@@ -1,0 +1,26 @@
+<Solution>
+    <Folder Name="/src/">
+        <Project Path="src/LoadingCache.Extensions.DependencyInjection/LoadingCache.Extensions.DependencyInjection.csproj" />
+    </Folder>
+    <Folder Name="/samples/">
+        <Project Path="samples/LoadingCache.AotSmoke/LoadingCache.AotSmoke.csproj" />
+        <Project Path="samples/LoadingCache.AspNetCore/LoadingCache.AspNetCore.csproj" />
+        <Project Path="samples/LoadingCache.DiAotSmoke/LoadingCache.DiAotSmoke.csproj" />
+        <Project Path="samples/LoadingCache.Grpc/LoadingCache.Grpc.csproj" />
+        <Project Path="samples/LoadingCache.Worker/LoadingCache.Worker.csproj" />
+    </Folder>
+    <Folder Name="/benchmarks/">
+        <Project Path="benchmarks/LoadingCache.Benchmarks/LoadingCache.Benchmarks.csproj" />
+    </Folder>
+    <Folder Name="/tools/">
+        <Project Path="tools/LoadingCache.LoadHarness/LoadingCache.LoadHarness.csproj" />
+        <Project Path="tools/LoadingCache.Simulator/LoadingCache.Simulator.csproj" />
+    </Folder>
+    <Folder Name="/tests/">
+        <Project Path="tests/LoadingCache.ConsumerSmoke/LoadingCache.ConsumerSmoke.csproj" />
+        <Project Path="tests/LoadingCache.Tests/LoadingCache.Tests.csproj" />
+        <Project Path="tests/LoadingCache.StressTests/LoadingCache.StressTests.csproj" />
+        <Project Path="tests/LoadingCache.DependencyInjection.Tests/LoadingCache.DependencyInjection.Tests.csproj" />
+    </Folder>
+    <Project Path="src/LoadingCache/LoadingCache.csproj" />
+</Solution>
