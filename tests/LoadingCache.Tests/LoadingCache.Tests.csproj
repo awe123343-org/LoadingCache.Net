@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework />
+        <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+        <IsTestProject>true</IsTestProject>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+        <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../../src/LoadingCache/LoadingCache.csproj" />
+        <PackageReference Include="Microsoft.NET.Test.Sdk" PrivateAssets="all" />
+        <PackageReference Include="NUnit" PrivateAssets="all" />
+        <PackageReference Include="NUnit3TestAdapter" PrivateAssets="all" />
+        <PackageReference Include="FluentAssertions" PrivateAssets="all" />
+        <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" PrivateAssets="all" />
+    </ItemGroup>
+</Project>

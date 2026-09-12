@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <AssemblyName>LoadingCache</AssemblyName>
+        <RootNamespace>LoadingCache</RootNamespace>
+        <LoadingCachePackageRole>core</LoadingCachePackageRole>
+        <PackageId>LoadingCache</PackageId>
+        <IsPackable>false</IsPackable>
+        <Version>0.1.0-alpha.1</Version>
+        <Description>Experimental .NET-native cache engine. Full Caffeine-class release gates are still in progress.</Description>
+        <IsAotCompatible>true</IsAotCompatible>
+    </PropertyGroup>
+
+    <Import Project="../Package.props" />
+
+    <ItemGroup>
+        <!-- IDE-only annotations are omitted from emitted assemblies. -->
+        <PackageReference
+            Include="JetBrains.Annotations"
+            PrivateAssets="all"
+            IncludeAssets="compile"
+        />
+        <InternalsVisibleTo Include="LoadingCache.Tests" />
+        <InternalsVisibleTo Include="LoadingCache.StressTests" />
+        <InternalsVisibleTo Include="LoadingCache.Simulator" />
+    </ItemGroup>
+</Project>

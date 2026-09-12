@@ -1,0 +1,333 @@
+using FluentAssertions;
+using LoadingCache.Maintenance;
+using NUnit.Framework;
+
+namespace LoadingCache.Tests;
+
+/// <summary>Integration checks for the shared engine maintenance seam.</summary>
+public sealed class EngineMaintenanceTests
+{
+    private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
+
+    [Test]
+    public async Task ReadyHitProgressesWhilePolicyMaintenanceIsPaused()
+    {
+        ManualMaintenanceScheduler scheduler = new();
+        await using BlockingTestHook hook = new(Watchdog);
+        var hooks = new LoadingCacheTestHooks { BeforePolicyMaintenance = hook.Invoke };
+        CacheEngine<int, string> engine = CreateEngine(
+            scheduler,
+            hooks,
+            readStripeCount: 1,
+            readStripeCapacity: 8
+        );
+        using var cache = new Cache<int, string>(engine);
+
+        cache.Put(1, "ready");
+        cache.TryGet(1, out string? first).Should().BeTrue();
+        first.Should().Be("ready");
+        scheduler.Pending.Should().Be(1);
+
+        Task worker = Task.Run(scheduler.RunNext);
+        Task<bool>? hit = null;
+        try
+        {
+            await hook.Entered.WaitAsync(Watchdog, CancellationToken.None);
+            hit = Task.Run(() => cache.TryGet(1, out string? value) && value == "ready");
+            (await hit.WaitAsync(Watchdog, CancellationToken.None)).Should().BeTrue();
+        }
+        finally
+        {
+            hook.Release();
+            await Task.WhenAll(worker, hit ?? Task.CompletedTask)
+                .WaitAsync(Watchdog, CancellationToken.None);
+        }
+
+        hook.TimedOut.Should().BeFalse();
+        engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
+    }
+
+    [Test]
+    public void ReadBufferIsBoundedAndDropsOnlyBestEffortAccessEvents()
+    {
+        ManualMaintenanceScheduler scheduler = new();
+        CacheEngine<int, string> engine = CreateEngine(
+            scheduler,
+            readStripeCount: 1,
+            readStripeCapacity: 2
+        );
+        using var cache = new Cache<int, string>(engine);
+
+        cache.Put(1, "ready");
+        for (int index = 0; index < 32; index++)
+        {
+            cache.TryGet(1, out _).Should().BeTrue();
+        }
+
+        ReadBufferStatistics statistics = engine.GetPolicyReadBufferStatistics();
+        statistics.Queued.Should().BeLessOrEqualTo(2);
+        statistics.DroppedFull.Should().BeGreaterThan(0);
+        scheduler.ScheduleCalls.Should().Be(1);
+
+        // Reliable mapping writes do not depend on admission to the lossy read
+        // transport.
+        cache.Put(2, "write");
+        cache.TryGet(2, out string? value).Should().BeTrue();
+        value.Should().Be("write");
+        engine.AssertInvariants();
+    }
+
+    [Test]
+    public void RejectedSchedulerUsesSynchronousFallbackForQueuedReads()
+    {
+        ManualMaintenanceScheduler scheduler = new() { Reject = true };
+        CacheEngine<int, string> engine = CreateEngine(
+            scheduler,
+            readStripeCount: 1,
+            readStripeCapacity: 8
+        );
+        using var cache = new Cache<int, string>(engine);
+
+        cache.Put(1, "ready");
+        cache.TryGet(1, out _).Should().BeTrue();
+
+        ReadBufferStatistics buffer = engine.GetPolicyReadBufferStatistics();
+        buffer.Queued.Should().Be(0);
+        MaintenanceStatistics maintenance = engine.GetMaintenanceStatistics();
+        maintenance.ScheduleRejections.Should().BeGreaterThan(0);
+        maintenance.DrainPasses.Should().BeGreaterThan(0);
+        maintenance.FallbackRequired.Should().BeFalse();
+    }
+
+    [Test]
+    public void FullReadStripeCanRetryAfterARejectedBudgetedFallback()
+    {
+        ManualMaintenanceScheduler scheduler = new() { Reject = true };
+        int keepFilling = 1;
+        int maintenanceCalls = 0;
+        Cache<int, string>? cache = null;
+        var hooks = new LoadingCacheTestHooks
+        {
+            BeforeMaintenanceSignalClear = () =>
+            {
+                Interlocked.Increment(ref maintenanceCalls);
+                if (Volatile.Read(ref keepFilling) != 0 && !cache!.TryGet(1, out _))
+                {
+                    throw new InvalidOperationException("The maintenance fill hit was not ready.");
+                }
+            },
+        };
+        CacheEngine<int, string> engine = CreateEngine(
+            scheduler,
+            hooks,
+            readStripeCount: 1,
+            readStripeCapacity: 1,
+            maintenanceMaxPasses: 32
+        );
+        cache = new Cache<int, string>(engine);
+        using (cache)
+        {
+            cache.Put(1, "ready");
+
+            // The hook keeps one event queued at every pass. The rejected
+            // re-arm must stop at the coordinator budget, leaving the signal
+            // clear while the one-slot stripe is still full.
+            cache.TryGet(1, out _).Should().BeTrue();
+            Volatile.Read(ref maintenanceCalls).Should().Be(32);
+            engine.GetMaintenanceStatistics().BudgetExhaustions.Should().BeGreaterThan(0);
+            engine.GetMaintenanceStatistics().FallbackRequired.Should().BeTrue();
+            engine.GetPolicyReadBufferStatistics().Queued.Should().Be(1);
+
+            Volatile.Write(ref keepFilling, 0);
+
+            // The stripe is full, so this hit's event is dropped. It must still
+            // observe the clear signal, request the rejected scheduler again,
+            // and synchronously drain the old event.
+            cache.TryGet(1, out _).Should().BeTrue();
+
+            engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
+            engine.GetMaintenanceStatistics().FallbackRequired.Should().BeFalse();
+            engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
+            engine.GetPolicyReadBufferStatistics().DroppedFull.Should().BeGreaterThan(0);
+        }
+    }
+
+    [Test]
+    public async Task LastEnqueueDuringAWorkerPassIsDrainedWithoutLostWakeup()
+    {
+        ManualMaintenanceScheduler scheduler = new();
+        await using BlockingTestHook hook = new(Watchdog);
+        var hooks = new LoadingCacheTestHooks { BeforePolicyMaintenance = hook.Invoke };
+        CacheEngine<int, string> engine = CreateEngine(
+            scheduler,
+            hooks,
+            readStripeCount: 1,
+            readStripeCapacity: 512
+        );
+        using var cache = new Cache<int, string>(engine);
+
+        cache.Put(1, "ready");
+        cache.TryGet(1, out _).Should().BeTrue();
+        Task worker = Task.Run(scheduler.RunNext);
+        try
+        {
+            await hook.Entered.WaitAsync(Watchdog, CancellationToken.None);
+            for (int index = 0; index < 300; index++)
+            {
+                cache.TryGet(1, out _).Should().BeTrue();
+            }
+        }
+        finally
+        {
+            hook.Release();
+            await worker.WaitAsync(Watchdog, CancellationToken.None);
+        }
+
+        hook.TimedOut.Should().BeFalse();
+        engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
+        engine.GetMaintenanceStatistics().DrainPasses.Should().BeGreaterThan(1);
+        engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
+    }
+
+    [Test]
+    public async Task ReadEnqueuedDuringSignalClearHandoffIsNotStranded()
+    {
+        ManualMaintenanceScheduler scheduler = new();
+        await using BlockingTestHook hook = new(Watchdog);
+        var hooks = new LoadingCacheTestHooks { BeforeMaintenanceSignalClear = hook.Invoke };
+        CacheEngine<int, string> engine = CreateEngine(
+            scheduler,
+            hooks,
+            readStripeCount: 1,
+            readStripeCapacity: 8
+        );
+        using var cache = new Cache<int, string>(engine);
+
+        cache.Put(1, "ready");
+        cache.TryGet(1, out _).Should().BeTrue();
+        Task worker = Task.Run(scheduler.RunNext);
+        try
+        {
+            await hook.Entered.WaitAsync(Watchdog, CancellationToken.None);
+            cache.TryGet(1, out _).Should().BeTrue();
+        }
+        finally
+        {
+            hook.Release();
+            await worker.WaitAsync(Watchdog, CancellationToken.None);
+        }
+        hook.TimedOut.Should().BeFalse();
+        engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
+        engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
+    }
+
+    [Test]
+    public void OldReadEventsAfterClearAndSetCannotPolluteTheCurrentPolicy()
+    {
+        ManualMaintenanceScheduler scheduler = new();
+        CacheEngine<int, string> engine = CreateEngine(scheduler, readStripeCount: 1);
+        using var cache = new Cache<int, string>(engine);
+
+        cache.Put(1, "old");
+        cache.TryGet(1, out _).Should().BeTrue();
+        cache.Clear();
+        cache.Put(1, "after-clear");
+        scheduler.RunNext();
+        cache.Policy.Eviction!.WeightedSize.Should().Be(1);
+        cache.TryGet(1, out string? clearValue).Should().BeTrue();
+        clearValue.Should().Be("after-clear");
+
+        cache.TryGet(1, out _).Should().BeTrue();
+        cache.Put(1, "after-set");
+        scheduler.RunNext();
+        cache.Policy.Eviction.WeightedSize.Should().Be(1);
+        cache.TryGet(1, out string? setValue).Should().BeTrue();
+        setValue.Should().Be("after-set");
+        engine.AssertInvariants();
+    }
+
+    [Test]
+    public void QuiescentEngineConvergesToSizeAndWeightBounds()
+    {
+        CacheEngine<int, string> sizedEngine = CreateEngine(scheduler: null, maximumSize: 2);
+        using var sized = new Cache<int, string>(sizedEngine);
+        for (int key = 0; key < 8; key++)
+        {
+            sized.Put(key, key.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        sized.CleanUp();
+        sized.EstimatedCount.Should().BeLessOrEqualTo(2);
+        sized.Policy.Eviction!.WeightedSize.Should().BeLessOrEqualTo(2);
+        sizedEngine.AssertInvariants();
+
+        CacheEngine<int, string> weightedEngine = new(
+            new CacheEngineOptions<int, string>
+            {
+                MaximumWeight = 5,
+                MaximumResidentCount = 4,
+                Weigher = (_, value) => value.Length,
+                MaxConcurrentLoads = 4,
+            }
+        );
+        using var weighted = new Cache<int, string>(weightedEngine);
+        for (int key = 0; key < 8; key++)
+        {
+            weighted.Put(key, "123");
+        }
+
+        weighted.CleanUp();
+        weighted.Policy.Eviction!.WeightedSize.Should().BeLessOrEqualTo(5);
+        weighted.EstimatedCount.Should().BeLessOrEqualTo(4);
+        weightedEngine.AssertInvariants();
+    }
+
+    private static CacheEngine<int, string> CreateEngine(
+        ManualMaintenanceScheduler? scheduler,
+        LoadingCacheTestHooks? hooks = null,
+        int maximumSize = 8,
+        int readStripeCount = 4,
+        int readStripeCapacity = 256,
+        int maintenanceMaxPasses = 32
+    ) =>
+        new(
+            new CacheEngineOptions<int, string>
+            {
+                MaximumSize = maximumSize,
+                MaxConcurrentLoads = 4,
+                TestHooks = hooks,
+                MaintenanceScheduler = scheduler,
+                MaintenanceMaxPasses = maintenanceMaxPasses,
+                MaintenanceReadStripeCount = readStripeCount,
+                MaintenanceReadStripeCapacity = readStripeCapacity,
+            }
+        );
+
+    private sealed class ManualMaintenanceScheduler : IMaintenanceScheduler
+    {
+        private readonly Queue<Action> _callbacks = new();
+
+        internal bool Reject { get; init; }
+
+        internal int ScheduleCalls { get; private set; }
+
+        internal int Pending => _callbacks.Count;
+
+        public bool TrySchedule(Action callback)
+        {
+            ScheduleCalls++;
+            if (Reject)
+            {
+                return false;
+            }
+
+            _callbacks.Enqueue(callback);
+            return true;
+        }
+
+        internal void RunNext()
+        {
+            _callbacks.Dequeue()();
+        }
+    }
+}

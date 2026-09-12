@@ -1,0 +1,866 @@
+namespace LoadingCache;
+
+internal sealed partial class CacheEngine<TKey, TValue>
+    where TKey : notnull
+    where TValue : notnull
+{
+    private bool IsRefreshEligibleLocked(Entry entry, long now)
+    {
+        long refreshTicks = Volatile.Read(ref _refreshAfterWriteTicks);
+        if (
+            refreshTicks < 0
+            || !Volatile.Read(ref entry.IsReady)
+            || entry.RefreshFlight is not null
+        )
+        {
+            return false;
+        }
+
+        if (
+            entry.HasRefreshFailure
+            && _refreshFailureBackoffTicks > 0
+            && _timeProvider.GetElapsedTime(entry.RefreshFailureTimestamp, now)
+                < TimeSpan.FromTicks(_refreshFailureBackoffTicks)
+        )
+        {
+            return false;
+        }
+
+        return _timeProvider.GetElapsedTime(entry.WriteTimestamp, now)
+            >= TimeSpan.FromTicks(refreshTicks);
+    }
+
+    private bool IsCurrentRefreshFlightLocked(Entry entry, Flight flight)
+    {
+        return IsCurrentRefreshFlightSnapshot(entry, flight)
+            && flight.Epoch == _epoch
+            && _entries.TryGetValue(entry.Key, out Entry? current)
+            && ReferenceEquals(current, entry);
+    }
+
+    private static bool IsCurrentRefreshFlightSnapshot(Entry entry, Flight? flight)
+    {
+        return flight is not null
+            && ReferenceEquals(entry.RefreshFlight, flight)
+            && Volatile.Read(ref flight.PublishRevoked) == 0;
+    }
+
+    private void StartAutomaticRefresh(
+        Entry entry,
+        Func<TKey, TValue, CancellationToken, Task<TValue>> reloadFactory
+    )
+    {
+        AsyncFlight flight;
+        lock (_gate)
+        {
+            if (
+                _disposed != 0
+                || !_entries.TryGetValue(entry.Key, out Entry? current)
+                || !ReferenceEquals(current, entry)
+            )
+            {
+                return;
+            }
+
+            lock (entry.Sync)
+            {
+                long now = _timeProvider.GetTimestamp();
+                if (!IsRefreshEligibleLocked(entry, now) || _reservedLoads >= _maxConcurrentLoads)
+                {
+                    return;
+                }
+
+                TValue oldValue = entry.Value;
+                TimeSpan oldDuration = _expiry is null
+                    ? TimeSpan.MaxValue
+                    : GetRemainingDuration(entry, now, ExpirationKind.Variable);
+                flight = CreateRefreshFlightLocked(
+                    entry,
+                    (key, cancellationToken) => reloadFactory(key, oldValue, cancellationToken),
+                    oldDuration
+                );
+            }
+        }
+
+        QueueAutomaticRefresh(flight);
+    }
+
+    private void StartAutomaticRefresh(Entry entry, Func<TKey, TValue, TValue> reloadFactory)
+    {
+        SyncFlight flight;
+        lock (_gate)
+        {
+            if (
+                _disposed != 0
+                || !_entries.TryGetValue(entry.Key, out Entry? current)
+                || !ReferenceEquals(current, entry)
+            )
+            {
+                return;
+            }
+
+            lock (entry.Sync)
+            {
+                long now = _timeProvider.GetTimestamp();
+                if (!IsRefreshEligibleLocked(entry, now) || _reservedLoads >= _maxConcurrentLoads)
+                {
+                    return;
+                }
+
+                TValue oldValue = entry.Value;
+                TimeSpan oldDuration = _expiry is null
+                    ? TimeSpan.MaxValue
+                    : GetRemainingDuration(entry, now, ExpirationKind.Variable);
+                flight = CreateRefreshFlightLocked(
+                    entry,
+                    key => reloadFactory(key, oldValue),
+                    oldDuration
+                );
+            }
+        }
+
+        QueueAutomaticRefresh(flight);
+    }
+
+    private AsyncFlight CreateRefreshFlightLocked(
+        Entry entry,
+        Func<TKey, CancellationToken, Task<TValue>> factory,
+        TimeSpan oldDuration
+    )
+    {
+        var flight = new AsyncFlight(entry.Key, _epoch, ++_nextGeneration, factory)
+        {
+            IsRefresh = true,
+            RefreshEntry = entry,
+            PreviousVariableDuration = oldDuration,
+        };
+        // A refresh reservation is itself a new publication generation for
+        // rollback fencing.  This prevents a late failure from an earlier
+        // refresh from restoring over a newer refresh that has already
+        // started and then failed without publishing a value.
+        entry.PublicationRevision++;
+        entry.RefreshFlight = flight;
+        _activeFlights.Add(flight);
+        _reservedLoads++;
+        return flight;
+    }
+
+    private SyncFlight CreateRefreshFlightLocked(
+        Entry entry,
+        Func<TKey, TValue> factory,
+        TimeSpan oldDuration
+    )
+    {
+        var flight = new SyncFlight(entry.Key, _epoch, ++_nextGeneration, factory)
+        {
+            IsRefresh = true,
+            RefreshEntry = entry,
+            PreviousVariableDuration = oldDuration,
+        };
+        entry.PublicationRevision++;
+        entry.RefreshFlight = flight;
+        _activeFlights.Add(flight);
+        _reservedLoads++;
+        return flight;
+    }
+
+    private void QueueAutomaticRefresh(AsyncFlight flight)
+    {
+        if (
+            !ThreadPool.UnsafeQueueUserWorkItem(
+                static state => state.Owner.StartAsyncFlight(state.Value),
+                new RefreshStartState(this, flight),
+                preferLocal: true
+            )
+        )
+        {
+            CompleteFailure(
+                flight,
+                new InvalidOperationException("The refresh scheduler rejected work.")
+            );
+        }
+    }
+
+    private void QueueAutomaticRefresh(SyncFlight flight)
+    {
+        QueueSyncFlight(flight);
+    }
+
+    internal ValueTask<TValue> RefreshAsync(
+        TKey key,
+        Func<TKey, CancellationToken, Task<TValue>> loadFactory,
+        Func<TKey, TValue, CancellationToken, Task<TValue>> reloadFactory,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (key is null)
+        {
+            throw new ArgumentNullException(nameof(key));
+        }
+        ArgumentNullException.ThrowIfNull(loadFactory);
+        ArgumentNullException.ThrowIfNull(reloadFactory);
+        ThrowIfDisposed();
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return ValueTask.FromCanceled<TValue>(cancellationToken);
+        }
+        if (LoadChainContext.Contains(this, key))
+        {
+            return ValueTask.FromException<TValue>(
+                new LoadingCacheReentrancyException(
+                    "A refresh delegate attempted to await an equivalent key in its own logical load chain."
+                )
+            );
+        }
+
+        AsyncFlight? flight = null;
+        bool start = false;
+        bool cold = false;
+        lock (_gate)
+        {
+            ThrowIfDisposedLocked();
+            if (_entries.TryGetValue(key, out Entry? current))
+            {
+                if (!Volatile.Read(ref current.IsReady))
+                {
+                    flight = (AsyncFlight)current.Flight!;
+                    RecordMiss();
+                    RecordCoalescedWaiter();
+                }
+                else if (current.RefreshFlight is AsyncFlight existing)
+                {
+                    flight = existing;
+                    RecordMiss();
+                    RecordCoalescedWaiter();
+                }
+                else
+                {
+                    if (_reservedLoads >= _maxConcurrentLoads)
+                    {
+                        throw new CacheLoadRejectedException();
+                    }
+
+                    lock (current.Sync)
+                    {
+                        long now = _timeProvider.GetTimestamp();
+                        TValue oldValue = current.Value;
+                        TimeSpan oldDuration = _expiry is null
+                            ? TimeSpan.MaxValue
+                            : GetRemainingDuration(current, now, ExpirationKind.Variable);
+                        flight = CreateRefreshFlightLocked(
+                            current,
+                            (refreshKey, refreshToken) =>
+                                reloadFactory(refreshKey, oldValue, refreshToken),
+                            oldDuration
+                        );
+                        start = true;
+                    }
+                }
+            }
+            else
+            {
+                cold = true;
+            }
+        }
+
+        if (cold)
+        {
+            return GetAsync(key, loadFactory, reloadFactory, cancellationToken);
+        }
+
+        AsyncFlight sharedFlight =
+            flight ?? throw new InvalidOperationException("The refresh flight was not installed.");
+        if (start)
+        {
+            StartAsyncFlight(sharedFlight);
+        }
+
+        if (Volatile.Read(ref sharedFlight.Started) == 0)
+        {
+            StartAsyncFlight(sharedFlight);
+        }
+
+        return WaitForFlight(sharedFlight, cancellationToken);
+    }
+
+    internal Task<TValue> RefreshSyncAsync(
+        TKey key,
+        Func<TKey, TValue> loadFactory,
+        Func<TKey, TValue, TValue> reloadFactory,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (key is null)
+        {
+            throw new ArgumentNullException(nameof(key));
+        }
+        ArgumentNullException.ThrowIfNull(loadFactory);
+        ArgumentNullException.ThrowIfNull(reloadFactory);
+        ThrowIfDisposed();
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return Task.FromCanceled<TValue>(cancellationToken);
+        }
+        if (LoadChainContext.Contains(this, key))
+        {
+            return Task.FromException<TValue>(
+                new LoadingCacheReentrancyException(
+                    "A refresh delegate attempted to await an equivalent key in its own logical load chain."
+                )
+            );
+        }
+
+        try
+        {
+            return RefreshSyncCoreAsync(key, loadFactory, reloadFactory, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            return Task.FromException<TValue>(exception);
+        }
+    }
+
+    private Task<TValue> RefreshSyncCoreAsync(
+        TKey key,
+        Func<TKey, TValue> loadFactory,
+        Func<TKey, TValue, TValue> reloadFactory,
+        CancellationToken cancellationToken
+    )
+    {
+        SyncFlight flight;
+        bool start = false;
+        lock (_gate)
+        {
+            ThrowIfDisposedLocked();
+            if (_entries.TryGetValue(key, out Entry? current))
+            {
+                if (!Volatile.Read(ref current.IsReady))
+                {
+                    flight = (SyncFlight)current.Flight!;
+                    RecordMiss();
+                    RecordCoalescedWaiter();
+                }
+                else if (current.RefreshFlight is SyncFlight existing)
+                {
+                    flight = existing;
+                    RecordMiss();
+                    RecordCoalescedWaiter();
+                }
+                else
+                {
+                    if (_reservedLoads >= _maxConcurrentLoads)
+                    {
+                        throw new CacheLoadRejectedException();
+                    }
+
+                    lock (current.Sync)
+                    {
+                        long now = _timeProvider.GetTimestamp();
+                        TValue oldValue = current.Value;
+                        TimeSpan oldDuration = _expiry is null
+                            ? TimeSpan.MaxValue
+                            : GetRemainingDuration(current, now, ExpirationKind.Variable);
+                        flight = CreateRefreshFlightLocked(
+                            current,
+                            refreshKey => reloadFactory(refreshKey, oldValue),
+                            oldDuration
+                        );
+                        start = true;
+                    }
+                }
+            }
+            else
+            {
+                if (_reservedLoads >= _maxConcurrentLoads)
+                {
+                    throw new CacheLoadRejectedException();
+                }
+
+                flight = new SyncFlight(key, _epoch, ++_nextGeneration, loadFactory);
+                _entries[key] = Entry.Loading(key, _epoch, flight.Generation, flight);
+                _activeFlights.Add(flight);
+                _reservedLoads++;
+                start = true;
+            }
+        }
+
+        if (start || Volatile.Read(ref flight.Started) == 0)
+        {
+            QueueSyncFlight(flight);
+        }
+
+        return WaitForSyncFlight(flight, cancellationToken);
+    }
+
+    private void QueueSyncFlight(SyncFlight flight)
+    {
+        if (Interlocked.CompareExchange(ref flight.StartRequested, 1, 0) != 0)
+        {
+            return;
+        }
+
+        if (
+            !ThreadPool.UnsafeQueueUserWorkItem(
+                static state => state.Owner.StartSyncFlight(state.Value),
+                new SyncStartState(this, flight),
+                preferLocal: true
+            )
+        )
+        {
+            CompleteFailure(
+                flight,
+                new InvalidOperationException("The sync load scheduler rejected work.")
+            );
+        }
+    }
+
+    private void CompleteRefreshSuccess(Flight flight, TValue value)
+    {
+        if (
+            Volatile.Read(ref flight.TerminalClaimed) != 0
+            && Volatile.Read(ref flight.PublishRevoked) != 0
+        )
+        {
+            RetireFlight(flight, underlyingCompleted: true);
+            return;
+        }
+
+        bool claimed = false;
+        bool published = false;
+        Entry? publishedEntry = null;
+        RefreshPublicationSnapshot previousSnapshot = default;
+        bool previousSnapshotCaptured = false;
+        long publishedRevision = 0;
+        try
+        {
+            long weight = ComputeWeight(flight.Key, value);
+            TimeSpan variableDuration = _expiry is null
+                ? TimeSpan.MaxValue
+                : ComputeUpdateDuration(flight.Key, value, flight.PreviousVariableDuration);
+            lock (_gate)
+            {
+                claimed = Interlocked.CompareExchange(ref flight.TerminalClaimed, 1, 0) == 0;
+                if (claimed)
+                {
+                    Entry? entry = flight.RefreshEntry;
+                    if (
+                        _disposed == 0
+                        && entry is not null
+                        && IsCurrentRefreshFlightLocked(entry, flight)
+                    )
+                    {
+                        // Capture the identity before any timestamp or
+                        // callback can fail.  A claimed refresh failure must
+                        // either restore this exact snapshot or clear only
+                        // this flight's ownership.
+                        publishedEntry = entry;
+                        long timestamp = _timeProvider.GetTimestamp();
+                        lock (entry.Sync)
+                        {
+                            if (IsCurrentRefreshFlightSnapshot(entry, flight))
+                            {
+                                previousSnapshot = new RefreshPublicationSnapshot(entry);
+                                previousSnapshotCaptured = true;
+                                entry.Value = value;
+                                entry.Weight = weight;
+                                entry.WriteTimestamp = timestamp;
+                                entry.AccessTimestamp = timestamp;
+                                entry.VariableTimestamp = timestamp;
+                                entry.VariableDuration = variableDuration;
+                                entry.VariableRevision++;
+                                entry.PublicationRevision++;
+                                publishedRevision = entry.PublicationRevision;
+                                entry.RefreshFailureTimestamp = 0;
+                                entry.HasRefreshFailure = false;
+                                entry.PolicyDetached = false;
+                                entry.RefreshFlight = null;
+                                entry.SharedTask = Task.FromResult(value);
+                                published = true;
+                            }
+                        }
+
+                        if (published)
+                        {
+                            _policy.OnPublish(entry.PolicyToken, entry.Weight);
+                            if (_expirationWheel is not null)
+                            {
+                                ulong normalizedNow = GetExpirationNowLocked();
+                                AdvanceExpirationLocked(normalizedNow);
+                                ScheduleExpirationNodeLocked(entry, normalizedNow);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!claimed)
+            {
+                RetireFlight(flight, underlyingCompleted: true);
+                return;
+            }
+
+            // A refresh may publish a shorter expiration than the previous
+            // value.  Arm the single cache timer after publication, outside
+            // the gate.  If arming fails, the claimed-failure path restores
+            // the previous snapshot and its deadline before completing the
+            // shared promise.
+            RequestExpirationTimer();
+
+            CompletePromise(
+                flight,
+                static (current, result) => current.Completion.TrySetResult(result),
+                value
+            );
+        }
+        catch (Exception exception)
+        {
+            if (claimed)
+            {
+                CompleteClaimedRefreshFailure(
+                    flight,
+                    exception,
+                    publishedEntry,
+                    previousSnapshot,
+                    previousSnapshotCaptured,
+                    publishedRevision
+                );
+            }
+            else
+            {
+                CompleteRefreshFailure(flight, exception);
+            }
+        }
+    }
+
+    private void CompleteClaimedRefreshFailure(
+        Flight flight,
+        Exception exception,
+        Entry? publishedEntry = null,
+        RefreshPublicationSnapshot previousSnapshot = default,
+        bool previousSnapshotCaptured = false,
+        long publishedRevision = 0
+    )
+    {
+        bool requestTimer = false;
+        lock (_gate)
+        {
+            Entry? entry = publishedEntry ?? flight.RefreshEntry;
+            if (
+                entry is not null
+                && entry.Epoch == _epoch
+                && _entries.TryGetValue(flight.Key, out Entry? current)
+                && ReferenceEquals(current, entry)
+            )
+            {
+                bool restored = false;
+                lock (entry.Sync)
+                {
+                    if (
+                        previousSnapshotCaptured
+                        && entry.PublicationRevision == publishedRevision
+                        && entry.RefreshFlight is null
+                    )
+                    {
+                        previousSnapshot.Restore(entry);
+                        restored = true;
+                    }
+                    else if (ReferenceEquals(entry.RefreshFlight, flight))
+                    {
+                        // The failure happened before the new value was
+                        // mutated.  Clear only the exact refresh owner and
+                        // leave the previous value and hard expiration intact.
+                        entry.RefreshFlight = null;
+                        try
+                        {
+                            entry.RefreshFailureTimestamp = _timeProvider.GetTimestamp();
+                            entry.HasRefreshFailure = true;
+                        }
+                        catch
+                        {
+                            // A failing time provider must not strand the
+                            // claimed flight.  The value remains governed by
+                            // its original expiration timestamps.
+                            entry.HasRefreshFailure = false;
+                        }
+                    }
+                }
+
+                if (restored)
+                {
+                    bool policyRestored = RestoreRefreshPolicyLocked(entry, previousSnapshot);
+                    if (!policyRestored)
+                    {
+                        // A policy exception must not leave a resident value
+                        // with an untracked node.  Remove this exact entry;
+                        // the shared promise is completed below regardless of
+                        // any infrastructure exception.
+                        try
+                        {
+                            RemoveCurrentEntryLocked(entry);
+                        }
+                        catch
+                        {
+                            RetireExpirationNodeLocked(entry);
+                            if (
+                                _entries.TryGetValue(entry.Key, out Entry? stillCurrent)
+                                && ReferenceEquals(stillCurrent, entry)
+                            )
+                            {
+                                _entries.TryRemove(entry.Key, out _);
+                            }
+
+                            entry.Retired = true;
+                            entry.RefreshFlight = null;
+                        }
+                    }
+                    try
+                    {
+                        bool expired;
+                        lock (entry.Sync)
+                        {
+                            expired = IsExpired(entry, _timeProvider.GetTimestamp());
+                        }
+
+                        if (expired)
+                        {
+                            RemoveExpiredEntryLocked(entry);
+                        }
+                        else if (
+                            policyRestored
+                            && _expirationWheel is not null
+                            && _entries.TryGetValue(entry.Key, out Entry? currentEntry)
+                            && ReferenceEquals(currentEntry, entry)
+                        )
+                        {
+                            ulong normalizedNow = GetExpirationNowLocked();
+                            AdvanceExpirationLocked(normalizedNow);
+                            ScheduleExpirationNodeLocked(entry, normalizedNow);
+                            requestTimer = true;
+                        }
+                    }
+                    catch
+                    {
+                        // Freshness is rechecked by the next lookup.  Do not
+                        // let a secondary clock failure strand the promise.
+                    }
+                }
+            }
+        }
+
+        if (requestTimer)
+        {
+            try
+            {
+                RequestExpirationTimer();
+            }
+            catch
+            {
+                // The original claimed failure is the shared terminal result.
+                // A secondary timer-arm failure must not strand it.
+            }
+        }
+
+        CompletePromise(
+            flight,
+            static (current, error) =>
+            {
+                if (error is OperationCanceledException canceled)
+                {
+                    current.Completion.TrySetCanceled(GetCancellationToken(canceled));
+                }
+                else
+                {
+                    current.TrySetException(error);
+                }
+            },
+            exception
+        );
+    }
+
+    private bool RestoreRefreshPolicyLocked(
+        Entry entry,
+        RefreshPublicationSnapshot previousSnapshot
+    )
+    {
+        try
+        {
+            // OnPublish may have updated an existing node or admitted a node
+            // that was detached while the value was hard-expired.  Reconcile
+            // the exact token before exposing the restored snapshot.
+            _policy.OnRemove(entry.PolicyToken);
+            if (!previousSnapshot.PolicyDetached)
+            {
+                _policy.OnPublish(entry.PolicyToken, previousSnapshot.Weight);
+            }
+
+            entry.PolicyDetached = previousSnapshot.PolicyDetached;
+            return true;
+        }
+        catch
+        {
+            entry.PolicyDetached = previousSnapshot.PolicyDetached;
+            try
+            {
+                _policy.OnRemove(entry.PolicyToken);
+            }
+            catch
+            {
+                // The exact entry is removed by the caller if this cleanup
+                // path also fails; never leave a resident ghost relying on a
+                // future policy rebuild.
+            }
+
+            return false;
+        }
+    }
+
+    private void CompleteRefreshFailure(Flight flight, Exception exception)
+    {
+        bool claimed;
+        bool removeExpired = false;
+        lock (_gate)
+        {
+            claimed = Interlocked.CompareExchange(ref flight.TerminalClaimed, 1, 0) == 0;
+            if (claimed)
+            {
+                Entry? entry = flight.RefreshEntry;
+                if (entry is not null && IsCurrentRefreshFlightLocked(entry, flight))
+                {
+                    lock (entry.Sync)
+                    {
+                        if (IsCurrentRefreshFlightSnapshot(entry, flight))
+                        {
+                            entry.RefreshFlight = null;
+                            entry.RefreshFailureTimestamp = _timeProvider.GetTimestamp();
+                            entry.HasRefreshFailure = true;
+                            removeExpired = IsExpired(entry, _timeProvider.GetTimestamp());
+                        }
+                    }
+
+                    if (removeExpired)
+                    {
+                        RemoveExpiredEntryLocked(entry);
+                    }
+                }
+
+                if (_recordStatistics)
+                {
+                    if (exception is OperationCanceledException)
+                    {
+                        Interlocked.Increment(ref _loadCancellations);
+                    }
+                    else
+                    {
+                        Interlocked.Increment(ref _loadFailures);
+                    }
+                }
+            }
+        }
+
+        if (!claimed)
+        {
+            RetireFlight(flight, underlyingCompleted: true);
+            return;
+        }
+
+        CompletePromise(
+            flight,
+            static (current, error) =>
+            {
+                if (error is OperationCanceledException canceled)
+                {
+                    current.Completion.TrySetCanceled(GetCancellationToken(canceled));
+                }
+                else
+                {
+                    current.TrySetException(error);
+                }
+            },
+            exception
+        );
+    }
+
+    private readonly struct RefreshPublicationSnapshot
+    {
+        internal RefreshPublicationSnapshot(Entry entry)
+        {
+            _value = entry.Value;
+            Weight = entry.Weight;
+            _writeTimestamp = entry.WriteTimestamp;
+            _accessTimestamp = entry.AccessTimestamp;
+            _variableTimestamp = entry.VariableTimestamp;
+            _variableRevision = entry.VariableRevision;
+            _publicationRevision = entry.PublicationRevision;
+            _variableDuration = entry.VariableDuration;
+            _sharedTask = entry.SharedTask;
+            PolicyDetached = entry.PolicyDetached;
+            _refreshFailureTimestamp = entry.RefreshFailureTimestamp;
+            _hasRefreshFailure = entry.HasRefreshFailure;
+        }
+
+        private readonly TValue _value;
+        internal readonly long Weight;
+        private readonly long _writeTimestamp;
+        private readonly long _accessTimestamp;
+        private readonly long _variableTimestamp;
+        private readonly long _variableRevision;
+        private readonly long _publicationRevision;
+        private readonly TimeSpan _variableDuration;
+        private readonly Task<TValue>? _sharedTask;
+        internal readonly bool PolicyDetached;
+        private readonly long _refreshFailureTimestamp;
+        private readonly bool _hasRefreshFailure;
+
+        internal void Restore(Entry entry)
+        {
+            entry.Value = _value;
+            entry.Weight = Weight;
+            entry.WriteTimestamp = _writeTimestamp;
+            entry.AccessTimestamp = _accessTimestamp;
+            entry.VariableTimestamp = _variableTimestamp;
+            entry.VariableRevision = _variableRevision;
+            entry.PublicationRevision = _publicationRevision;
+            entry.VariableDuration = _variableDuration;
+            // A refresh can snapshot a cold completion while that cold flight
+            // is concurrently claimed-failed.  Its task may still be pending
+            // when this rollback runs, so checking IsFaulted is too late.  A
+            // claimed-failure rollback may therefore expose the retained
+            // value through a completed snapshot unless the old promise has
+            // already completed successfully.  Normal successful publication
+            // keeps the original shared-task identity.
+            entry.SharedTask = _sharedTask is { IsCompletedSuccessfully: true }
+                ? _sharedTask
+                : Task.FromResult(_value);
+            entry.PolicyDetached = PolicyDetached;
+            entry.RefreshFailureTimestamp = _refreshFailureTimestamp;
+            entry.HasRefreshFailure = _hasRefreshFailure;
+            entry.RefreshFlight = null;
+        }
+    }
+
+    private sealed class RefreshStartState
+    {
+        internal RefreshStartState(CacheEngine<TKey, TValue> owner, AsyncFlight value)
+        {
+            Owner = owner;
+            Value = value;
+        }
+
+        internal CacheEngine<TKey, TValue> Owner { get; }
+
+        internal AsyncFlight Value { get; }
+    }
+
+    private sealed class SyncStartState
+    {
+        internal SyncStartState(CacheEngine<TKey, TValue> owner, SyncFlight value)
+        {
+            Owner = owner;
+            Value = value;
+        }
+
+        internal CacheEngine<TKey, TValue> Owner { get; }
+
+        internal SyncFlight Value { get; }
+    }
+}
