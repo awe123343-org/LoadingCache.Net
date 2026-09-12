@@ -1,0 +1,39 @@
+<Project>
+    <PropertyGroup>
+        <PackageId Condition="'$(PackageId)' == ''">$(AssemblyName)</PackageId>
+        <PackageId
+            Condition="'$(LoadingCachePackageRole)' == 'core' and '$(LoadingCacheCorePackageId)' != ''"
+            >$(LoadingCacheCorePackageId)</PackageId>
+        <PackageId
+            Condition="'$(LoadingCachePackageRole)' == 'dependency-injection' and '$(LoadingCacheDependencyInjectionPackageId)' != ''"
+            >$(LoadingCacheDependencyInjectionPackageId)</PackageId>
+        <PackageVersion Condition="'$(PackageVersion)' == '' and '$(Version)' != ''"
+            >$(Version)</PackageVersion>
+        <PackageVersion Condition="'$(PackageVersion)' == ''">0.1.0-alpha.1</PackageVersion>
+        <Authors Condition="'$(Authors)' == ''">UNCONFIRMED-PACKAGE-AUTHOR</Authors>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <PackageTags Condition="'$(PackageTags)' == ''">cache;loading;async;tinylfu</PackageTags>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <RepositoryType>git</RepositoryType>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(RepositoryUrl)' != ''">
+        <PublishRepositoryUrl>true</PublishRepositoryUrl>
+        <EmbedUntrackedSources>true</EmbedUntrackedSources>
+        <PackageProjectUrl Condition="'$(PackageProjectUrl)' == ''"
+            >$(RepositoryUrl)</PackageProjectUrl>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="$(MSBuildThisFileDirectory)../README.md" Pack="true" PackagePath="/" />
+        <None Include="$(MSBuildThisFileDirectory)../LICENSE" Pack="true" PackagePath="/" />
+        <None
+            Include="$(MSBuildThisFileDirectory)../THIRD_PARTY_NOTICES.md"
+            Pack="true"
+            PackagePath="/"
+        />
+    </ItemGroup>
+</Project>
