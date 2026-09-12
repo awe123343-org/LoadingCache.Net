@@ -1,0 +1,117 @@
+[
+  {
+    "package": "microsoft.extensions.dependencyinjection",
+    "version": "10.0.12",
+    "nuspec_sha256": "672bbde8d6a1d90b3d603f49d80f18fd56c8be929b74d049457b87266e2869b1",
+    "license": {
+      "value": "MIT",
+      "attributes": {
+        "type": "expression"
+      }
+    },
+    "authors": {
+      "value": "Microsoft",
+      "attributes": {}
+    },
+    "repository": {
+      "value": null,
+      "attributes": {
+        "type": "git",
+        "url": "https://github.com/dotnet/dotnet",
+        "commit": "95017c711e6afc1085133d440e42b4bd78155701"
+      }
+    }
+  },
+  {
+    "package": "microsoft.extensions.dependencyinjection.abstractions",
+    "version": "10.0.12",
+    "nuspec_sha256": "8766714f4945465f519ba4c6ebcdea8e6e3234871178f009779d7b1b5a54c59c",
+    "license": {
+      "value": "MIT",
+      "attributes": {
+        "type": "expression"
+      }
+    },
+    "authors": {
+      "value": "Microsoft",
+      "attributes": {}
+    },
+    "repository": {
+      "value": null,
+      "attributes": {
+        "type": "git",
+        "url": "https://github.com/dotnet/dotnet",
+        "commit": "95017c711e6afc1085133d440e42b4bd78155701"
+      }
+    }
+  },
+  {
+    "package": "grpc.aspnetcore",
+    "version": "2.83.0",
+    "nuspec_sha256": "3852b062a3142127590a43bb41470c956570ca4dd5a65713c4da92a57de1714e",
+    "license": {
+      "value": "Apache-2.0",
+      "attributes": {
+        "type": "expression"
+      }
+    },
+    "authors": {
+      "value": "The gRPC Authors",
+      "attributes": {}
+    },
+    "repository": {
+      "value": null,
+      "attributes": {
+        "type": "git",
+        "url": "https://github.com/grpc/grpc-dotnet.git",
+        "commit": "4301104498e53898a452e8fb2fea6c0b1492b755"
+      }
+    }
+  },
+  {
+    "package": "grpc.net.client",
+    "version": "2.83.0",
+    "nuspec_sha256": "bc4f11891023c0511a08b5fcc47497b14ad145f2e3bf19b329fedce20c003367",
+    "license": {
+      "value": "Apache-2.0",
+      "attributes": {
+        "type": "expression"
+      }
+    },
+    "authors": {
+      "value": "The gRPC Authors",
+      "attributes": {}
+    },
+    "repository": {
+      "value": null,
+      "attributes": {
+        "type": "git",
+        "url": "https://github.com/grpc/grpc-dotnet.git",
+        "commit": "4301104498e53898a452e8fb2fea6c0b1492b755"
+      }
+    }
+  },
+  {
+    "package": "grpc.tools",
+    "version": "2.83.0",
+    "nuspec_sha256": "902fe31dd38be7efeb5d1b4b13f65c652005459a78db3122a2f58c2648eefc3e",
+    "license": {
+      "value": "Apache-2.0",
+      "attributes": {
+        "type": "expression"
+      }
+    },
+    "authors": {
+      "value": "The gRPC Authors",
+      "attributes": {}
+    },
+    "repository": {
+      "value": null,
+      "attributes": {
+        "type": "git",
+        "url": "https://github.com/grpc/grpc.git",
+        "commit": "c876f4da50f7da2f331888b88b2a7243514139fe"
+      }
+    }
+  }
+]

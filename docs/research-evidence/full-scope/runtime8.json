@@ -1,0 +1,90 @@
+{
+  "sha": "1219a42122cf5190c7f512850557e38c422430dc",
+  "node_id": "C_kwDODI9FZdoAKDEyMTlhNDIxMjJjZjUxOTBjN2Y1MTI4NTA1NTdlMzhjNDIyNDMwZGM",
+  "commit": {
+    "author": {
+      "name": "Mirroring",
+      "email": "dnceng-mirroring@microsoft.com",
+      "date": "2026-08-20T20:38:34Z"
+    },
+    "committer": {
+      "name": "Mirroring",
+      "email": "dnceng-mirroring@microsoft.com",
+      "date": "2026-08-20T20:38:34Z"
+    },
+    "message": "Merge commit 'face81b9e72b5c2a1b634e027899ecfdd758e338'",
+    "tree": {
+      "sha": "438f1ef5b0104d7159165280b179022414aafa22",
+      "url": "https://api.github.com/repos/dotnet/runtime/git/trees/438f1ef5b0104d7159165280b179022414aafa22"
+    },
+    "url": "https://api.github.com/repos/dotnet/runtime/git/commits/1219a42122cf5190c7f512850557e38c422430dc",
+    "comment_count": 0,
+    "verification": {
+      "verified": false,
+      "reason": "unsigned",
+      "signature": null,
+      "payload": null,
+      "verified_at": null
+    }
+  },
+  "url": "https://api.github.com/repos/dotnet/runtime/commits/1219a42122cf5190c7f512850557e38c422430dc",
+  "html_url": "https://github.com/dotnet/runtime/commit/1219a42122cf5190c7f512850557e38c422430dc",
+  "comments_url": "https://api.github.com/repos/dotnet/runtime/commits/1219a42122cf5190c7f512850557e38c422430dc/comments",
+  "author": null,
+  "committer": null,
+  "parents": [
+    {
+      "sha": "2a19dd15d054021e9cb1d97fe3ceb6df910e4bcc",
+      "url": "https://api.github.com/repos/dotnet/runtime/commits/2a19dd15d054021e9cb1d97fe3ceb6df910e4bcc",
+      "html_url": "https://github.com/dotnet/runtime/commit/2a19dd15d054021e9cb1d97fe3ceb6df910e4bcc"
+    },
+    {
+      "sha": "face81b9e72b5c2a1b634e027899ecfdd758e338",
+      "url": "https://api.github.com/repos/dotnet/runtime/commits/face81b9e72b5c2a1b634e027899ecfdd758e338",
+      "html_url": "https://github.com/dotnet/runtime/commit/face81b9e72b5c2a1b634e027899ecfdd758e338"
+    }
+  ],
+  "stats": {
+    "total": 12,
+    "additions": 6,
+    "deletions": 6
+  },
+  "files": [
+    {
+      "sha": "1adfa2bb12f9f240e03120ad497699242be393bf",
+      "filename": "NuGet.config",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "changes": 2,
+      "blob_url": "https://github.com/dotnet/runtime/blob/1219a42122cf5190c7f512850557e38c422430dc/NuGet.config",
+      "raw_url": "https://github.com/dotnet/runtime/raw/1219a42122cf5190c7f512850557e38c422430dc/NuGet.config",
+      "contents_url": "https://api.github.com/repos/dotnet/runtime/contents/NuGet.config?ref=1219a42122cf5190c7f512850557e38c422430dc",
+      "patch": "@@ -9,7 +9,7 @@\n     <clear />\n     <!--Begin: Package sources managed by Dependency Flow automation. Do not edit the sources below.-->\n     <!--  Begin: Package sources from dotnet-emsdk -->\n-    <add key=\"darc-pub-dotnet-emsdk-86f69e1\" value=\"https://pkgs.dev.azure.com/dnceng/public/_packaging/darc-pub-dotnet-emsdk-86f69e11/nuget/v3/index.json\" />\n+    <add key=\"darc-pub-dotnet-emsdk-66c8722\" value=\"https://pkgs.dev.azure.com/dnceng/public/_packaging/darc-pub-dotnet-emsdk-66c8722e/nuget/v3/index.json\" />\n     <!--  End: Package sources from dotnet-emsdk -->\n     <!--  Begin: Package sources from dotnet-sdk -->\n     <!--  End: Package sources from dotnet-sdk -->"
+    },
+    {
+      "sha": "c3a4fa69e5e6edf2e9c144832544ca00a8f66f6a",
+      "filename": "eng/Version.Details.xml",
+      "status": "modified",
+      "additions": 4,
+      "deletions": 4,
+      "changes": 8,
+      "blob_url": "https://github.com/dotnet/runtime/blob/1219a42122cf5190c7f512850557e38c422430dc/eng%2FVersion.Details.xml",
+      "raw_url": "https://github.com/dotnet/runtime/raw/1219a42122cf5190c7f512850557e38c422430dc/eng%2FVersion.Details.xml",
+      "contents_url": "https://api.github.com/repos/dotnet/runtime/contents/eng%2FVersion.Details.xml?ref=1219a42122cf5190c7f512850557e38c422430dc",
+      "patch": "@@ -91,13 +91,13 @@\n       <Sha>a1cb4f641df8967b3338e6f630f594ca4962b467</Sha>\n       <SourceBuild RepoName=\"cecil\" ManagedOnly=\"true\" />\n     </Dependency>\n-    <Dependency Name=\"Microsoft.NET.Workload.Emscripten.Current.Manifest-8.0.100\" Version=\"8.0.30\">\n+    <Dependency Name=\"Microsoft.NET.Workload.Emscripten.Current.Manifest-8.0.100\" Version=\"8.0.31\">\n       <Uri>https://github.com/dotnet/emsdk</Uri>\n-      <Sha>86f69e111f0c65545820c13c1008f63c3a673ea1</Sha>\n+      <Sha>66c8722e3897f210bd58059c9bdf87697c6e4963</Sha>\n     </Dependency>\n-    <Dependency Name=\"Microsoft.SourceBuild.Intermediate.emsdk\" Version=\"8.0.30-servicing.26356.2\">\n+    <Dependency Name=\"Microsoft.SourceBuild.Intermediate.emsdk\" Version=\"8.0.31-servicing.26418.4\">\n       <Uri>https://github.com/dotnet/emsdk</Uri>\n-      <Sha>86f69e111f0c65545820c13c1008f63c3a673ea1</Sha>\n+      <Sha>66c8722e3897f210bd58059c9bdf87697c6e4963</Sha>\n       <SourceBuild RepoName=\"emsdk\" ManagedOnly=\"true\" />\n     </Dependency>\n     <Dependency Name=\"Microsoft.SourceBuild.Intermediate.source-build-assets\" Version=\"8.0.0-alpha.1.26208.5\">"
+    },
+    {
+      "sha": "8a326a666486fe5b87d010b0447b5c682e705ae2",
+      "filename": "eng/Versions.props",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "changes": 2,
+      "blob_url": "https://github.com/dotnet/runtime/blob/1219a42122cf5190c7f512850557e38c422430dc/eng%2FVersions.props",
+      "raw_url": "https://github.com/dotnet/runtime/raw/1219a42122cf5190c7f512850557e38c422430dc/eng%2FVersions.props",
+      "contents_url": "https://api.github.com/repos/dotnet/runtime/contents/eng%2FVersions.props?ref=1219a42122cf5190c7f512850557e38c422430dc",
+      "patch": "@@ -253,7 +253,7 @@\n          Note: when the name is updated, make sure to update dependency name in eng/pipelines/common/xplat-setup.yml\n                like - DarcDependenciesChanged.Microsoft_NET_Workload_Emscripten_Current_Manifest-8_0_100_Transport\n     -->\n-    <MicrosoftNETWorkloadEmscriptenCurrentManifest80100Version>8.0.30</MicrosoftNETWorkloadEmscriptenCurrentManifest80100Version>\n+    <MicrosoftNETWorkloadEmscriptenCurrentManifest80100Version>8.0.31</MicrosoftNETWorkloadEmscriptenCurrentManifest80100Version>\n     <MicrosoftNETRuntimeEmscriptenVersion>$(MicrosoftNETWorkloadEmscriptenCurrentManifest80100Version)</MicrosoftNETRuntimeEmscriptenVersion>\n     <!-- SdkVersionForWorkloadTesting is used to compute the sdk band and version for workload testing.\n          The published manifests are built in dotnet/sdk so these values are for testing purposes only."
+    }
+  ]
+}

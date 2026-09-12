@@ -1,0 +1,307 @@
+[
+  {
+    "repository": "ben-manes/caffeine",
+    "commit": "836b65c0a83e5d1641ded9c6de578654bc04b2e9",
+    "path": "caffeine/src/main/java/com/github/benmanes/caffeine/cache/BoundedLocalCache.java",
+    "url": "https://raw.githubusercontent.com/ben-manes/caffeine/836b65c0a83e5d1641ded9c6de578654bc04b2e9/caffeine/src/main/java/com/github/benmanes/caffeine/cache/BoundedLocalCache.java",
+    "local_research_copy": "/tmp/loadingcache-full-scope/stable/BoundedLocalCache.java",
+    "bytes": 173839,
+    "sha256": "f1fd31383519237967267d03ed7b5063d5505c33cac0d79c51c3ef78bcd6c39f",
+    "inspection": "selected: sizing, admission, onAccess/AddTask sample, adaptation/transfers; stable-master diff only for unrelated sections"
+  },
+  {
+    "repository": "ben-manes/caffeine",
+    "commit": "836b65c0a83e5d1641ded9c6de578654bc04b2e9",
+    "path": "caffeine/src/test/java/com/github/benmanes/caffeine/cache/BoundedLocalCacheTest.java",
+    "url": "https://raw.githubusercontent.com/ben-manes/caffeine/836b65c0a83e5d1641ded9c6de578654bc04b2e9/caffeine/src/test/java/com/github/benmanes/caffeine/cache/BoundedLocalCacheTest.java",
+    "local_research_copy": "/tmp/loadingcache-full-scope/stable/BoundedLocalCacheTest.java",
+    "bytes": 226990,
+    "sha256": "4cee4cb011789335a8c3fb11d5adf249a9a3d8ee9eddef3dcfd2bb2406d52de2",
+    "inspection": "selected stable adaptation/growth/shrink/largeSample/evict_admit; master retrieved for follow-up"
+  },
+  {
+    "repository": "ben-manes/caffeine",
+    "commit": "836b65c0a83e5d1641ded9c6de578654bc04b2e9",
+    "path": "caffeine/src/main/java/com/github/benmanes/caffeine/cache/FrequencySketch.java",
+    "url": "https://raw.githubusercontent.com/ben-manes/caffeine/836b65c0a83e5d1641ded9c6de578654bc04b2e9/caffeine/src/main/java/com/github/benmanes/caffeine/cache/FrequencySketch.java",
+    "local_research_copy": "/tmp/loadingcache-full-scope/stable/FrequencySketch.java",
+    "bytes": 8422,
+    "sha256": "1758b0cca82c3dd8fde50094a95b47ca982272a377dc3f841d956ea4afe2b52f",
+    "inspection": "selected: capacity/hash/counters/reset; stable-master comparison"
+  },
+  {
+    "repository": "ben-manes/caffeine",
+    "commit": "836b65c0a83e5d1641ded9c6de578654bc04b2e9",
+    "path": "caffeine/src/test/java/com/github/benmanes/caffeine/cache/FrequencySketchTest.java",
+    "url": "https://raw.githubusercontent.com/ben-manes/caffeine/836b65c0a83e5d1641ded9c6de578654bc04b2e9/caffeine/src/test/java/com/github/benmanes/caffeine/cache/FrequencySketchTest.java",
+    "local_research_copy": "/tmp/loadingcache-full-scope/stable/FrequencySketchTest.java",
+    "bytes": 6208,
+    "sha256": "8e7fb815c5bd4eec83f79a06f2f04377458c3f1ed42436a51681fb56ca367226",
+    "inspection": "selected: saturation/aging; master shrink/retrack/resetReachable"
+  },
+  {
+    "repository": "ben-manes/caffeine",
+    "commit": "836b65c0a83e5d1641ded9c6de578654bc04b2e9",
+    "path": "caffeine/src/main/java/com/github/benmanes/caffeine/cache/TimerWheel.java",
+    "url": "https://raw.githubusercontent.com/ben-manes/caffeine/836b65c0a83e5d1641ded9c6de578654bc04b2e9/caffeine/src/main/java/com/github/benmanes/caffeine/cache/TimerWheel.java",
+    "local_research_copy": "/tmp/loadingcache-full-scope/stable/TimerWheel.java",
+    "bytes": 16157,
+    "sha256": "61979f744499608278a50f631fea7de9dd93a0674ba9de74dadde6bc5a5c7da3",
+    "inspection": "selected: schedule/deschedule/advance/expiry/delay; stable-master full file diff; BitFaster first165 lines"
+  },
+  {
+    "repository": "ben-manes/caffeine",
+    "commit": "836b65c0a83e5d1641ded9c6de578654bc04b2e9",
+    "path": "caffeine/src/test/java/com/github/benmanes/caffeine/cache/TimerWheelTest.java",
+    "url": "https://raw.githubusercontent.com/ben-manes/caffeine/836b65c0a83e5d1641ded9c6de578654bc04b2e9/caffeine/src/test/java/com/github/benmanes/caffeine/cache/TimerWheelTest.java",
+    "local_research_copy": "/tmp/loadingcache-full-scope/stable/TimerWheelTest.java",
+    "bytes": 29558,
+    "sha256": "58cad3624dfc663a6e4aba73b62530db0a4a16be14d9dfa38642626c7616230e",
+    "inspection": "selected: boundaries/wrap/future/reschedule/cascade; master transfer/exception-restoration/bounded-cycle"
+  },
+  {
+    "repository": "ben-manes/caffeine",
+    "commit": "d885a95eee51fdfe13f450fd9cba80f58f7e0def",
+    "path": "caffeine/src/main/java/com/github/benmanes/caffeine/cache/BoundedLocalCache.java",
+    "url": "https://raw.githubusercontent.com/ben-manes/caffeine/d885a95eee51fdfe13f450fd9cba80f58f7e0def/caffeine/src/main/java/com/github/benmanes/caffeine/cache/BoundedLocalCache.java",
+    "local_research_copy": "/tmp/loadingcache-full-scope/master/BoundedLocalCache.java",
+    "bytes": 185063,
+    "sha256": "29978d76b711817632e8e731e28b8540f27a730b6dbb2b1fa82c462d4d4bc266",
+    "inspection": "selected: sizing, admission, onAccess/AddTask sample, adaptation/transfers; stable-master diff only for unrelated sections"
+  },
+  {
+    "repository": "ben-manes/caffeine",
+    "commit": "d885a95eee51fdfe13f450fd9cba80f58f7e0def",
+    "path": "caffeine/src/test/java/com/github/benmanes/caffeine/cache/BoundedLocalCacheTest.java",
+    "url": "https://raw.githubusercontent.com/ben-manes/caffeine/d885a95eee51fdfe13f450fd9cba80f58f7e0def/caffeine/src/test/java/com/github/benmanes/caffeine/cache/BoundedLocalCacheTest.java",
+    "local_research_copy": "/tmp/loadingcache-full-scope/master/BoundedLocalCacheTest.java",
+    "bytes": 368687,
+    "sha256": "3994eda6e9b3869ef472c76afd581b16d2a7827b9506c9660af23e3c373dc1b8",
+    "inspection": "retrieved-only; not claimed audited"
+  },
+  {
+    "repository": "ben-manes/caffeine",
+    "commit": "d885a95eee51fdfe13f450fd9cba80f58f7e0def",
+    "path": "caffeine/src/main/java/com/github/benmanes/caffeine/cache/FrequencySketch.java",
+    "url": "https://raw.githubusercontent.com/ben-manes/caffeine/d885a95eee51fdfe13f450fd9cba80f58f7e0def/caffeine/src/main/java/com/github/benmanes/caffeine/cache/FrequencySketch.java",
+    "local_research_copy": "/tmp/loadingcache-full-scope/master/FrequencySketch.java",
+    "bytes": 8608,
+    "sha256": "61efb5c76789ab60162a83db68f5daea521932c2d687a249ad46bbff9e39c579",
+    "inspection": "selected: capacity/hash/counters/reset; stable-master comparison"
+  },
+  {
+    "repository": "ben-manes/caffeine",
+    "commit": "d885a95eee51fdfe13f450fd9cba80f58f7e0def",
+    "path": "caffeine/src/test/java/com/github/benmanes/caffeine/cache/FrequencySketchTest.java",
+    "url": "https://raw.githubusercontent.com/ben-manes/caffeine/d885a95eee51fdfe13f450fd9cba80f58f7e0def/caffeine/src/test/java/com/github/benmanes/caffeine/cache/FrequencySketchTest.java",
+    "local_research_copy": "/tmp/loadingcache-full-scope/master/FrequencySketchTest.java",
+    "bytes": 8775,
+    "sha256": "7dc324309296e89b5ce5f50cf4e49233a7bc29e6d5ffa175dbed019cecd8164c",
+    "inspection": "selected: saturation/aging; master shrink/retrack/resetReachable"
+  },
+  {
+    "repository": "ben-manes/caffeine",
+    "commit": "d885a95eee51fdfe13f450fd9cba80f58f7e0def",
+    "path": "caffeine/src/main/java/com/github/benmanes/caffeine/cache/TimerWheel.java",
+    "url": "https://raw.githubusercontent.com/ben-manes/caffeine/d885a95eee51fdfe13f450fd9cba80f58f7e0def/caffeine/src/main/java/com/github/benmanes/caffeine/cache/TimerWheel.java",
+    "local_research_copy": "/tmp/loadingcache-full-scope/master/TimerWheel.java",
+    "bytes": 17491,
+    "sha256": "43ba1affb457c9a7a5dfd51d4de560c5b23d1a8b7420b286d1214c1bb07a695c",
+    "inspection": "selected: schedule/deschedule/advance/expiry/delay; stable-master full file diff; BitFaster first165 lines"
+  },
+  {
+    "repository": "ben-manes/caffeine",
+    "commit": "d885a95eee51fdfe13f450fd9cba80f58f7e0def",
+    "path": "caffeine/src/test/java/com/github/benmanes/caffeine/cache/TimerWheelTest.java",
+    "url": "https://raw.githubusercontent.com/ben-manes/caffeine/d885a95eee51fdfe13f450fd9cba80f58f7e0def/caffeine/src/test/java/com/github/benmanes/caffeine/cache/TimerWheelTest.java",
+    "local_research_copy": "/tmp/loadingcache-full-scope/master/TimerWheelTest.java",
+    "bytes": 36723,
+    "sha256": "4cf13cd45947d93cc5ea7819f7530b8a8a4355af4d63730fd9d89fbfb44ebe86",
+    "inspection": "selected: boundaries/wrap/future/reschedule/cascade; master transfer/exception-restoration/bounded-cycle"
+  },
+  {
+    "repository": "dotnet/runtime",
+    "commit": "1219a42122cf5190c7f512850557e38c422430dc",
+    "path": "src/libraries/System.Private.CoreLib/src/System/WeakReference.T.cs",
+    "url": "https://raw.githubusercontent.com/dotnet/runtime/1219a42122cf5190c7f512850557e38c422430dc/src/libraries/System.Private.CoreLib/src/System/WeakReference.T.cs",
+    "local_research_copy": "/tmp/loadingcache-full-scope/runtime/WeakReference.T.cs",
+    "bytes": 6972,
+    "sha256": "b6cbf62d3eabfc893330f91b92905afa4356c8b6c1dba15e100b4a8f4c932372",
+    "inspection": "selected constructors, TryGetTarget/Target and GC handle lifetime comments"
+  },
+  {
+    "repository": "dotnet/runtime",
+    "commit": "1219a42122cf5190c7f512850557e38c422430dc",
+    "path": "src/libraries/System.Private.CoreLib/src/System/Runtime/CompilerServices/ConditionalWeakTable.cs",
+    "url": "https://raw.githubusercontent.com/dotnet/runtime/1219a42122cf5190c7f512850557e38c422430dc/src/libraries/System.Private.CoreLib/src/System/Runtime/CompilerServices/ConditionalWeakTable.cs",
+    "local_research_copy": "/tmp/loadingcache-full-scope/runtime/ConditionalWeakTable.cs",
+    "bytes": 40675,
+    "sha256": "f5ddf248f9cf2deb13a8cc4ac0e0dd2250e45d554b2b9c1ba779865c9006150a",
+    "inspection": "selected dependent reachability, factory outside lock, identity hash and exact target lookup"
+  },
+  {
+    "repository": "dotnet/runtime",
+    "commit": "1219a42122cf5190c7f512850557e38c422430dc",
+    "path": "src/coreclr/System.Private.CoreLib/src/System/Runtime/CompilerServices/RuntimeHelpers.CoreCLR.cs",
+    "url": "https://raw.githubusercontent.com/dotnet/runtime/1219a42122cf5190c7f512850557e38c422430dc/src/coreclr/System.Private.CoreLib/src/System/Runtime/CompilerServices/RuntimeHelpers.CoreCLR.cs",
+    "local_research_copy": "/tmp/loadingcache-full-scope/runtime/RuntimeHelpers.CoreCLR.cs",
+    "bytes": 29060,
+    "sha256": "0b26f9aaab1faf3c13e9ecb68663334b4c7b2517e831b9bc3d1d953c5b7a8d21",
+    "inspection": "selected GetHashCode/TryGetHashCode declarations"
+  },
+  {
+    "repository": "ben-manes/caffeine",
+    "commit": "836b65c0a83e5d1641ded9c6de578654bc04b2e9",
+    "path": "caffeine/src/main/java/com/github/benmanes/caffeine/cache/Caffeine.java",
+    "url": "https://raw.githubusercontent.com/ben-manes/caffeine/836b65c0a83e5d1641ded9c6de578654bc04b2e9/caffeine/src/main/java/com/github/benmanes/caffeine/cache/Caffeine.java",
+    "local_research_copy": "/tmp/loadingcache-full-scope/stable/Caffeine.java",
+    "bytes": 61276,
+    "sha256": "04907e73da3a202ef8a91707584b334fcd0d7c85b56a139f5027ec9af48e1470",
+    "inspection": "selected weak keys/value equality and async restrictions"
+  },
+  {
+    "repository": "ben-manes/caffeine",
+    "commit": "836b65c0a83e5d1641ded9c6de578654bc04b2e9",
+    "path": "caffeine/src/main/java/com/github/benmanes/caffeine/cache/References.java",
+    "url": "https://raw.githubusercontent.com/ben-manes/caffeine/836b65c0a83e5d1641ded9c6de578654bc04b2e9/caffeine/src/main/java/com/github/benmanes/caffeine/cache/References.java",
+    "local_research_copy": "/tmp/loadingcache-full-scope/stable/References.java",
+    "bytes": 9649,
+    "sha256": "b0b5c72afff008679fd9b5ca771076468c59042b172dd297a6edcdf48350b75e",
+    "inspection": "selected stable identity hash wrappers and equality"
+  },
+  {
+    "repository": "ben-manes/caffeine",
+    "commit": "d885a95eee51fdfe13f450fd9cba80f58f7e0def",
+    "path": "caffeine/src/main/java/com/github/benmanes/caffeine/cache/WindowClimber.java",
+    "url": "https://raw.githubusercontent.com/ben-manes/caffeine/d885a95eee51fdfe13f450fd9cba80f58f7e0def/caffeine/src/main/java/com/github/benmanes/caffeine/cache/WindowClimber.java",
+    "local_research_copy": "/tmp/loadingcache-full-scope/master/WindowClimber.java",
+    "bytes": 58559,
+    "sha256": "05ff8bde39f2a375972472e9ac0f86e4ba955ea6c307c662c95a63e15868af83",
+    "inspection": "selected: ReactiveClimber, Step, Sample, Reading, DensityClimber tier/normal steering, probe/anchor overview; not full audit"
+  },
+  {
+    "repository": "ben-manes/caffeine",
+    "commit": "d885a95eee51fdfe13f450fd9cba80f58f7e0def",
+    "path": "caffeine/src/test/java/com/github/benmanes/caffeine/cache/WindowClimberTest.java",
+    "url": "https://raw.githubusercontent.com/ben-manes/caffeine/d885a95eee51fdfe13f450fd9cba80f58f7e0def/caffeine/src/test/java/com/github/benmanes/caffeine/cache/WindowClimberTest.java",
+    "local_research_copy": "/tmp/loadingcache-full-scope/master/WindowClimberTest.java",
+    "bytes": 168008,
+    "sha256": "7187944e83a9151d7ad5e44be56156186a812e4a80d4fe848455f3343d5defc5",
+    "inspection": "selected: resized/samplePeriod/tierBoundary/stepDecay/flatSample; other test names located only"
+  },
+  {
+    "repository": "dotnet/runtime",
+    "commit": "1219a42122cf5190c7f512850557e38c422430dc",
+    "path": "LICENSE.TXT",
+    "url": "https://raw.githubusercontent.com/dotnet/runtime/1219a42122cf5190c7f512850557e38c422430dc/LICENSE.TXT",
+    "local_research_copy": "/tmp/loadingcache-full-scope/runtime/LICENSE.TXT",
+    "bytes": 1116,
+    "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310",
+    "inspection": "full-license-read"
+  },
+  {
+    "repository": "bitfaster/BitFaster.Caching",
+    "commit": "a71bec32a6b7f621af7a9d2b1d7c4edd0209b289",
+    "path": "BitFaster.Caching/Lfu/LfuCapacityPartition.cs",
+    "url": "https://raw.githubusercontent.com/bitfaster/BitFaster.Caching/a71bec32a6b7f621af7a9d2b1d7c4edd0209b289/BitFaster.Caching/Lfu/LfuCapacityPartition.cs",
+    "local_research_copy": "/tmp/loadingcache-full-scope/bitfaster/BitFaster.Caching/Lfu/LfuCapacityPartition.cs",
+    "bytes": 4782,
+    "sha256": "50d9ff1d930c3ce0f577b3305b687fc99a9541f1c17be4eea8d39f27bfb900dd",
+    "inspection": "full-class-read"
+  },
+  {
+    "repository": "bitfaster/BitFaster.Caching",
+    "commit": "a71bec32a6b7f621af7a9d2b1d7c4edd0209b289",
+    "path": "BitFaster.Caching/Lfu/TimerWheel.cs",
+    "url": "https://raw.githubusercontent.com/bitfaster/BitFaster.Caching/a71bec32a6b7f621af7a9d2b1d7c4edd0209b289/BitFaster.Caching/Lfu/TimerWheel.cs",
+    "local_research_copy": "/tmp/loadingcache-full-scope/bitfaster/BitFaster.Caching/Lfu/TimerWheel.cs",
+    "bytes": 11516,
+    "sha256": "61b7550b4a73c558b40460b268493aefd485cfc217e80f55dbda70e2cfd6d81a",
+    "inspection": "retrieved-only"
+  },
+  {
+    "repository": "bitfaster/BitFaster.Caching",
+    "commit": "a71bec32a6b7f621af7a9d2b1d7c4edd0209b289",
+    "path": "BitFaster.Caching.UnitTests/Lfu/LfuCapacityPartitionTests.cs",
+    "url": "https://raw.githubusercontent.com/bitfaster/BitFaster.Caching/a71bec32a6b7f621af7a9d2b1d7c4edd0209b289/BitFaster.Caching.UnitTests/Lfu/LfuCapacityPartitionTests.cs",
+    "local_research_copy": "/tmp/loadingcache-full-scope/bitfaster/BitFaster.Caching.UnitTests/Lfu/LfuCapacityPartitionTests.cs",
+    "bytes": 6318,
+    "sha256": "4410056c07914fa275a698a5a06f34e78299bba216fa85f9254922f7cf495350",
+    "inspection": "selected: tiny rejection/initial allocation/growth clamp/convergence/phase changes"
+  },
+  {
+    "repository": "bitfaster/BitFaster.Caching",
+    "commit": "a71bec32a6b7f621af7a9d2b1d7c4edd0209b289",
+    "path": "BitFaster.Caching.UnitTests/Lfu/TimerWheelTests.cs",
+    "url": "https://raw.githubusercontent.com/bitfaster/BitFaster.Caching/a71bec32a6b7f621af7a9d2b1d7c4edd0209b289/BitFaster.Caching.UnitTests/Lfu/TimerWheelTests.cs",
+    "local_research_copy": "/tmp/loadingcache-full-scope/bitfaster/BitFaster.Caching.UnitTests/Lfu/TimerWheelTests.cs",
+    "bytes": 16858,
+    "sha256": "ea2a7d4ead23ba7fc2b1f2f92088bf7fdac2bf8edb5c7edc1662ca9d7e4930be",
+    "inspection": "retrieved-only; no test-body review"
+  },
+  {
+    "repository": "bitfaster/BitFaster.Caching",
+    "commit": "a71bec32a6b7f621af7a9d2b1d7c4edd0209b289",
+    "path": "BitFaster.Caching/Lfu/Builder/LfuBuilderBase.cs",
+    "url": "https://raw.githubusercontent.com/bitfaster/BitFaster.Caching/a71bec32a6b7f621af7a9d2b1d7c4edd0209b289/BitFaster.Caching/Lfu/Builder/LfuBuilderBase.cs",
+    "local_research_copy": "/tmp/loadingcache-full-scope/bitfaster/BitFaster.Caching/Lfu/Builder/LfuBuilderBase.cs",
+    "bytes": 4267,
+    "sha256": "7225cc19cba3ff3cb37a728d51915aabac1df458714d29ea73a33dbabcf28618",
+    "inspection": "full-class-read"
+  },
+  {
+    "repository": "bitfaster/BitFaster.Caching",
+    "commit": "a71bec32a6b7f621af7a9d2b1d7c4edd0209b289",
+    "path": "BitFaster.Caching/Lfu/ConcurrentLfuCore.cs",
+    "url": "https://raw.githubusercontent.com/bitfaster/BitFaster.Caching/a71bec32a6b7f621af7a9d2b1d7c4edd0209b289/BitFaster.Caching/Lfu/ConcurrentLfuCore.cs",
+    "local_research_copy": "/tmp/loadingcache-full-scope/bitfaster/BitFaster.Caching/Lfu/ConcurrentLfuCore.cs",
+    "bytes": 45576,
+    "sha256": "813d34aba0e386cd965639ed73da76b261397b9b8563a9774b6b2c97fb4286cd",
+    "inspection": "selected capacity/admission/authority, plus preceding M0 notes; not full audit"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/bitfaster/BitFaster.Caching/a71bec32a6b7f621af7a9d2b1d7c4edd0209b289/BitFaster.Caching/Policy/IBoundedPolicy.cs",
+    "error": "HTTP Error 404: Not Found",
+    "inspection": "retrieval-failed; corrected path retrieved separately"
+  },
+  {
+    "repository": "bitfaster/BitFaster.Caching",
+    "commit": "a71bec32a6b7f621af7a9d2b1d7c4edd0209b289",
+    "path": "LICENSE",
+    "url": "https://raw.githubusercontent.com/bitfaster/BitFaster.Caching/a71bec32a6b7f621af7a9d2b1d7c4edd0209b289/LICENSE",
+    "local_research_copy": "/tmp/loadingcache-full-scope/bitfaster/LICENSE",
+    "bytes": 1066,
+    "sha256": "bc201c30b8ace5d38b420c6c9917ebce143649e93a8a603aa989f8d57e560de6",
+    "inspection": "full-license-read"
+  },
+  {
+    "repository": "bitfaster/BitFaster.Caching",
+    "commit": "a71bec32a6b7f621af7a9d2b1d7c4edd0209b289",
+    "path": "BitFaster.Caching/IBoundedPolicy.cs",
+    "url": "https://raw.githubusercontent.com/bitfaster/BitFaster.Caching/a71bec32a6b7f621af7a9d2b1d7c4edd0209b289/BitFaster.Caching/IBoundedPolicy.cs",
+    "local_research_copy": "/tmp/loadingcache-full-scope/bitfaster/BitFaster.Caching/IBoundedPolicy.cs",
+    "bytes": 654,
+    "sha256": "4c91a1f88c03f621e398e8b094d5e921eb58bcd290cab18cc2528b40b8f5f07f",
+    "inspection": "full-class-read"
+  },
+  {
+    "repository": "ben-manes/caffeine",
+    "commit": "836b65c0a83e5d1641ded9c6de578654bc04b2e9",
+    "path": "LICENSE",
+    "url": "https://raw.githubusercontent.com/ben-manes/caffeine/836b65c0a83e5d1641ded9c6de578654bc04b2e9/LICENSE",
+    "local_research_copy": "/tmp/loadingcache-full-scope/stable/LICENSE",
+    "bytes": 11358,
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "inspection": "full-license-read"
+  },
+  {
+    "repository": "ben-manes/caffeine",
+    "commit": "d885a95eee51fdfe13f450fd9cba80f58f7e0def",
+    "path": "LICENSE",
+    "url": "https://raw.githubusercontent.com/ben-manes/caffeine/d885a95eee51fdfe13f450fd9cba80f58f7e0def/LICENSE",
+    "local_research_copy": "/tmp/loadingcache-full-scope/master/LICENSE",
+    "bytes": 11358,
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "inspection": "full-license-read"
+  }
+]

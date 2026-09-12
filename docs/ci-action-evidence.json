@@ -1,0 +1,20 @@
+[
+  {
+    "repository": "actions/checkout",
+    "tag": "v7.0.1",
+    "commit": "3d3c42e5aac5ba805825da76410c181273ba90b1",
+    "release_url": "https://github.com/actions/checkout/releases/tag/v7.0.1"
+  },
+  {
+    "repository": "actions/setup-dotnet",
+    "tag": "v6.0.0",
+    "commit": "a98b56852c35b8e3190ac28c8c2271da59106c68",
+    "release_url": "https://github.com/actions/setup-dotnet/releases/tag/v6.0.0"
+  },
+  {
+    "repository": "actions/upload-artifact",
+    "tag": "v7.0.1",
+    "commit": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+    "release_url": "https://github.com/actions/upload-artifact/releases/tag/v7.0.1"
+  }
+]

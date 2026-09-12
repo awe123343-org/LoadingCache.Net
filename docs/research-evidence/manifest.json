@@ -1,0 +1,218 @@
+{
+  "accessed": "2026-09-12",
+  "upstream_code_executed": false,
+  "upstream_tests_executed": false,
+  "scope": "Selected primary source review; no repository-wide audit",
+  "files": [
+    {
+      "repository": "ben-manes/caffeine",
+      "tag": "v3.2.4",
+      "commit": "836b65c0a83e5d1641ded9c6de578654bc04b2e9",
+      "path": "LICENSE",
+      "raw_url": "https://raw.githubusercontent.com/ben-manes/caffeine/836b65c0a83e5d1641ded9c6de578654bc04b2e9/LICENSE",
+      "bytes": 11358,
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "inspection": "read-license"
+    },
+    {
+      "repository": "ben-manes/caffeine",
+      "tag": "v3.2.4",
+      "commit": "836b65c0a83e5d1641ded9c6de578654bc04b2e9",
+      "path": "caffeine/src/main/java/com/github/benmanes/caffeine/cache/FrequencySketch.java",
+      "raw_url": "https://raw.githubusercontent.com/ben-manes/caffeine/836b65c0a83e5d1641ded9c6de578654bc04b2e9/caffeine/src/main/java/com/github/benmanes/caffeine/cache/FrequencySketch.java",
+      "bytes": 8422,
+      "sha256": "1758b0cca82c3dd8fde50094a95b47ca982272a377dc3f841d956ea4afe2b52f",
+      "inspection": "selected-sections-read"
+    },
+    {
+      "repository": "ben-manes/caffeine",
+      "tag": "v3.2.4",
+      "commit": "836b65c0a83e5d1641ded9c6de578654bc04b2e9",
+      "path": "caffeine/src/main/java/com/github/benmanes/caffeine/cache/LocalAsyncCache.java",
+      "raw_url": "https://raw.githubusercontent.com/ben-manes/caffeine/836b65c0a83e5d1641ded9c6de578654bc04b2e9/caffeine/src/main/java/com/github/benmanes/caffeine/cache/LocalAsyncCache.java",
+      "bytes": 54498,
+      "sha256": "fb891c16a10392f0961fa831cdd6a1d79b0316dae6e03ccf931796cf7aa1a982",
+      "inspection": "selected-sections-read"
+    },
+    {
+      "repository": "ben-manes/caffeine",
+      "tag": "v3.2.4",
+      "commit": "836b65c0a83e5d1641ded9c6de578654bc04b2e9",
+      "path": "caffeine/src/main/java/com/github/benmanes/caffeine/cache/LocalAsyncLoadingCache.java",
+      "raw_url": "https://raw.githubusercontent.com/ben-manes/caffeine/836b65c0a83e5d1641ded9c6de578654bc04b2e9/caffeine/src/main/java/com/github/benmanes/caffeine/cache/LocalAsyncLoadingCache.java",
+      "bytes": 12687,
+      "sha256": "1dca08b1162df196ca474a41855780a6b8740c6a2669686ec57c6df75a5f6610",
+      "inspection": "selected-sections-read"
+    },
+    {
+      "repository": "ben-manes/caffeine",
+      "tag": "v3.2.4",
+      "commit": "836b65c0a83e5d1641ded9c6de578654bc04b2e9",
+      "path": "caffeine/src/test/java/com/github/benmanes/caffeine/cache/AsyncLoadingCacheTest.java",
+      "raw_url": "https://raw.githubusercontent.com/ben-manes/caffeine/836b65c0a83e5d1641ded9c6de578654bc04b2e9/caffeine/src/test/java/com/github/benmanes/caffeine/cache/AsyncLoadingCacheTest.java",
+      "bytes": 35523,
+      "sha256": "ba14ad5629525d960b4205daaab9561f3fa9228ac807a2a4068f8c3b2e3222de",
+      "inspection": "selected-sections-read"
+    },
+    {
+      "repository": "ben-manes/caffeine",
+      "tag": "v3.2.4",
+      "commit": "836b65c0a83e5d1641ded9c6de578654bc04b2e9",
+      "path": "caffeine/src/test/java/com/github/benmanes/caffeine/cache/FrequencySketchTest.java",
+      "raw_url": "https://raw.githubusercontent.com/ben-manes/caffeine/836b65c0a83e5d1641ded9c6de578654bc04b2e9/caffeine/src/test/java/com/github/benmanes/caffeine/cache/FrequencySketchTest.java",
+      "bytes": 6208,
+      "sha256": "8e7fb815c5bd4eec83f79a06f2f04377458c3f1ed42436a51681fb56ca367226",
+      "inspection": "selected-sections-read"
+    },
+    {
+      "repository": "bitfaster/BitFaster.Caching",
+      "tag": "v2.6.1",
+      "commit": "a71bec32a6b7f621af7a9d2b1d7c4edd0209b289",
+      "path": "BitFaster.Caching/Atomic/AsyncAtomicFactory.cs",
+      "raw_url": "https://raw.githubusercontent.com/bitfaster/BitFaster.Caching/a71bec32a6b7f621af7a9d2b1d7c4edd0209b289/BitFaster.Caching/Atomic/AsyncAtomicFactory.cs",
+      "bytes": 7052,
+      "sha256": "1b98f90fd96b35f54c24cf71493e4f947351d5acfb5c412b24fa1aa8963759da",
+      "inspection": "full-class-read"
+    },
+    {
+      "repository": "bitfaster/BitFaster.Caching",
+      "tag": "v2.6.1",
+      "commit": "a71bec32a6b7f621af7a9d2b1d7c4edd0209b289",
+      "path": "BitFaster.Caching/Atomic/AtomicFactoryAsyncCache.cs",
+      "raw_url": "https://raw.githubusercontent.com/bitfaster/BitFaster.Caching/a71bec32a6b7f621af7a9d2b1d7c4edd0209b289/BitFaster.Caching/Atomic/AtomicFactoryAsyncCache.cs",
+      "bytes": 11714,
+      "sha256": "4dccf6e3c32057b334462c8a96ea1cbd135f3beecce6541ff0207c28003d477e",
+      "inspection": "selected-sections-read"
+    },
+    {
+      "repository": "bitfaster/BitFaster.Caching",
+      "tag": "v2.6.1",
+      "commit": "a71bec32a6b7f621af7a9d2b1d7c4edd0209b289",
+      "path": "BitFaster.Caching/Lfu/Builder/AtomicAsyncConcurrentLfuBuilder.cs",
+      "raw_url": "https://raw.githubusercontent.com/bitfaster/BitFaster.Caching/a71bec32a6b7f621af7a9d2b1d7c4edd0209b289/BitFaster.Caching/Lfu/Builder/AtomicAsyncConcurrentLfuBuilder.cs",
+      "bytes": 1050,
+      "sha256": "2fbb9b04e100cdee728a2d01bb85e74ca5bfb0b402b3991ca7c46c32f58e3497",
+      "inspection": "retrieved-only"
+    },
+    {
+      "repository": "bitfaster/BitFaster.Caching",
+      "tag": "v2.6.1",
+      "commit": "a71bec32a6b7f621af7a9d2b1d7c4edd0209b289",
+      "path": "BitFaster.Caching/Lfu/Builder/LfuBuilderBase.cs",
+      "raw_url": "https://raw.githubusercontent.com/bitfaster/BitFaster.Caching/a71bec32a6b7f621af7a9d2b1d7c4edd0209b289/BitFaster.Caching/Lfu/Builder/LfuBuilderBase.cs",
+      "bytes": 4267,
+      "sha256": "7225cc19cba3ff3cb37a728d51915aabac1df458714d29ea73a33dbabcf28618",
+      "inspection": "full-class-read"
+    },
+    {
+      "repository": "bitfaster/BitFaster.Caching",
+      "tag": "v2.6.1",
+      "commit": "a71bec32a6b7f621af7a9d2b1d7c4edd0209b289",
+      "path": "BitFaster.Caching/Lfu/Builder/LfuInfo.cs",
+      "raw_url": "https://raw.githubusercontent.com/bitfaster/BitFaster.Caching/a71bec32a6b7f621af7a9d2b1d7c4edd0209b289/BitFaster.Caching/Lfu/Builder/LfuInfo.cs",
+      "bytes": 1541,
+      "sha256": "518c0a7da9c1afff69a95faa1302c3ecdea3f6f3ae9a9f2ce0e685869dfc8211",
+      "inspection": "retrieved-only"
+    },
+    {
+      "repository": "bitfaster/BitFaster.Caching",
+      "tag": "v2.6.1",
+      "commit": "a71bec32a6b7f621af7a9d2b1d7c4edd0209b289",
+      "path": "BitFaster.Caching/Lfu/ConcurrentLfu.cs",
+      "raw_url": "https://raw.githubusercontent.com/bitfaster/BitFaster.Caching/a71bec32a6b7f621af7a9d2b1d7c4edd0209b289/BitFaster.Caching/Lfu/ConcurrentLfu.cs",
+      "bytes": 13590,
+      "sha256": "d2cfeef678e9d913ca1e89ef8cada1c7e3369f631e8a8560f494d92ec43dcbd6",
+      "inspection": "retrieved-only"
+    },
+    {
+      "repository": "bitfaster/BitFaster.Caching",
+      "tag": "v2.6.1",
+      "commit": "a71bec32a6b7f621af7a9d2b1d7c4edd0209b289",
+      "path": "BitFaster.Caching/Lfu/ConcurrentLfuBuilderExtensions.cs",
+      "raw_url": "https://raw.githubusercontent.com/bitfaster/BitFaster.Caching/a71bec32a6b7f621af7a9d2b1d7c4edd0209b289/BitFaster.Caching/Lfu/ConcurrentLfuBuilderExtensions.cs",
+      "bytes": 11253,
+      "sha256": "8499b22efe001a74083b5bc173e35ef879a2d7c051936c5ea94818558e1d8933",
+      "inspection": "retrieved-only"
+    },
+    {
+      "repository": "bitfaster/BitFaster.Caching",
+      "tag": "v2.6.1",
+      "commit": "a71bec32a6b7f621af7a9d2b1d7c4edd0209b289",
+      "path": "BitFaster.Caching/Lfu/ConcurrentLfuCore.cs",
+      "raw_url": "https://raw.githubusercontent.com/bitfaster/BitFaster.Caching/a71bec32a6b7f621af7a9d2b1d7c4edd0209b289/BitFaster.Caching/Lfu/ConcurrentLfuCore.cs",
+      "bytes": 45576,
+      "sha256": "813d34aba0e386cd965639ed73da76b261397b9b8563a9774b6b2c97fb4286cd",
+      "inspection": "selected-sections-read"
+    },
+    {
+      "repository": "bitfaster/BitFaster.Caching",
+      "tag": "v2.6.1",
+      "commit": "a71bec32a6b7f621af7a9d2b1d7c4edd0209b289",
+      "path": "BitFaster.Caching.UnitTests/Atomic/AsyncAtomicFactoryTests.cs",
+      "raw_url": "https://raw.githubusercontent.com/bitfaster/BitFaster.Caching/a71bec32a6b7f621af7a9d2b1d7c4edd0209b289/BitFaster.Caching.UnitTests/Atomic/AsyncAtomicFactoryTests.cs",
+      "bytes": 8443,
+      "sha256": "0f003f14abb6a92e646c7225b472a8cd98f6b3223eaf8b42bf00f0443aabda10",
+      "inspection": "selected-sections-read"
+    },
+    {
+      "repository": "bitfaster/BitFaster.Caching",
+      "tag": "v2.6.1",
+      "commit": "a71bec32a6b7f621af7a9d2b1d7c4edd0209b289",
+      "path": "BitFaster.Caching.UnitTests/Lfu/ConcurrentLfuBuilderTests.cs",
+      "raw_url": "https://raw.githubusercontent.com/bitfaster/BitFaster.Caching/a71bec32a6b7f621af7a9d2b1d7c4edd0209b289/BitFaster.Caching.UnitTests/Lfu/ConcurrentLfuBuilderTests.cs",
+      "bytes": 20683,
+      "sha256": "2c05c7962633a9fe4c1c88d74184ac413dfbe83862d2536d0d2d8b34665af99b",
+      "inspection": "selected-sections-read"
+    },
+    {
+      "repository": "bitfaster/BitFaster.Caching",
+      "tag": "v2.6.1",
+      "commit": "a71bec32a6b7f621af7a9d2b1d7c4edd0209b289",
+      "path": "LICENSE",
+      "raw_url": "https://raw.githubusercontent.com/bitfaster/BitFaster.Caching/a71bec32a6b7f621af7a9d2b1d7c4edd0209b289/LICENSE",
+      "bytes": 1066,
+      "sha256": "bc201c30b8ace5d38b420c6c9917ebce143649e93a8a603aa989f8d57e560de6",
+      "inspection": "read-license"
+    },
+    {
+      "repository": "dotnet/runtime",
+      "tag": "v10.0.12",
+      "commit": "4271d88e0aebf3d04f188f1334c2220d80555ef6",
+      "path": "docs/design/specs/Memory-model.md",
+      "raw_url": "https://raw.githubusercontent.com/dotnet/runtime/4271d88e0aebf3d04f188f1334c2220d80555ef6/docs/design/specs/Memory-model.md",
+      "bytes": 17280,
+      "sha256": "4358aa5c8afbe1bd8624a4c0efabf284fcda2928d43748699a039e610e0619d0",
+      "inspection": "selected-sections-read"
+    },
+    {
+      "repository": "google/guava",
+      "tag": "v33.7.1",
+      "commit": "c5b5a383a1f7f4a84c17de910f61181011c95908",
+      "path": "LICENSE",
+      "raw_url": "https://raw.githubusercontent.com/google/guava/c5b5a383a1f7f4a84c17de910f61181011c95908/LICENSE",
+      "bytes": 11358,
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "inspection": "read-license"
+    },
+    {
+      "repository": "ZiggyCreatures/FusionCache",
+      "tag": "v2.7.2",
+      "commit": "841ee7e8a467481bb4e6da2e9a07fe629ddda8bc",
+      "path": "LICENSE.md",
+      "raw_url": "https://raw.githubusercontent.com/ZiggyCreatures/FusionCache/841ee7e8a467481bb4e6da2e9a07fe629ddda8bc/LICENSE.md",
+      "bytes": 1078,
+      "sha256": "3a785dcbc4419b3366891d1ccfa132bb911cfabac765598334c5e9cce1236b91",
+      "inspection": "read-license"
+    },
+    {
+      "repository": "ZiggyCreatures/FusionCache",
+      "tag": "v2.7.2",
+      "commit": "841ee7e8a467481bb4e6da2e9a07fe629ddda8bc",
+      "path": "README.md",
+      "raw_url": "https://raw.githubusercontent.com/ZiggyCreatures/FusionCache/841ee7e8a467481bb4e6da2e9a07fe629ddda8bc/README.md",
+      "bytes": 26109,
+      "sha256": "8eea338dd05bf14322587869d2af4bcddb080b9a6b17cf0dcaec472b8e3041af",
+      "inspection": "selected-sections-read"
+    }
+  ]
+}

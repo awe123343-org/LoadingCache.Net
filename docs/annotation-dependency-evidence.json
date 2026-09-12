@@ -1,0 +1,13 @@
+{
+  "retrieved_at": "2026-09-12",
+  "id": "JetBrains.Annotations",
+  "version": "2026.2.0",
+  "authors": "JetBrains",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JetBrains/JetBrains.Annotations.git"
+  },
+  "nupkg_sha256": "e34f42b24add688097529946b3db0da657d325f604965955c08430a0359f7669",
+  "use": "Compile-only IDE annotations; PrivateAssets=all and IncludeAssets=compile. No JETBRAINS_ANNOTATIONS define."
+}

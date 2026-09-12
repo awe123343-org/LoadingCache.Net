@@ -1,0 +1,11 @@
+{
+  "accessed": "2026-09-12",
+  "scope": "Bounded selected primary-source research; no whole-repository audit",
+  "upstreamCodeExecuted": false,
+  "upstreamTestsExecuted": false,
+  "newLocalAlgorithmTestsExecutedByResearcher": false,
+  "retrievedFiles": 30,
+  "failedRequests": 1,
+  "rawSourceLocation": "/tmp/loadingcache-full-scope; not copied to repository",
+  "productionEditsByResearcher": false
+}
