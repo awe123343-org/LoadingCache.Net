@@ -1,0 +1,83 @@
+{
+  "seed": 123,
+  "capacity": 8,
+  "requests": 20000,
+  "workload": "phase-changing-hotset-with-scan",
+  "windowHistoryInterval": 1024,
+  "results": [
+    {
+      "Policy": "lru",
+      "Requests": 20000,
+      "Hits": 683,
+      "Misses": 19317,
+      "HitRate": 0.03415,
+      "WindowMaximumHistory": null
+    },
+    {
+      "Policy": "slru",
+      "Requests": 20000,
+      "Hits": 878,
+      "Misses": 19122,
+      "HitRate": 0.0439,
+      "WindowMaximumHistory": null
+    },
+    {
+      "Policy": "fixed-window-tinylfu",
+      "Requests": 20000,
+      "Hits": 823,
+      "Misses": 19177,
+      "HitRate": 0.04115,
+      "WindowMaximumHistory": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "Policy": "adaptive-window-tinylfu",
+      "Requests": 20000,
+      "Hits": 768,
+      "Misses": 19232,
+      "HitRate": 0.0384,
+      "WindowMaximumHistory": [
+        3,
+        2,
+        6,
+        6,
+        3,
+        2,
+        5,
+        4,
+        2,
+        2,
+        5,
+        3,
+        3,
+        4,
+        2,
+        4,
+        1,
+        3,
+        2,
+        1
+      ]
+    }
+  ]
+}
