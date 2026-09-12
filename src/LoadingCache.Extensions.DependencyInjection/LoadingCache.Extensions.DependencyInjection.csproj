@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <AssemblyName>LoadingCache.Extensions.DependencyInjection</AssemblyName>
+        <RootNamespace>LoadingCache.Extensions.DependencyInjection</RootNamespace>
+        <LoadingCachePackageRole>dependency-injection</LoadingCachePackageRole>
+        <IsPackable>false</IsPackable>
+        <Description>Microsoft.Extensions.DependencyInjection integration for LoadingCache.</Description>
+    </PropertyGroup>
+
+    <Import Project="../Package.props" />
+
+    <ItemGroup>
+        <!-- IDE-only annotations are omitted from emitted assemblies. -->
+        <PackageReference
+            Include="JetBrains.Annotations"
+            PrivateAssets="all"
+            IncludeAssets="compile"
+        />
+        <ProjectReference Include="../LoadingCache/LoadingCache.csproj" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    </ItemGroup>
+</Project>
