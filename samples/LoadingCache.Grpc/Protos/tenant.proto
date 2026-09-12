@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+option csharp_namespace = "LoadingCache.Grpc.Sample";
+
+package tenant;
+
+service TenantConfig {
+  rpc GetConfig (TenantConfigRequest) returns (TenantConfigReply);
+}
+
+message TenantConfigRequest {
+  string tenant_id = 1;
+}
+
+message TenantConfigReply {
+  string tenant_id = 1;
+  string value = 2;
+}
