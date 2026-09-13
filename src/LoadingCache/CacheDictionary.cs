@@ -3,6 +3,108 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace LoadingCache;
 
+/// <summary>Describes the result requested by an atomic dictionary transform.</summary>
+public enum CacheMutationKind
+{
+    /// <summary>Leave the current mapping unchanged.</summary>
+    Keep,
+
+    /// <summary>Store the value supplied by <see cref="CacheMutation{TValue}.Value"/>.</summary>
+    Set,
+
+    /// <summary>Remove the current mapping.</summary>
+    Remove,
+}
+
+/// <summary>Factory methods for explicit cache dictionary mutations.</summary>
+public static class CacheMutation
+{
+    /// <summary>Leaves a mapping unchanged.</summary>
+    public static CacheMutation<TValue> Keep<TValue>()
+        where TValue : notnull => new(CacheMutationKind.Keep);
+
+    /// <summary>Stores <paramref name="value"/> as a mapping.</summary>
+    public static CacheMutation<TValue> Set<TValue>(TValue value)
+        where TValue : notnull => new(CacheMutationKind.Set, value);
+
+    /// <summary>Removes a mapping.</summary>
+    public static CacheMutation<TValue> Remove<TValue>()
+        where TValue : notnull => new(CacheMutationKind.Remove);
+}
+
+/// <summary>Represents an explicit atomic update for a cache dictionary.</summary>
+/// <typeparam name="TValue">The cache value type.</typeparam>
+public readonly struct CacheMutation<TValue>
+    where TValue : notnull
+{
+    private readonly TValue _value;
+
+    internal CacheMutation(CacheMutationKind kind, TValue value = default!)
+    {
+        if (kind == CacheMutationKind.Set)
+        {
+            ArgumentNullException.ThrowIfNull(value);
+        }
+
+        Kind = kind;
+        _value = value;
+    }
+
+    /// <summary>Gets the requested mutation kind.</summary>
+    public CacheMutationKind Kind { get; }
+
+    /// <summary>
+    /// Gets the replacement value for a <see cref="CacheMutationKind.Set"/> mutation.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The mutation does not set a value.</exception>
+    public TValue Value =>
+        Kind == CacheMutationKind.Set
+            ? _value
+            : throw new InvalidOperationException("This cache mutation does not set a value.");
+}
+
+/// <summary>Factory methods for explicit present-or-missing cache values.</summary>
+public static class CacheValue
+{
+    /// <summary>Returns a missing mapping.</summary>
+    public static CacheValue<TValue> Missing<TValue>()
+        where TValue : notnull => default;
+
+    /// <summary>Returns a present mapping containing <paramref name="value"/>.</summary>
+    public static CacheValue<TValue> Present<TValue>(TValue value)
+        where TValue : notnull => new(value);
+}
+
+/// <summary>Represents an optional value supplied to an atomic dictionary transform.</summary>
+/// <typeparam name="TValue">The cache value type.</typeparam>
+public readonly struct CacheValue<TValue>
+    where TValue : notnull
+{
+    private readonly TValue _value;
+
+    internal CacheValue(TValue value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        _value = value;
+        HasValue = true;
+    }
+
+    /// <summary>Gets whether this instance contains a mapping.</summary>
+    public bool HasValue { get; }
+
+    /// <summary>Gets the contained value.</summary>
+    /// <exception cref="InvalidOperationException">This instance represents a missing mapping.</exception>
+    public TValue Value =>
+        HasValue ? _value : throw new InvalidOperationException("This cache value is missing.");
+
+    /// <summary>Attempts to read the contained value.</summary>
+    public bool TryGetValue([MaybeNullWhen(false)] out TValue value)
+    {
+        value = _value;
+        return HasValue;
+    }
+}
+
 /// <summary>
 /// A mutable, cache-aware dictionary view over one cache engine.
 /// </summary>
@@ -11,7 +113,9 @@ namespace LoadingCache;
 /// intentionally absent from reads and snapshots; an <see cref="Add(TKey, TValue)"/>
 /// operation treats a pending flight as occupied, while <see cref="Remove(TKey)"/>
 /// leaves it untouched. The view owns no cache resources and does not block on
-/// asynchronous flights.
+/// asynchronous flights. Atomic transforms treat a pending flight as a missing
+/// value and fence it by exact entry identity; <see cref="ComputeIfPresent"/>
+/// skips its callback while a flight is pending.
 /// </remarks>
 /// <typeparam name="TKey">The key type.</typeparam>
 /// <typeparam name="TValue">The value type.</typeparam>
@@ -104,6 +208,63 @@ public class CacheDictionary<TKey, TValue>
 
     /// <summary>Removes a ready value for a key.</summary>
     public bool Remove(TKey key) => Engine.DictionaryTryRemove(key, out _);
+
+    /// <summary>
+    /// Adds a value when absent or computes a replacement from the current value.
+    /// Factories run outside cache locks and may be invoked more than once when
+    /// concurrent mutations race, matching .NET concurrent dictionary semantics.
+    /// </summary>
+    public TValue AddOrUpdate(
+        TKey key,
+        Func<TKey, TValue> addValueFactory,
+        Func<TKey, TValue, TValue> updateValueFactory
+    )
+    {
+        ArgumentNullException.ThrowIfNull(addValueFactory);
+        ArgumentNullException.ThrowIfNull(updateValueFactory);
+        return Engine.DictionaryAddOrUpdate(key, addValueFactory, updateValueFactory);
+    }
+
+    /// <summary>
+    /// Computes a value from an explicit present-or-missing state. Returning
+    /// <c>CacheMutation.Remove&lt;TValue&gt;()</c> removes the mapping without
+    /// using <see langword="null"/> as a deletion sentinel. A missing snapshot
+    /// is fenced by the cache's explicit-mutation revision, so an unrelated
+    /// explicit mutation may cause the callback to run again.
+    /// </summary>
+    public CacheMutation<TValue> Compute(
+        TKey key,
+        Func<TKey, CacheValue<TValue>, CacheMutation<TValue>> transform
+    )
+    {
+        ArgumentNullException.ThrowIfNull(transform);
+        return Engine.DictionaryCompute(key, transform);
+    }
+
+    /// <summary>
+    /// Computes a value only when the key is present. The callback is not invoked
+    /// for a missing key; the returned <see cref="CacheMutationKind.Keep"/> then
+    /// indicates that no mapping was changed.
+    /// </summary>
+    public CacheMutation<TValue> ComputeIfPresent(
+        TKey key,
+        Func<TKey, TValue, CacheMutation<TValue>> transform
+    )
+    {
+        ArgumentNullException.ThrowIfNull(transform);
+        return Engine.DictionaryComputeIfPresent(key, transform);
+    }
+
+    /// <summary>
+    /// Adds <paramref name="value"/> when absent or combines it with the current
+    /// value. The merge callback runs outside cache locks and may be retried.
+    /// </summary>
+    public TValue Merge(TKey key, TValue value, Func<TValue, TValue, TValue> mergeFactory)
+    {
+        ValidateValue(value);
+        ArgumentNullException.ThrowIfNull(mergeFactory);
+        return Engine.DictionaryMerge(key, value, mergeFactory);
+    }
 
     /// <summary>Removes all current cache entries, including pending flights.</summary>
     public void Clear() => Engine.Clear();

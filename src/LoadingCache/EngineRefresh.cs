@@ -52,7 +52,9 @@ internal sealed partial class CacheEngine<TKey, TValue>
         Func<TKey, TValue, CancellationToken, Task<TValue>> reloadFactory
     )
     {
-        AsyncFlight flight;
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
+        AsyncFlight? flight = null;
+        bool collected = false;
         lock (_gate)
         {
             if (_disposed != 0 || !_entries.IsCurrent(entry))
@@ -72,25 +74,37 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 if (!entry.TryGetValue(out TValue? oldValue))
                 {
                     RemoveCurrentEntryLocked(entry, collected: true);
-                    return;
+                    collected = true;
                 }
-                TimeSpan oldDuration = _expiry is null
-                    ? TimeSpan.MaxValue
-                    : GetRemainingDuration(entry, now, ExpirationKind.Variable);
-                flight = CreateRefreshFlightLocked(
-                    entry,
-                    (key, cancellationToken) => reloadFactory(key, oldValue!, cancellationToken),
-                    oldDuration
-                );
+                else
+                {
+                    TimeSpan oldDuration = _expiry is null
+                        ? TimeSpan.MaxValue
+                        : GetRemainingDuration(entry, now, ExpirationKind.Variable);
+                    flight = CreateRefreshFlightLocked(
+                        entry,
+                        (key, cancellationToken) =>
+                            reloadFactory(key, oldValue!, cancellationToken),
+                        oldDuration
+                    );
+                }
             }
         }
 
-        QueueAutomaticRefresh(flight);
+        evictionScope.Dispatch();
+        if (collected)
+        {
+            return;
+        }
+
+        QueueAutomaticRefresh(flight!);
     }
 
     private void StartAutomaticRefresh(Entry entry, Func<TKey, TValue, TValue> reloadFactory)
     {
-        SyncFlight flight;
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
+        SyncFlight? flight = null;
+        bool collected = false;
         lock (_gate)
         {
             if (_disposed != 0 || !_entries.IsCurrent(entry))
@@ -110,20 +124,29 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 if (!entry.TryGetValue(out TValue? oldValue))
                 {
                     RemoveCurrentEntryLocked(entry, collected: true);
-                    return;
+                    collected = true;
                 }
-                TimeSpan oldDuration = _expiry is null
-                    ? TimeSpan.MaxValue
-                    : GetRemainingDuration(entry, now, ExpirationKind.Variable);
-                flight = CreateRefreshFlightLocked(
-                    entry,
-                    key => reloadFactory(key, oldValue!),
-                    oldDuration
-                );
+                else
+                {
+                    TimeSpan oldDuration = _expiry is null
+                        ? TimeSpan.MaxValue
+                        : GetRemainingDuration(entry, now, ExpirationKind.Variable);
+                    flight = CreateRefreshFlightLocked(
+                        entry,
+                        key => reloadFactory(key, oldValue!),
+                        oldDuration
+                    );
+                }
             }
         }
 
-        QueueAutomaticRefresh(flight);
+        evictionScope.Dispatch();
+        if (collected)
+        {
+            return;
+        }
+
+        QueueAutomaticRefresh(flight!);
     }
 
     private AsyncFlight CreateRefreshFlightLocked(
@@ -230,6 +253,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         AsyncFlight? flight = null;
         bool start = false;
         bool cold = false;
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
         lock (_gate)
         {
             ThrowIfDisposedLocked();
@@ -285,6 +309,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             }
         }
 
+        evictionScope.Dispatch();
         if (cold)
         {
             return GetAsync(key, loadFactory, reloadFactory, cancellationToken);
@@ -352,6 +377,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         SyncFlight flight = null!;
         bool start = false;
         bool cold = false;
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
         lock (_gate)
         {
             ThrowIfDisposedLocked();
@@ -416,6 +442,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             }
         }
 
+        evictionScope.Dispatch();
         if (cold)
         {
             return Task.FromResult(GetOrAdd(key, loadFactory, cancellationToken));
@@ -462,6 +489,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             return;
         }
 
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
         bool claimed = false;
         bool published = false;
         Entry? publishedEntry = null;
@@ -532,9 +560,12 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
             if (!claimed)
             {
+                evictionScope.Dispatch();
                 RetireFlight(flight, underlyingCompleted: true);
                 return;
             }
+
+            evictionScope.Dispatch();
 
             // A refresh may publish a shorter expiration than the previous
             // value.  Arm the single cache timer after publication, outside
@@ -564,6 +595,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         }
         catch (Exception exception)
         {
+            evictionScope.Dispatch();
             if (claimed)
             {
                 CompleteClaimedRefreshFailure(
@@ -591,6 +623,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         long publishedRevision = 0
     )
     {
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
         bool requestTimer = false;
         lock (_gate)
         {
@@ -693,6 +726,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             }
         }
 
+        evictionScope.Dispatch();
         if (requestTimer)
         {
             try
@@ -771,6 +805,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
     private void CompleteRefreshFailure(Flight flight, Exception exception)
     {
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
         bool claimed;
         bool removeExpired = false;
         lock (_gate)
@@ -800,6 +835,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             }
         }
 
+        evictionScope.Dispatch();
         if (!claimed)
         {
             RetireFlight(flight, underlyingCompleted: true);

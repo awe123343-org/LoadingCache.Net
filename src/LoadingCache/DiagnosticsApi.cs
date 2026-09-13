@@ -38,6 +38,10 @@ public enum RemovalCause
 /// A value-version produces at most one removal notification. Weak-reference
 /// collection notifications may have a <see langword="null"/> key and value;
 /// listeners must not assume that either object remains strongly reachable.
+/// The eviction listener receives policy-driven removals synchronously after
+/// internal locks are released and before the triggering operation returns.
+/// The removal listener is a separate bounded asynchronous diagnostic path and
+/// may drop notifications under configured pressure or shutdown.
 /// </remarks>
 [PublicAPI]
 public readonly record struct RemovalNotification<TKey, TValue>(

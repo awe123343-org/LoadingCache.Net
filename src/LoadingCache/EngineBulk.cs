@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Runtime.CompilerServices;
 using LoadingCache.Diagnostics;
+using LoadingCache.ReferenceStorage;
 
 namespace LoadingCache;
 
@@ -21,8 +22,12 @@ internal sealed partial class CacheEngine<TKey, TValue>
     private int _bulkPendingKeyLimit;
     private int _bulkInputKeyLimit;
     private int? _configuredBulkInputKeyLimit;
-    private object _bulkMutationStamp = new();
+    private Dictionary<TKey, long>? _strongBulkMutationVersions;
+    private Dictionary<object, long>? _weakBulkMutationVersions;
+    private long _bulkMutationSequence;
+    private object _bulkMutationLedgerToken = new();
     private const int FallbackBulkInputKeyLimit = 1024;
+    private const int MaximumBulkMutationKeys = FallbackBulkInputKeyLimit;
 
     private int BulkPendingKeyLimit =>
         Volatile.Read(ref _bulkPendingKeyLimit) > 0
@@ -75,16 +80,122 @@ internal sealed partial class CacheEngine<TKey, TValue>
     }
 
     /// <summary>
-    /// Records an explicit mutation which must fence prefetched values.  The
-    /// caller holds the engine gate when this method is used for a mutation
-    /// that changes the authoritative mapping.
+    /// Starts bounded mutation tracking for a new active bulk group. The
+    /// caller holds the engine gate.
     /// </summary>
-    private void RecordBulkMutationLocked()
+    private void BeginBulkMutationTrackingLocked()
     {
         if (_bulkGroupCount != 0)
         {
-            _bulkMutationStamp = new object();
+            return;
         }
+
+        _strongBulkMutationVersions?.Clear();
+        _weakBulkMutationVersions?.Clear();
+        _bulkMutationSequence = 0;
+        _bulkMutationLedgerToken = new object();
+    }
+
+    /// <summary>
+    /// Rotates the bounded mutation ledger after it can no longer represent
+    /// every distinct key. Groups attached to the previous token fail closed;
+    /// newer groups can continue recording mutations without waiting for an
+    /// old non-cooperative loader to retire.
+    /// </summary>
+    private void RotateBulkMutationLedgerLocked()
+    {
+        _strongBulkMutationVersions?.Clear();
+        _weakBulkMutationVersions?.Clear();
+        _bulkMutationSequence = 0;
+        _bulkMutationLedgerToken = new object();
+    }
+
+    /// <summary>
+    /// Sets the mutation sequence for an adversarial overflow test. The test
+    /// only uses this seam while a bulk group is active; production paths never
+    /// need to manufacture a sequence value.
+    /// </summary>
+    internal void SetBulkMutationSequenceForTesting(long sequence)
+    {
+        lock (_gate)
+        {
+            _bulkMutationSequence = sequence;
+        }
+    }
+
+    /// <summary>
+    /// Records an explicit mutation for exact-key prefetch fencing. The caller
+    /// holds the engine gate. Tracking exists only while a bulk group is active
+    /// and is bounded so mutation history cannot retain an unbounded key set.
+    /// </summary>
+    private void RecordBulkMutationLocked(TKey key)
+    {
+        if (_bulkGroupCount == 0)
+        {
+            return;
+        }
+
+        if (_bulkMutationSequence == long.MaxValue)
+        {
+            RotateBulkMutationLedgerLocked();
+            return;
+        }
+
+        long sequence = ++_bulkMutationSequence;
+        if (_weakKeys)
+        {
+            _weakBulkMutationVersions ??= new Dictionary<object, long>(
+                WeakKeyObjectComparer<TKey>.Instance
+            );
+            if (_weakBulkMutationVersions.ContainsKey(key))
+            {
+                _weakBulkMutationVersions[ReferenceKey<TKey>.CreateWeak(key)] = sequence;
+                return;
+            }
+
+            if (_weakBulkMutationVersions.Count >= MaximumBulkMutationKeys)
+            {
+                RotateBulkMutationLedgerLocked();
+                return;
+            }
+
+            _weakBulkMutationVersions.Add(ReferenceKey<TKey>.CreateWeak(key), sequence);
+            return;
+        }
+
+        _strongBulkMutationVersions ??= new Dictionary<TKey, long>(Comparer);
+        if (_strongBulkMutationVersions.ContainsKey(key))
+        {
+            _strongBulkMutationVersions[key] = sequence;
+            return;
+        }
+
+        if (_strongBulkMutationVersions.Count >= MaximumBulkMutationKeys)
+        {
+            RotateBulkMutationLedgerLocked();
+            return;
+        }
+
+        _strongBulkMutationVersions.Add(key, sequence);
+    }
+
+    private bool IsBulkPrefetchFencedLocked(BulkGroup group, TKey key)
+    {
+        if (!ReferenceEquals(group.MutationLedgerToken, _bulkMutationLedgerToken))
+        {
+            return true;
+        }
+
+        if (_weakKeys)
+        {
+            return _weakBulkMutationVersions is not null
+                && _weakBulkMutationVersions.TryGetValue(key, out long weakSequence)
+                && weakSequence > group.MutationSequence;
+        }
+
+        return _strongBulkMutationVersions is not null
+            && _strongBulkMutationVersions.TryGetValue(key, out long strongSequence)
+            && strongSequence > group.MutationSequence;
     }
 
     internal IReadOnlyDictionary<TKey, TValue> GetAll(
@@ -288,6 +399,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         Func<IReadOnlyCollection<TKey>, IReadOnlyDictionary<TKey, TValue>> bulkLoader
     )
     {
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
         var plan = new BulkPlan(Comparer);
         lock (_gate)
         {
@@ -299,10 +411,12 @@ internal sealed partial class CacheEngine<TKey, TValue>
             }
 
             EnsureBulkCapacityLocked(plan.OwnedKeys.Count);
+            BeginBulkMutationTrackingLocked();
             BulkSyncGroup group = new(
                 [.. plan.OwnedKeys],
                 _epoch,
-                _bulkMutationStamp,
+                _bulkMutationSequence,
+                _bulkMutationLedgerToken,
                 bulkLoader,
                 Comparer
             );
@@ -341,6 +455,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         > bulkLoader
     )
     {
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
         var plan = new BulkPlan(Comparer);
         lock (_gate)
         {
@@ -352,10 +467,12 @@ internal sealed partial class CacheEngine<TKey, TValue>
             }
 
             EnsureBulkCapacityLocked(plan.OwnedKeys.Count);
+            BeginBulkMutationTrackingLocked();
             BulkAsyncGroup group = new(
                 [.. plan.OwnedKeys],
                 _epoch,
-                _bulkMutationStamp,
+                _bulkMutationSequence,
+                _bulkMutationLedgerToken,
                 bulkLoader,
                 Comparer
             );
@@ -729,6 +846,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
     private bool CompleteBulkSuccessCore(BulkGroup group, TValue leaderValue)
     {
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
         bool claimed = Interlocked.CompareExchange(ref group.Owner.TerminalClaimed, 1, 0) == 0;
         if (!claimed)
         {
@@ -760,7 +878,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
                         }
                         else if (
                             !group.IsOwnedKey(publication.Key)
-                            && ReferenceEquals(group.MutationStamp, _bulkMutationStamp)
+                            && !IsBulkPrefetchFencedLocked(group, publication.Key)
                             && !_entries.TryGetValue(publication.Key, out _)
                         )
                         {
@@ -773,6 +891,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             }
 
             RequestExpirationTimer();
+            evictionScope.Dispatch();
             CompleteBulkResults(group);
             CompletePromise(
                 group.Owner,
@@ -783,6 +902,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         }
         catch (Exception exception)
         {
+            evictionScope.Dispatch();
             RecordFlightResult(group.Owner, CacheCounterKind.LoadFailures);
             FailBulkGroup(group, exception);
             CompletePromise(
@@ -1007,6 +1127,13 @@ internal sealed partial class CacheEngine<TKey, TValue>
         {
             _bulkPendingKeyCount -= group.OwnedKeys.Length;
             _bulkGroupCount--;
+            if (_bulkGroupCount == 0)
+            {
+                _strongBulkMutationVersions?.Clear();
+                _weakBulkMutationVersions?.Clear();
+                _bulkMutationSequence = 0;
+                _bulkMutationLedgerToken = new object();
+            }
         }
     }
 
@@ -1115,7 +1242,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
     private abstract class BulkGroup(
         TKey[] ownedKeys,
         long epoch,
-        object mutationStamp,
+        long mutationSequence,
+        object mutationLedgerToken,
         IEqualityComparer<TKey> comparer
     )
     {
@@ -1124,7 +1252,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
         internal IReadOnlyCollection<TKey> LoaderKeys { get; } =
             new ReadOnlyCollection<TKey>(ownedKeys);
         internal long Epoch { get; } = epoch;
-        internal object MutationStamp { get; } = mutationStamp;
+        internal long MutationSequence { get; } = mutationSequence;
+        internal object MutationLedgerToken { get; } = mutationLedgerToken;
         internal BulkPrepared? Prepared;
         internal int PromiseTerminal;
         internal int KeyReservationReleased;
@@ -1136,10 +1265,11 @@ internal sealed partial class CacheEngine<TKey, TValue>
     private sealed class BulkSyncGroup(
         TKey[] ownedKeys,
         long epoch,
-        object mutationStamp,
+        long mutationSequence,
+        object mutationLedgerToken,
         Func<IReadOnlyCollection<TKey>, IReadOnlyDictionary<TKey, TValue>> loader,
         IEqualityComparer<TKey> comparer
-    ) : BulkGroup(ownedKeys, epoch, mutationStamp, comparer)
+    ) : BulkGroup(ownedKeys, epoch, mutationSequence, mutationLedgerToken, comparer)
     {
         internal Func<
             IReadOnlyCollection<TKey>,
@@ -1150,14 +1280,15 @@ internal sealed partial class CacheEngine<TKey, TValue>
     private sealed class BulkAsyncGroup(
         TKey[] ownedKeys,
         long epoch,
-        object mutationStamp,
+        long mutationSequence,
+        object mutationLedgerToken,
         Func<
             IReadOnlyCollection<TKey>,
             CancellationToken,
             Task<IReadOnlyDictionary<TKey, TValue>>
         > loader,
         IEqualityComparer<TKey> comparer
-    ) : BulkGroup(ownedKeys, epoch, mutationStamp, comparer)
+    ) : BulkGroup(ownedKeys, epoch, mutationSequence, mutationLedgerToken, comparer)
     {
         internal Func<
             IReadOnlyCollection<TKey>,

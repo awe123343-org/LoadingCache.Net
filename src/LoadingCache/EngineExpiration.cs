@@ -37,6 +37,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
     {
         ValidateDuration(duration, nameof(duration));
         ThrowIfDisposed();
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
         lock (_gate)
         {
             ThrowIfDisposedLocked();
@@ -44,6 +45,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             RescheduleAllExpirationNodesLocked();
         }
 
+        evictionScope.Dispatch();
         RequestExpirationTimer();
     }
 
@@ -121,71 +123,81 @@ internal sealed partial class CacheEngine<TKey, TValue>
         }
         ValidateVariableDuration(duration, nameof(duration));
         ThrowIfDisposed();
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
         bool reschedule = false;
+        bool result;
         lock (_gate)
         {
             ThrowIfDisposedLocked();
             if (!_entries.TryGetValue(key, out Entry? entry) || !Volatile.Read(ref entry.IsReady))
             {
-                return false;
+                result = false;
             }
-
-            long now = _timeProvider.GetTimestamp();
-            bool expired;
-            bool collected = false;
-            lock (entry.Sync)
+            else
             {
-                bool ready = Volatile.Read(ref entry.IsReady);
-                collected =
-                    ready
-                    && (
-                        (_weakKeys && !entry.TryGetKey(out _))
-                        || (_weakValues && !entry.TryGetValue(out _))
-                    );
-                expired = !ready || (!collected && IsExpired(entry, now));
-                if (expired || collected)
+                long now = _timeProvider.GetTimestamp();
+                bool expired;
+                bool collected;
+                lock (entry.Sync)
                 {
-                    // The cleanup below runs after the entry snapshot lock so
-                    // an ongoing refresh can retain its exact flight owner.
-                }
-                else
-                {
-                    entry.VariableTimestamp = now;
-                    entry.VariableDuration = duration;
-                    entry.VariableRevision++;
-                    if (duration <= TimeSpan.Zero)
+                    bool ready = Volatile.Read(ref entry.IsReady);
+                    collected =
+                        ready
+                        && (
+                            (_weakKeys && !entry.TryGetKey(out _))
+                            || (_weakValues && !entry.TryGetValue(out _))
+                        );
+                    expired = !ready || (!collected && IsExpired(entry, now));
+                    if (expired || collected)
                     {
-                        RemoveExpiredEntryLocked(entry);
+                        // The cleanup below runs after the entry snapshot lock so
+                        // an ongoing refresh can retain its exact flight owner.
                     }
                     else
                     {
-                        reschedule = true;
+                        entry.VariableTimestamp = now;
+                        entry.VariableDuration = duration;
+                        entry.VariableRevision++;
+                        if (duration <= TimeSpan.Zero)
+                        {
+                            RemoveExpiredEntryLocked(entry);
+                        }
+                        else
+                        {
+                            reschedule = true;
+                        }
+                    }
+                }
+
+                if (collected)
+                {
+                    RemoveCurrentEntryLocked(entry, collected: true);
+                    result = false;
+                }
+                else if (expired)
+                {
+                    RemoveExpiredEntryLocked(entry);
+                    result = false;
+                }
+                else
+                {
+                    result = true;
+                    if (reschedule && _expirationWheel is not null)
+                    {
+                        ulong normalizedNow = GetExpirationNowLocked();
+                        AdvanceExpirationLocked(normalizedNow);
+                        ScheduleExpirationNodeLocked(entry, normalizedNow);
                     }
                 }
             }
-
-            if (collected)
-            {
-                RemoveCurrentEntryLocked(entry, collected: true);
-                return false;
-            }
-
-            if (expired)
-            {
-                RemoveExpiredEntryLocked(entry);
-                return false;
-            }
-
-            if (reschedule && _expirationWheel is not null)
-            {
-                ulong normalizedNow = GetExpirationNowLocked();
-                AdvanceExpirationLocked(normalizedNow);
-                ScheduleExpirationNodeLocked(entry, normalizedNow);
-            }
         }
 
-        RequestExpirationTimer();
-        return true;
+        evictionScope.Dispatch();
+        if (result)
+        {
+            RequestExpirationTimer();
+        }
+        return result;
     }
 
     private void PutWithVariableDuration(TKey key, TValue value, TimeSpan duration)
@@ -329,63 +341,74 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
     private void RequestExpirationTimer()
     {
-        ITimer? timer = _expirationTimer;
-        if (!_enableExpirationScheduler || timer is null)
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
+        try
         {
-            return;
-        }
-
-        lock (_expirationTimerGate)
-        {
-            if (_disposed != 0)
+            ITimer? timer = _expirationTimer;
+            if (!_enableExpirationScheduler || timer is null)
             {
                 return;
             }
 
-            TimeSpan delay;
-            long armRevision;
-            lock (_gate)
+            lock (_expirationTimerGate)
             {
-                if (_disposed != 0 || _expirationWheel is null)
+                if (_disposed != 0)
                 {
                     return;
                 }
 
-                AdvanceExpirationLocked(GetExpirationNowLocked());
-                delay = GetTimerDelay(_expirationWheel);
-                armRevision = ++_expirationArmRevision;
-            }
+                TimeSpan delay;
+                long armRevision;
+                lock (_gate)
+                {
+                    if (_disposed != 0 || _expirationWheel is null)
+                    {
+                        return;
+                    }
 
-            if (Volatile.Read(ref _expirationTimerRunning) != 0)
-            {
-                Volatile.Write(ref _expirationTimerRearmRequested, 1);
-                return;
-            }
+                    AdvanceExpirationLocked(GetExpirationNowLocked());
+                    delay = GetTimerDelay(_expirationWheel);
+                    armRevision = ++_expirationArmRevision;
+                }
 
-            // All timer arm submissions are serialized by _expirationTimerGate.
-            // The revision is captured while holding _gate, so a later request
-            // cannot submit an older delay after a newer request has changed the
-            // wheel.
-            if (armRevision != Volatile.Read(ref _expirationArmRevision))
-            {
-                return;
-            }
+                if (Volatile.Read(ref _expirationTimerRunning) != 0)
+                {
+                    Volatile.Write(ref _expirationTimerRearmRequested, 1);
+                    return;
+                }
 
-            InvokeHook(_testHooks?.BeforeExpirationTimerArm);
-            if (_disposed != 0)
-            {
-                return;
-            }
+                // All timer arm submissions are serialized by _expirationTimerGate.
+                // The revision is captured while holding _gate, so a later request
+                // cannot submit an older delay after a newer request has changed the
+                // wheel.
+                if (armRevision != Volatile.Read(ref _expirationArmRevision))
+                {
+                    return;
+                }
 
-            try
-            {
-                timer.Change(delay, Timeout.InfiniteTimeSpan);
+                InvokeHook(_testHooks?.BeforeExpirationTimerArm);
+                if (_disposed != 0)
+                {
+                    return;
+                }
+
+                try
+                {
+                    timer.Change(delay, Timeout.InfiniteTimeSpan);
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Disposal wins the race with a prompt re-arm.  The cache is
+                    // already fenced and no late timer callback may publish state.
+                }
             }
-            catch (ObjectDisposedException)
-            {
-                // Disposal wins the race with a prompt re-arm.  The cache is
-                // already fenced and no late timer callback may publish state.
-            }
+        }
+        finally
+        {
+            // Expiration advancement may detach entries while holding the gate;
+            // reliable eviction callbacks run only after this method has left
+            // every internal lock and before its caller observes completion.
+            evictionScope.Dispatch();
         }
     }
 

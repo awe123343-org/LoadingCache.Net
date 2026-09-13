@@ -74,70 +74,104 @@ internal sealed partial class CacheEngine<TKey, TValue>
     {
         ValidateDictionaryArguments(key, value);
         ThrowIfDisposed();
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
 
-        lock (_gate)
+        try
         {
-            ThrowIfDisposedLocked();
-            if (_entries.TryGetValue(key, out Entry? current))
+            lock (_gate)
             {
-                if (!Volatile.Read(ref current.IsReady))
+                ThrowIfDisposedLocked();
+                if (_entries.TryGetValue(key, out Entry? current))
                 {
-                    return false;
-                }
-
-                lock (current.Sync)
-                {
-                    if (
-                        !Volatile.Read(ref current.IsReady)
-                        || (
-                            current.RefreshFlight is not null
-                            && IsCurrentRefreshFlightLocked(current, current.RefreshFlight)
-                        )
-                        || !IsExpired(current, _timeProvider.GetTimestamp())
-                    )
+                    if (!Volatile.Read(ref current.IsReady))
                     {
                         return false;
                     }
-                }
 
-                RemoveCurrentEntryLocked(current, RemovalCause.Expired);
-            }
-        }
+                    bool collected;
+                    lock (current.Sync)
+                    {
+                        if (!Volatile.Read(ref current.IsReady))
+                        {
+                            return false;
+                        }
 
-        long weight = ComputeWeight(key, value);
-        TimeSpan duration = ComputeCreateDuration(key, value);
-        lock (_gate)
-        {
-            ThrowIfDisposedLocked();
-            if (_entries.TryGetValue(key, out Entry? current))
-            {
-                if (!Volatile.Read(ref current.IsReady))
-                {
-                    return false;
-                }
-
-                lock (current.Sync)
-                {
-                    if (
-                        !Volatile.Read(ref current.IsReady)
-                        || (
-                            current.RefreshFlight is not null
-                            && IsCurrentRefreshFlightLocked(current, current.RefreshFlight)
+                        collected =
+                            (_weakKeys && !current.TryGetKey(out _))
+                            || (_weakValues && !current.TryGetValue(out _));
+                        if (
+                            !collected
+                            && (
+                                (
+                                    current.RefreshFlight is not null
+                                    && IsCurrentRefreshFlightLocked(current, current.RefreshFlight)
+                                ) || !IsExpired(current, _timeProvider.GetTimestamp())
+                            )
                         )
-                        || !IsExpired(current, _timeProvider.GetTimestamp())
-                    )
+                        {
+                            return false;
+                        }
+                    }
+
+                    RemoveCurrentEntryLocked(
+                        current,
+                        collected ? RemovalCause.Collected : RemovalCause.Expired
+                    );
+                }
+            }
+
+            long weight = ComputeWeight(key, value);
+            TimeSpan duration = ComputeCreateDuration(key, value);
+            lock (_gate)
+            {
+                ThrowIfDisposedLocked();
+                if (_entries.TryGetValue(key, out Entry? current))
+                {
+                    if (!Volatile.Read(ref current.IsReady))
                     {
                         return false;
                     }
+
+                    bool collected;
+                    lock (current.Sync)
+                    {
+                        if (!Volatile.Read(ref current.IsReady))
+                        {
+                            return false;
+                        }
+
+                        collected =
+                            (_weakKeys && !current.TryGetKey(out _))
+                            || (_weakValues && !current.TryGetValue(out _));
+                        if (
+                            !collected
+                            && (
+                                (
+                                    current.RefreshFlight is not null
+                                    && IsCurrentRefreshFlightLocked(current, current.RefreshFlight)
+                                ) || !IsExpired(current, _timeProvider.GetTimestamp())
+                            )
+                        )
+                        {
+                            return false;
+                        }
+                    }
+
+                    RemoveCurrentEntryLocked(
+                        current,
+                        collected ? RemovalCause.Collected : RemovalCause.Expired
+                    );
                 }
 
-                RemoveCurrentEntryLocked(current, RemovalCause.Expired);
+                PublishDictionaryEntryLocked(key, value, weight, duration);
             }
-
-            PublishDictionaryEntryLocked(key, value, weight, duration);
+            RequestExpirationTimer();
+            return true;
         }
-        RequestExpirationTimer();
-        return true;
+        finally
+        {
+            evictionScope.Dispatch();
+        }
     }
 
     internal bool DictionaryTryUpdate(TKey key, TValue value, TValue comparisonValue)
@@ -149,141 +183,163 @@ internal sealed partial class CacheEngine<TKey, TValue>
         }
 
         ThrowIfDisposed();
-        Entry? expectedEntry;
-        long expectedRevision;
-        long expectedVariableRevision;
-        TValue expectedValue;
-        TimeSpan currentDuration;
-        lock (_gate)
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
+
+        try
         {
-            ThrowIfDisposedLocked();
-            if (
-                !_entries.TryGetValue(key, out expectedEntry)
-                || !Volatile.Read(ref expectedEntry.IsReady)
-            )
+            Entry? expectedEntry;
+            long expectedRevision;
+            long expectedVariableRevision;
+            TValue expectedValue;
+            TimeSpan currentDuration;
+            lock (_gate)
             {
-                return false;
-            }
-
-            lock (expectedEntry.Sync)
-            {
-                if (!Volatile.Read(ref expectedEntry.IsReady))
-                {
-                    return false;
-                }
-
-                if (IsExpired(expectedEntry, _timeProvider.GetTimestamp()))
-                {
-                    if (
-                        expectedEntry.RefreshFlight is null
-                        || !IsCurrentRefreshFlightLocked(expectedEntry, expectedEntry.RefreshFlight)
-                    )
-                    {
-                        RemoveCurrentEntryLocked(expectedEntry, RemovalCause.Expired);
-                    }
-
-                    return false;
-                }
-
-                expectedRevision = expectedEntry.PublicationRevision;
-                expectedVariableRevision = expectedEntry.VariableRevision;
-                if (!expectedEntry.TryGetValue(out TValue? liveValue))
-                {
-                    RemoveCurrentEntryLocked(expectedEntry, collected: true);
-                    return false;
-                }
-                expectedValue = liveValue!;
-                currentDuration = _expiry is null
-                    ? TimeSpan.MaxValue
-                    : GetRemainingDuration(
-                        expectedEntry,
-                        _timeProvider.GetTimestamp(),
-                        ExpirationKind.Variable
-                    );
-            }
-        }
-
-        if (!DictionaryValuesEqual(expectedValue, comparisonValue))
-        {
-            return false;
-        }
-
-        long weight = ComputeWeight(key, value);
-        TimeSpan duration = ComputeUpdateDuration(key, value, currentDuration);
-        lock (_gate)
-        {
-            ThrowIfDisposedLocked();
-            if (
-                !_entries.TryGetValue(key, out Entry? current)
-                || !ReferenceEquals(current, expectedEntry)
-                || current.Epoch != _epoch
-                || current.PublicationRevision != expectedRevision
-                || current.VariableRevision != expectedVariableRevision
-                || !Volatile.Read(ref current.IsReady)
-            )
-            {
-                return false;
-            }
-
-            lock (current.Sync)
-            {
+                ThrowIfDisposedLocked();
                 if (
-                    !Volatile.Read(ref current.IsReady)
-                    || IsExpired(current, _timeProvider.GetTimestamp())
+                    !_entries.TryGetValue(key, out expectedEntry)
+                    || !Volatile.Read(ref expectedEntry.IsReady)
                 )
                 {
                     return false;
                 }
+
+                lock (expectedEntry.Sync)
+                {
+                    if (!Volatile.Read(ref expectedEntry.IsReady))
+                    {
+                        return false;
+                    }
+
+                    if (IsExpired(expectedEntry, _timeProvider.GetTimestamp()))
+                    {
+                        if (
+                            expectedEntry.RefreshFlight is null
+                            || !IsCurrentRefreshFlightLocked(
+                                expectedEntry,
+                                expectedEntry.RefreshFlight
+                            )
+                        )
+                        {
+                            RemoveCurrentEntryLocked(expectedEntry, RemovalCause.Expired);
+                        }
+
+                        return false;
+                    }
+
+                    expectedRevision = expectedEntry.PublicationRevision;
+                    expectedVariableRevision = expectedEntry.VariableRevision;
+                    if (!expectedEntry.TryGetValue(out TValue? liveValue))
+                    {
+                        RemoveCurrentEntryLocked(expectedEntry, collected: true);
+                        return false;
+                    }
+                    expectedValue = liveValue!;
+                    currentDuration = _expiry is null
+                        ? TimeSpan.MaxValue
+                        : GetRemainingDuration(
+                            expectedEntry,
+                            _timeProvider.GetTimestamp(),
+                            ExpirationKind.Variable
+                        );
+                }
             }
 
-            PublishDictionaryEntryLocked(key, value, weight, duration);
-        }
+            if (!DictionaryValuesEqual(expectedValue, comparisonValue))
+            {
+                return false;
+            }
 
-        RequestExpirationTimer();
-        return true;
+            long weight = ComputeWeight(key, value);
+            TimeSpan duration = ComputeUpdateDuration(key, value, currentDuration);
+            lock (_gate)
+            {
+                ThrowIfDisposedLocked();
+                if (
+                    !_entries.TryGetValue(key, out Entry? current)
+                    || !ReferenceEquals(current, expectedEntry)
+                    || current.Epoch != _epoch
+                    || current.PublicationRevision != expectedRevision
+                    || current.VariableRevision != expectedVariableRevision
+                    || !Volatile.Read(ref current.IsReady)
+                )
+                {
+                    return false;
+                }
+
+                lock (current.Sync)
+                {
+                    if (
+                        !Volatile.Read(ref current.IsReady)
+                        || IsExpired(current, _timeProvider.GetTimestamp())
+                    )
+                    {
+                        return false;
+                    }
+                }
+
+                PublishDictionaryEntryLocked(key, value, weight, duration);
+            }
+
+            RequestExpirationTimer();
+            return true;
+        }
+        finally
+        {
+            evictionScope.Dispatch();
+        }
     }
 
     internal bool DictionaryTryRemove(TKey key, [MaybeNullWhen(false)] out TValue value)
     {
         ArgumentNullException.ThrowIfNull(key);
         ThrowIfDisposed();
-        lock (_gate)
-        {
-            ThrowIfDisposedLocked();
-            RecordBulkMutationLocked();
-            if (
-                !_entries.TryGetValue(key, out Entry? current)
-                || !Volatile.Read(ref current.IsReady)
-            )
-            {
-                value = default;
-                return false;
-            }
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
 
-            lock (current.Sync)
+        try
+        {
+            lock (_gate)
             {
+                ThrowIfDisposedLocked();
+                MarkDictionaryTransformMutation(key);
+                RecordBulkMutationLocked(key);
                 if (
-                    !Volatile.Read(ref current.IsReady)
-                    || IsExpired(current, _timeProvider.GetTimestamp())
+                    !_entries.TryGetValue(key, out Entry? current)
+                    || !Volatile.Read(ref current.IsReady)
                 )
                 {
                     value = default;
                     return false;
                 }
 
-                if (!current.TryGetValue(out value))
+                lock (current.Sync)
                 {
-                    RemoveCurrentEntryLocked(current, collected: true);
-                    value = default;
-                    return false;
+                    if (
+                        !Volatile.Read(ref current.IsReady)
+                        || IsExpired(current, _timeProvider.GetTimestamp())
+                    )
+                    {
+                        value = default;
+                        return false;
+                    }
+
+                    if (!current.TryGetValue(out value))
+                    {
+                        RemoveCurrentEntryLocked(current, collected: true);
+                        value = default;
+                        return false;
+                    }
                 }
+
+                RemoveCurrentEntryLocked(current);
             }
 
-            RemoveCurrentEntryLocked(current);
+            RequestExpirationTimer();
+            return true;
         }
-
-        RequestExpirationTimer();
-        return true;
+        finally
+        {
+            evictionScope.Dispatch();
+        }
     }
 
     internal bool DictionaryTryRemove(TKey key, TValue comparisonValue)
@@ -295,86 +351,99 @@ internal sealed partial class CacheEngine<TKey, TValue>
         }
 
         ThrowIfDisposed();
-        Entry? expectedEntry;
-        long expectedRevision;
-        TValue expectedValue;
-        lock (_gate)
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
+
+        try
         {
-            ThrowIfDisposedLocked();
-            RecordBulkMutationLocked();
-            if (
-                !_entries.TryGetValue(key, out expectedEntry)
-                || !Volatile.Read(ref expectedEntry.IsReady)
-            )
+            Entry? expectedEntry;
+            long expectedRevision;
+            TValue expectedValue;
+            lock (_gate)
             {
-                return false;
-            }
-
-            lock (expectedEntry.Sync)
-            {
-                if (!Volatile.Read(ref expectedEntry.IsReady))
-                {
-                    return false;
-                }
-
-                bool expired = IsExpired(expectedEntry, _timeProvider.GetTimestamp());
-                if (expired)
-                {
-                    if (
-                        expectedEntry.RefreshFlight is null
-                        || !IsCurrentRefreshFlightLocked(expectedEntry, expectedEntry.RefreshFlight)
-                    )
-                    {
-                        RemoveCurrentEntryLocked(expectedEntry, RemovalCause.Expired);
-                    }
-
-                    return false;
-                }
-
-                expectedRevision = expectedEntry.PublicationRevision;
-                if (!expectedEntry.TryGetValue(out TValue? liveValue))
-                {
-                    RemoveCurrentEntryLocked(expectedEntry, collected: true);
-                    return false;
-                }
-                expectedValue = liveValue!;
-            }
-        }
-
-        if (!DictionaryValuesEqual(expectedValue, comparisonValue))
-        {
-            return false;
-        }
-
-        lock (_gate)
-        {
-            ThrowIfDisposedLocked();
-            if (
-                !_entries.TryGetValue(key, out Entry? current)
-                || !ReferenceEquals(current, expectedEntry)
-                || current.Epoch != _epoch
-                || current.PublicationRevision != expectedRevision
-                || !Volatile.Read(ref current.IsReady)
-            )
-            {
-                return false;
-            }
-
-            lock (current.Sync)
-            {
+                ThrowIfDisposedLocked();
+                MarkDictionaryTransformMutation(key);
+                RecordBulkMutationLocked(key);
                 if (
-                    !Volatile.Read(ref current.IsReady)
-                    || IsExpired(current, _timeProvider.GetTimestamp())
+                    !_entries.TryGetValue(key, out expectedEntry)
+                    || !Volatile.Read(ref expectedEntry.IsReady)
                 )
                 {
                     return false;
                 }
+
+                lock (expectedEntry.Sync)
+                {
+                    if (!Volatile.Read(ref expectedEntry.IsReady))
+                    {
+                        return false;
+                    }
+
+                    bool expired = IsExpired(expectedEntry, _timeProvider.GetTimestamp());
+                    if (expired)
+                    {
+                        if (
+                            expectedEntry.RefreshFlight is null
+                            || !IsCurrentRefreshFlightLocked(
+                                expectedEntry,
+                                expectedEntry.RefreshFlight
+                            )
+                        )
+                        {
+                            RemoveCurrentEntryLocked(expectedEntry, RemovalCause.Expired);
+                        }
+
+                        return false;
+                    }
+
+                    expectedRevision = expectedEntry.PublicationRevision;
+                    if (!expectedEntry.TryGetValue(out TValue? liveValue))
+                    {
+                        RemoveCurrentEntryLocked(expectedEntry, collected: true);
+                        return false;
+                    }
+                    expectedValue = liveValue!;
+                }
             }
 
-            RemoveCurrentEntryLocked(current);
+            if (!DictionaryValuesEqual(expectedValue, comparisonValue))
+            {
+                return false;
+            }
+
+            lock (_gate)
+            {
+                ThrowIfDisposedLocked();
+                if (
+                    !_entries.TryGetValue(key, out Entry? current)
+                    || !ReferenceEquals(current, expectedEntry)
+                    || current.Epoch != _epoch
+                    || current.PublicationRevision != expectedRevision
+                    || !Volatile.Read(ref current.IsReady)
+                )
+                {
+                    return false;
+                }
+
+                lock (current.Sync)
+                {
+                    if (
+                        !Volatile.Read(ref current.IsReady)
+                        || IsExpired(current, _timeProvider.GetTimestamp())
+                    )
+                    {
+                        return false;
+                    }
+                }
+
+                RemoveCurrentEntryLocked(current);
+            }
+            RequestExpirationTimer();
+            return true;
         }
-        RequestExpirationTimer();
-        return true;
+        finally
+        {
+            evictionScope.Dispatch();
+        }
     }
 
     internal bool DictionaryContains(TKey key, TValue value)
@@ -400,7 +469,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
         TimeSpan variableDuration
     )
     {
-        RecordBulkMutationLocked();
+        MarkDictionaryTransformMutation(key);
+        RecordBulkMutationLocked(key);
         Entry entry = Entry.Ready(
             key,
             _epoch,

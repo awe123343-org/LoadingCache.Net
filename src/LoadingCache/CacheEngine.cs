@@ -405,6 +405,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             return new ValueTask<TValue>(readyValue!);
         }
 
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
         AsyncFlight? flight = null;
         bool created = false;
         bool fallbackHit = false;
@@ -416,6 +417,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         long fallbackVariableTimestamp = 0;
         long fallbackVariableRevision = 0;
         TimeSpan fallbackVariableDuration = TimeSpan.MaxValue;
+        RemovalNotification<TKey, TValue>? pendingEviction = null;
+        bool loadRejected = false;
 
         lock (_gate)
         {
@@ -467,7 +470,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                         }
                         else
                         {
-                            RemoveCurrentEntryLocked(
+                            pendingEviction = RemoveCurrentEntryLocked(
                                 current,
                                 fallbackCollected ? RemovalCause.Collected
                                     : fallbackExpired ? RemovalCause.Expired
@@ -497,16 +500,29 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 if (!CanReserveFlightsLocked(1))
                 {
                     RecordCounter(CacheCounterKind.LoadRejections);
-                    return ValueTask.FromException<TValue>(new CacheLoadRejectedException());
+                    loadRejected = true;
                 }
-
-                flight = new AsyncFlight(key, _epoch, ++_nextGeneration, factory);
-                Entry entry = Entry.Loading(key, _epoch, flight.Generation, flight, _weakKeys);
-                _entries[key] = entry;
-                _activeFlights.Add(flight);
-                _reservedLoads++;
-                created = true;
+                else
+                {
+                    flight = new AsyncFlight(key, _epoch, ++_nextGeneration, factory);
+                    Entry entry = Entry.Loading(key, _epoch, flight.Generation, flight, _weakKeys);
+                    _entries[key] = entry;
+                    _activeFlights.Add(flight);
+                    _reservedLoads++;
+                    created = true;
+                }
             }
+        }
+
+        if (pendingEviction is { } evictionNotification)
+        {
+            DispatchSynchronousEviction(evictionNotification);
+        }
+        evictionScope.Dispatch();
+
+        if (loadRejected)
+        {
+            return ValueTask.FromException<TValue>(new CacheLoadRejectedException());
         }
 
         if (fallbackHit)
@@ -620,6 +636,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             return readyValue!;
         }
 
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
         SyncFlight? flight = null;
         bool created = false;
         bool fallbackHit = false;
@@ -631,6 +648,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         long fallbackVariableTimestamp = 0;
         long fallbackVariableRevision = 0;
         TimeSpan fallbackVariableDuration = TimeSpan.MaxValue;
+        RemovalNotification<TKey, TValue>? pendingEviction = null;
+        bool loadRejected = false;
         lock (_gate)
         {
             ThrowIfDisposedLocked();
@@ -681,7 +700,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                         }
                         else
                         {
-                            RemoveCurrentEntryLocked(
+                            pendingEviction = RemoveCurrentEntryLocked(
                                 current,
                                 fallbackCollected ? RemovalCause.Collected
                                     : fallbackExpired ? RemovalCause.Expired
@@ -711,15 +730,34 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 if (!CanReserveFlightsLocked(1))
                 {
                     RecordCounter(CacheCounterKind.LoadRejections);
-                    throw new CacheLoadRejectedException();
+                    loadRejected = true;
                 }
-
-                flight = new SyncFlight(key, _epoch, ++_nextGeneration, factory);
-                _entries[key] = Entry.Loading(key, _epoch, flight.Generation, flight, _weakKeys);
-                _activeFlights.Add(flight);
-                _reservedLoads++;
-                created = true;
+                else
+                {
+                    flight = new SyncFlight(key, _epoch, ++_nextGeneration, factory);
+                    _entries[key] = Entry.Loading(
+                        key,
+                        _epoch,
+                        flight.Generation,
+                        flight,
+                        _weakKeys
+                    );
+                    _activeFlights.Add(flight);
+                    _reservedLoads++;
+                    created = true;
+                }
             }
+        }
+
+        if (pendingEviction is { } evictionNotification)
+        {
+            DispatchSynchronousEviction(evictionNotification);
+        }
+        evictionScope.Dispatch();
+
+        if (loadRejected)
+        {
+            throw new CacheLoadRejectedException();
         }
 
         if (fallbackHit)
@@ -801,10 +839,12 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 : ComputeCreateDuration(key, value)
             );
 
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
         lock (_gate)
         {
             ThrowIfDisposedLocked();
-            RecordBulkMutationLocked();
+            MarkDictionaryTransformMutation(key);
+            RecordBulkMutationLocked(key);
             Entry entry = Entry.Ready(
                 key,
                 _epoch,
@@ -830,6 +870,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             }
         }
 
+        evictionScope.Dispatch();
         RequestExpirationTimer();
     }
 
@@ -842,11 +883,13 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         ArgumentNullException.ThrowIfNull(valueTask);
         ThrowIfDisposed();
 
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
         AsyncFlight flight;
         lock (_gate)
         {
             ThrowIfDisposedLocked();
-            RecordBulkMutationLocked();
+            MarkDictionaryTransformMutation(key);
+            RecordBulkMutationLocked(key);
             if (!CanReserveFlightsLocked(1))
             {
                 RecordCounter(CacheCounterKind.LoadRejections);
@@ -862,6 +905,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             _reservedLoads++;
         }
 
+        evictionScope.Dispatch();
         try
         {
             InvokeHook(_testHooks?.AfterFlightInstalled);
@@ -883,21 +927,25 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         }
         ThrowIfDisposed();
 
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
         bool removed;
         lock (_gate)
         {
             ThrowIfDisposedLocked();
             if (!_entries.TryGetValue(key, out Entry? entry))
             {
-                RecordBulkMutationLocked();
+                MarkDictionaryTransformMutation(key);
+                RecordBulkMutationLocked(key);
                 return false;
             }
 
-            RecordBulkMutationLocked();
+            MarkDictionaryTransformMutation(key);
+            RecordBulkMutationLocked(key);
             RemoveCurrentEntryLocked(entry, RemovalCause.Explicit);
             removed = true;
         }
 
+        evictionScope.Dispatch();
         RequestExpirationTimer();
         return removed;
     }
@@ -926,7 +974,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         lock (_gate)
         {
             ThrowIfDisposedLocked();
-            RecordBulkMutationLocked();
+            MarkAllDictionaryTransformsMutated();
             _epoch = ++_nextEpoch;
             foreach (Entry entry in _entries.Snapshot())
             {
@@ -943,6 +991,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     internal void CleanUp()
     {
         ThrowIfDisposed();
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
         lock (_gate)
         {
             ThrowIfDisposedLocked();
@@ -954,6 +1003,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         }
 
         _maintenanceCoordinator.CleanUp();
+        evictionScope.Dispatch();
         RequestExpirationTimer();
     }
 
@@ -980,10 +1030,15 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             return false;
         }
 
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
+        bool moreWork;
         lock (_gate)
         {
-            return _disposed == 0 && _policy.CleanUp();
+            moreWork = _disposed == 0 && _policy.CleanUp();
         }
+
+        evictionScope.Dispatch();
+        return moreWork;
     }
 
     internal ValueTask DisposeAsync()
@@ -1414,6 +1469,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             return;
         }
 
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
         bool claimed = false;
         Entry? publishedEntry = null;
         long publishedRevision = 0;
@@ -1422,6 +1478,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             InvokeHook(_testHooks?.BeforePublish);
             if (TryCompleteBulkSuccess(flight, value))
             {
+                evictionScope.Dispatch();
                 return;
             }
 
@@ -1492,6 +1549,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
 
             if (!claimed)
             {
+                evictionScope.Dispatch();
                 RetireFlight(flight, underlyingCompleted: true);
                 return;
             }
@@ -1500,6 +1558,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         }
         catch (Exception exception)
         {
+            evictionScope.Dispatch();
             if (claimed)
             {
                 CompleteClaimedFailure(flight, exception, publishedEntry, publishedRevision);
@@ -1511,6 +1570,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             return;
         }
 
+        evictionScope.Dispatch();
         CompletePromise(
             flight,
             static (asyncFlight, value) => asyncFlight.Completion.TrySetResult(value),
@@ -1526,6 +1586,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             return;
         }
 
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
         bool claimed;
         lock (_gate)
         {
@@ -1537,6 +1598,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             }
         }
 
+        evictionScope.Dispatch();
         if (!claimed)
         {
             RetireFlight(flight, underlyingCompleted: true);
@@ -1560,6 +1622,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             return;
         }
 
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
         bool claimed;
         lock (_gate)
         {
@@ -1571,6 +1634,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             }
         }
 
+        evictionScope.Dispatch();
         if (!claimed)
         {
             RetireFlight(flight, underlyingCompleted: true);
@@ -1592,6 +1656,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         long publishedRevision = 0
     )
     {
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
         // CompleteSuccess claims terminal ownership before policy and
         // expiration maintenance.  If one of those operations fails, the
         // generic failure path cannot claim the flight a second time and
@@ -1652,6 +1717,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             }
         }
 
+        evictionScope.Dispatch();
         CompletePromise(
             flight,
             static (current, error) => current.TrySetException(error),
@@ -1839,20 +1905,24 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         RemoveCurrentEntryLocked(entry, RemovalCause.Explicit, collected: false);
     }
 
-    private void RemoveCurrentEntryLocked(Entry entry, bool collected)
+    private RemovalNotification<TKey, TValue>? RemoveCurrentEntryLocked(Entry entry, bool collected)
     {
-        RemoveCurrentEntryLocked(
+        return RemoveCurrentEntryLocked(
             entry,
             collected ? RemovalCause.Collected : RemovalCause.Explicit,
             collected
         );
     }
 
-    private void RemoveCurrentEntryLocked(Entry entry, RemovalCause cause, bool collected = false)
+    private RemovalNotification<TKey, TValue>? RemoveCurrentEntryLocked(
+        Entry entry,
+        RemovalCause cause,
+        bool collected = false
+    )
     {
         if (!_entries.IsCurrent(entry))
         {
-            return;
+            return null;
         }
 
         RetireExpirationNodeLocked(entry);
@@ -1866,10 +1936,16 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         }
         if (!Volatile.Read(ref entry.IsReady))
         {
-            return;
+            return null;
         }
 
-        QueueRemovalNotificationLocked(entry, cause, IsEvictionCause(cause), collected);
+        bool hasSynchronousEviction = QueueRemovalNotificationLocked(
+            entry,
+            cause,
+            IsEvictionCause(cause),
+            out RemovalNotification<TKey, TValue> synchronousEviction,
+            collected
+        );
 
         // Trusted ownership bookkeeping only. It may enqueue bounded work but
         // must never invoke a user disposer on this thread or throw.
@@ -1886,6 +1962,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         {
             _policy.OnRemove(entry.PolicyToken);
         }
+
+        return hasSynchronousEviction ? synchronousEviction : null;
     }
 
     private void RemoveCurrentEntryLocked(Flight flight)
@@ -1898,11 +1976,11 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             && current.Generation == flight.Generation
         )
         {
-            RemoveCurrentEntryLocked(current);
+            RemoveCurrentEntryLocked(current, RemovalCause.Explicit, collected: false);
         }
     }
 
-    private void RemoveExpiredEntryLocked(Entry entry)
+    private RemovalNotification<TKey, TValue>? RemoveExpiredEntryLocked(Entry entry)
     {
         Flight? refreshFlight = entry.RefreshFlight;
         if (
@@ -1912,18 +1990,18 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             || !IsCurrentRefreshFlightLocked(entry, refreshFlight)
         )
         {
-            RemoveCurrentEntryLocked(entry, RemovalCause.Expired);
-            return;
+            return RemoveCurrentEntryLocked(entry, RemovalCause.Expired);
         }
 
         RetireExpirationNodeLocked(entry);
         if (entry.PolicyDetached)
         {
-            return;
+            return null;
         }
 
         _policy.OnRemove(entry.PolicyToken);
         entry.PolicyDetached = true;
+        return null;
     }
 
     private bool TryReadReady(TKey key, out TValue value) =>
@@ -2000,16 +2078,19 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 return false;
             }
 
+            // A nested lookup owns its expiration notification. It must not enqueue
+            // into a surrounding loader's scope and defer delivery until that loader returns.
+            using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
+            RemovalNotification<TKey, TValue>? evictionNotification;
             lock (_gate)
             {
-                if (valueCollected)
-                {
-                    RemoveCurrentEntryLocked(entry, collected: true);
-                }
-                else
-                {
-                    RemoveExpiredEntryLocked(entry);
-                }
+                evictionNotification = valueCollected
+                    ? RemoveCurrentEntryLocked(entry, collected: true)
+                    : RemoveExpiredEntryLocked(entry);
+            }
+            if (evictionNotification is { } notification)
+            {
+                DispatchSynchronousEviction(notification);
             }
             return false;
         }
@@ -2042,6 +2123,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         {
             return;
         }
+
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
 
         // The callback is user code and is deliberately invoked without either
         // the engine gate or the entry snapshot lock.  It may re-enter the
@@ -2103,6 +2186,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 }
             }
         }
+
+        evictionScope.Dispatch();
 
         if (!changed)
         {

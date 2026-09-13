@@ -108,6 +108,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         CancellationTokenSource? cancellation;
         bool timedOut;
         bool removeExpired = false;
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
 
         lock (_gate)
         {
@@ -189,6 +190,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
             timedOut = true;
         }
+
+        evictionScope.Dispatch();
 
         timer?.Dispose();
 

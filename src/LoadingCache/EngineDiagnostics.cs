@@ -23,6 +23,9 @@ internal sealed partial class CacheEngine<TKey, TValue>
     private long _pendingDroppedSchedule;
     private long _pendingDroppedShutdown;
 
+    [ThreadStatic]
+    private static EvictionScope? _currentEvictionScope;
+
     private void InitializeDiagnostics(CacheEngineOptions<TKey, TValue> options)
     {
         if (_recordStatistics || options.EnableMetrics)
@@ -209,18 +212,32 @@ internal sealed partial class CacheEngine<TKey, TValue>
         return true;
     }
 
-    private void QueueRemovalNotificationLocked(
+    /// <summary>
+    /// Creates the exact removal notification while the entry is still owned by the engine gate.
+    /// A policy eviction is captured by the current operation-owned scope, or returned to the
+    /// caller for lock-outside dispatch when no scope is active. A removal-listener copy is
+    /// admitted independently to the bounded asynchronous dispatcher. This keeps reliable
+    /// eviction delivery separate from the intentionally lossy removal notification queue.
+    /// </summary>
+    private bool QueueRemovalNotificationLocked(
         Entry entry,
         RemovalCause cause,
         bool eviction,
+        out RemovalNotification<TKey, TValue> synchronousEviction,
         bool omitValue = false
     )
     {
+        synchronousEviction = default;
         RecordRemovalCounter(cause);
 
-        if (_listenerDispatcher is null || entry.RemovalNotified)
+        if (entry.RemovalNotified)
         {
-            return;
+            return false;
+        }
+
+        if (_listenerDispatcher is null)
+        {
+            return false;
         }
 
         entry.RemovalNotified = true;
@@ -233,7 +250,137 @@ internal sealed partial class CacheEngine<TKey, TValue>
             cause,
             entry.Weight
         );
+
+        if (eviction && _evictionListener is not null)
+        {
+            EvictionScope? scope = _currentEvictionScope;
+            if (scope is not null && ReferenceEquals(scope.Owner, this))
+            {
+                // The removal listener has an independent bounded delivery path.
+                // Reliable eviction delivery must not depend on its queue.
+                if (_removalListener is not null)
+                {
+                    QueueListenerEventLocked(new ListenerEvent(notification, IsEviction: false));
+                }
+
+                scope.Add(notification);
+                return false;
+            }
+
+            synchronousEviction = notification;
+            if (_removalListener is not null)
+            {
+                QueueListenerEventLocked(new ListenerEvent(notification, IsEviction: false));
+            }
+
+            return true;
+        }
+
         QueueListenerEventLocked(new ListenerEvent(notification, eviction));
+        return false;
+    }
+
+    /// <summary>
+    /// Invokes one captured eviction callback after the caller has released engine/entry locks.
+    /// Callback failures are observed in cache statistics and do not alter authoritative state.
+    /// </summary>
+    internal void DispatchSynchronousEviction(RemovalNotification<TKey, TValue> notification)
+    {
+        Action<RemovalNotification<TKey, TValue>>? listener = _evictionListener;
+        if (listener is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (ExecutionContext.IsFlowSuppressed())
+            {
+                listener(notification);
+            }
+            else
+            {
+                using (ExecutionContext.SuppressFlow())
+                {
+                    listener(notification);
+                }
+            }
+        }
+        catch
+        {
+            RecordCounter(CacheCounterKind.ListenerFailures);
+        }
+    }
+
+    private SynchronousEvictionScope BeginSynchronousEvictionScope()
+    {
+        if (_evictionListener is null)
+        {
+            return default;
+        }
+
+        EvictionScope? previous = _currentEvictionScope;
+        var scope = new EvictionScope(this, previous);
+        _currentEvictionScope = scope;
+        return new SynchronousEvictionScope(scope);
+    }
+
+    private sealed class EvictionScope(CacheEngine<TKey, TValue> owner, EvictionScope? parent)
+    {
+        private List<RemovalNotification<TKey, TValue>>? _notifications;
+
+        internal CacheEngine<TKey, TValue> Owner { get; } = owner;
+
+        internal EvictionScope? Parent { get; } = parent;
+
+        internal void Add(RemovalNotification<TKey, TValue> notification) =>
+            (_notifications ??= []).Add(notification);
+
+        internal void Dispatch()
+        {
+            bool restore = ReferenceEquals(_currentEvictionScope, this);
+            if (restore)
+            {
+                _currentEvictionScope = Parent;
+            }
+
+            if (_notifications is { Count: > 0 } notifications)
+            {
+                _notifications = null;
+                foreach (RemovalNotification<TKey, TValue> notification in notifications)
+                {
+                    Owner.DispatchSynchronousEviction(notification);
+                }
+            }
+
+            if (restore && ReferenceEquals(_currentEvictionScope, Parent))
+            {
+                _currentEvictionScope = this;
+            }
+        }
+    }
+
+    private readonly struct SynchronousEvictionScope(EvictionScope? scope) : IDisposable
+    {
+        internal void Dispatch() => scope?.Dispatch();
+
+        public void Dispose()
+        {
+            if (scope is null)
+            {
+                return;
+            }
+
+            if (ReferenceEquals(_currentEvictionScope, scope))
+            {
+                _currentEvictionScope = scope.Parent;
+            }
+
+            // Dispose is the final safety net for exceptional/early-return paths. The scope is
+            // detached before invoking user code, so callback re-entry cannot append to a batch
+            // that is currently being drained.
+            scope.Dispatch();
+        }
     }
 
     private void QueueReplacementNotificationLocked(

@@ -8,9 +8,11 @@ internal sealed partial class CacheEngine<TKey, TValue>
     {
         ArgumentNullException.ThrowIfNull(key);
         ThrowIfDisposed();
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
+        RemovalNotification<TKey, TValue>? pendingEviction = null;
         if (_entries.TryGetValue(key, out Entry? entry))
         {
-            bool collected = false;
+            bool collected;
             lock (entry.Sync)
             {
                 if (
@@ -31,12 +33,17 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 {
                     if (_disposed == 0)
                     {
-                        RemoveCurrentEntryLocked(entry, collected: true);
+                        pendingEviction = RemoveCurrentEntryLocked(entry, collected: true);
                     }
                 }
             }
         }
 
+        if (pendingEviction is { } evictionNotification)
+        {
+            DispatchSynchronousEviction(evictionNotification);
+        }
+        evictionScope.Dispatch();
         return (false, default!);
     }
 
@@ -78,12 +85,14 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 );
             }
 
+            using SynchronousEvictionScope evictionScope = engine.BeginSynchronousEvictionScope();
             lock (engine._gate)
             {
                 engine.ThrowIfDisposedLocked();
                 engine._policy.SetMaximum(maximum, weighted);
             }
 
+            evictionScope.Dispatch();
             engine.RequestExpirationTimer();
         }
 

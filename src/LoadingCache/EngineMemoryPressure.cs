@@ -268,6 +268,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
     internal int TrimForMemoryPressure(MemoryPressureSnapshot snapshot)
     {
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
+        int removed = 0;
         lock (_gate)
         {
             if (_disposed != 0 || _epoch != snapshot.Epoch)
@@ -281,7 +283,6 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 return 0;
             }
 
-            int removed = 0;
             for (int index = 0; index < candidates.Count; index++)
             {
                 MemoryPressureCandidate candidate = candidates[index];
@@ -310,8 +311,9 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
                 removed++;
             }
-
-            return removed;
         }
+
+        evictionScope.Dispatch();
+        return removed;
     }
 }

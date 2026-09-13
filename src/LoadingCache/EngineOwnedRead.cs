@@ -19,11 +19,14 @@ internal sealed partial class CacheEngine<TKey, TValue>
         ArgumentNullException.ThrowIfNull(tryAcquire);
         ThrowIfDisposed();
 
-        Entry readyEntry;
-        object? policyToken;
-        long variableTimestamp;
-        long variableRevision;
-        TimeSpan variableDuration;
+        Entry readyEntry = null!;
+        object? policyToken = null;
+        long variableTimestamp = 0;
+        long variableRevision = 0;
+        TimeSpan variableDuration = TimeSpan.MaxValue;
+        RemovalNotification<TKey, TValue>? pendingEviction = null;
+        bool miss = false;
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
 
         lock (_gate)
         {
@@ -40,37 +43,47 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 long now = _timeProvider.GetTimestamp();
                 if (!Volatile.Read(ref entry.IsReady) || IsExpired(entry, now))
                 {
-                    RemoveCurrentEntryLocked(entry, RemovalCause.Expired);
+                    pendingEviction = RemoveCurrentEntryLocked(entry, RemovalCause.Expired);
                     value = default;
                     RecordMiss();
-                    return false;
+                    miss = true;
                 }
-
-                if (!entry.TryGetValue(out TValue? liveValue))
+                else if (!entry.TryGetValue(out TValue? liveValue))
                 {
-                    RemoveCurrentEntryLocked(entry, collected: true);
+                    pendingEviction = RemoveCurrentEntryLocked(entry, collected: true);
                     value = default;
                     RecordMiss();
-                    return false;
+                    miss = true;
                 }
-
-                if (!tryAcquire(liveValue))
+                else if (!tryAcquire(liveValue))
                 {
                     value = default;
                     RecordMiss();
-                    return false;
+                    miss = true;
                 }
-
-                TouchWithoutLock(entry, now);
-                value = liveValue;
-                readyEntry = entry;
-                policyToken = entry.PolicyToken;
-                variableTimestamp = entry.VariableTimestamp;
-                variableRevision = entry.VariableRevision;
-                variableDuration = _expiry is null
-                    ? TimeSpan.MaxValue
-                    : GetRemainingDuration(entry, now, ExpirationKind.Variable);
+                else
+                {
+                    TouchWithoutLock(entry, now);
+                    value = liveValue!;
+                    readyEntry = entry;
+                    policyToken = entry.PolicyToken;
+                    variableTimestamp = entry.VariableTimestamp;
+                    variableRevision = entry.VariableRevision;
+                    variableDuration = _expiry is null
+                        ? TimeSpan.MaxValue
+                        : GetRemainingDuration(entry, now, ExpirationKind.Variable);
+                }
             }
+        }
+
+        if (miss)
+        {
+            if (pendingEviction is { } evictionNotification)
+            {
+                DispatchSynchronousEviction(evictionNotification);
+            }
+            evictionScope.Dispatch();
+            return false;
         }
 
         if (_expiry is not null)
@@ -91,6 +104,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
             _policy.OnAccess(policyToken);
         }
 
+        TValue acquiredValue = value!;
+        value = acquiredValue;
         return true;
     }
 }

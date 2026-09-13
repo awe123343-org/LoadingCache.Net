@@ -269,8 +269,13 @@ public sealed class CacheBuilder<TKey, TValue>
         return this;
     }
 
-    /// <summary>Registers a bounded asynchronous notification for policy-driven removals.</summary>
-    /// <remarks>Eviction and removal callbacks are diagnostic notifications, not disposal guarantees.</remarks>
+    /// <summary>Registers a reliable callback for policy-driven removals.</summary>
+    /// <remarks>
+    /// The callback runs synchronously after the cache has detached the entry and released its
+    /// internal locks, but before the operation that caused the eviction returns. Callback
+    /// exceptions are observed in cache statistics and do not corrupt cache state. This callback
+    /// is a diagnostic notification, not a value-disposal guarantee.
+    /// </remarks>
     public CacheBuilder<TKey, TValue> EvictionListener(
         Action<RemovalNotification<TKey, TValue>> listener
     )
