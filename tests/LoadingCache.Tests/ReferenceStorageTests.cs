@@ -47,6 +47,87 @@ public sealed class ReferenceStorageTests
     }
 
     [Test]
+    public void WeakKeyObjectComparerMatchesRawKeysByReferenceWithoutCallingOverrides()
+    {
+        ThrowingKey key = new();
+        ThrowingKey equalByValue = new();
+        ReferenceKey<ThrowingKey> handle = ReferenceKey<ThrowingKey>.CreateWeak(key);
+        IEqualityComparer<object> comparer = WeakKeyObjectComparer<ThrowingKey>.Instance;
+
+        comparer.Equals(handle, key).Should().BeTrue();
+        comparer.Equals(key, handle).Should().BeTrue();
+        comparer.Equals(handle, equalByValue).Should().BeFalse();
+        comparer.GetHashCode(handle).Should().Be(RuntimeHelpers.GetHashCode(key));
+        comparer.GetHashCode(key).Should().Be(RuntimeHelpers.GetHashCode(key));
+    }
+
+    [Test]
+    public void WeakKeyObjectComparerDoesNotAllocateDuringRawLookupComparison()
+    {
+        Key key = new(1);
+        ReferenceKey<Key> handle = ReferenceKey<Key>.CreateWeak(key);
+        IEqualityComparer<object> comparer = WeakKeyObjectComparer<Key>.Instance;
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        bool allMatches = true;
+        for (int index = 0; index < 10_000; index++)
+        {
+            allMatches &= comparer.Equals(handle, key);
+        }
+
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        allMatches.Should().BeTrue();
+        allocated.Should().Be(0);
+    }
+
+    [Test]
+    public void WeakKeyObjectComparerPreservesCollisionAndExactRemovalSemantics()
+    {
+        Key liveKey = new(2);
+        int collisionHash = RuntimeHelpers.GetHashCode(liveKey);
+        (ReferenceKey<Key> deadHandle, WeakReference deadKey) = CreateWeakKey(collisionHash);
+        ReferenceKey<Key> liveHandle = ReferenceKey<Key>.CreateWeakForTesting(
+            liveKey,
+            collisionHash
+        );
+        ConcurrentDictionary<object, string> map = new(WeakKeyObjectComparer<Key>.Instance)
+        {
+            [deadHandle] = "dead",
+            [liveHandle] = "live",
+        };
+
+        ForceCollection(deadKey);
+
+        map.TryGetValue(liveKey, out string? value).Should().BeTrue();
+        value.Should().Be("live");
+        ((ICollection<KeyValuePair<object, string>>)map)
+            .Remove(new KeyValuePair<object, string>(deadHandle, "dead"))
+            .Should()
+            .BeTrue();
+        map.TryGetValue(liveKey, out value).Should().BeTrue();
+        value.Should().Be("live");
+    }
+
+    [Test]
+    public void WeakKeyObjectComparerExactRemovalDoesNotRemoveReplacedEntry()
+    {
+        Key key = new(3);
+        ReferenceKey<Key> handle = ReferenceKey<Key>.CreateWeak(key);
+        ConcurrentDictionary<object, object> map = new(WeakKeyObjectComparer<Key>.Instance);
+        object oldGeneration = new();
+        object newGeneration = new();
+        map[handle] = oldGeneration;
+        map[handle] = newGeneration;
+
+        ((ICollection<KeyValuePair<object, object>>)map)
+            .Remove(new KeyValuePair<object, object>(handle, oldGeneration))
+            .Should()
+            .BeFalse();
+        map.TryGetValue(key, out object? current).Should().BeTrue();
+        current.Should().BeSameAs(newGeneration);
+    }
+
+    [Test]
     public void DeadWeakKeyCanBeRemovedByItsExactWrapper()
     {
         (ReferenceKey<Key> handle, WeakReference weakKey) = CreateWeakKey();
@@ -205,6 +286,13 @@ public sealed class ReferenceStorageTests
         {
             return Number;
         }
+    }
+
+    private sealed class ThrowingKey
+    {
+        public override bool Equals(object? obj) => throw new InvalidOperationException();
+
+        public override int GetHashCode() => throw new InvalidOperationException();
     }
 
     private sealed class Value;

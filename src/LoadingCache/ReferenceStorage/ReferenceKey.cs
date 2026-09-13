@@ -210,6 +210,57 @@ internal sealed class ReferenceKeyComparer<TKey> : IEqualityComparer<ReferenceKe
     }
 }
 
+/// <summary>
+/// Compares raw live keys with the weak wrappers stored by a weak-key entry
+/// store without invoking a key's virtual equality or hash-code implementation.
+/// </summary>
+/// <typeparam name="TKey">The reference type used as the key.</typeparam>
+internal sealed class WeakKeyObjectComparer<TKey> : IEqualityComparer<object>
+    where TKey : notnull
+{
+    internal static WeakKeyObjectComparer<TKey> Instance { get; } = new();
+
+    public new bool Equals(object? x, object? y)
+    {
+        if (ReferenceEquals(x, y))
+        {
+            return true;
+        }
+
+        if (x is null || y is null)
+        {
+            return false;
+        }
+
+        if (GetHashCode(x) != GetHashCode(y))
+        {
+            return false;
+        }
+
+        if (x is ReferenceKey<TKey> xReference)
+        {
+            return y is ReferenceKey<TKey> yReference
+                ? xReference.IsSameIdentity(yReference)
+                : y is TKey yKey && xReference.Matches(yKey);
+        }
+
+        if (y is ReferenceKey<TKey> yReferenceOnly)
+        {
+            return x is TKey xKey && yReferenceOnly.Matches(xKey);
+        }
+
+        return ReferenceEquals(x, y);
+    }
+
+    public int GetHashCode(object obj)
+    {
+        ArgumentNullException.ThrowIfNull(obj);
+        return obj is ReferenceKey<TKey> reference
+            ? reference.IdentityHash
+            : RuntimeHelpers.GetHashCode(obj);
+    }
+}
+
 /// <summary>Reference-identity comparer for public key snapshots in weak-key mode.</summary>
 internal sealed class ReferenceIdentityComparer<TKey> : IEqualityComparer<TKey>
     where TKey : notnull

@@ -17,15 +17,20 @@ internal sealed partial class CacheEngine<TKey, TValue>
     {
         private readonly bool _weakKeys;
         private readonly ConcurrentDictionary<TKey, Entry>? _strong;
-        private readonly ConcurrentDictionary<ReferenceKey<TKey>, Entry>? _weak;
+
+        // The weak-key dictionary is object-keyed so live callers can probe it
+        // with the raw key reference.  Creating a ReferenceKey probe for every
+        // hit allocates; the comparer understands both raw keys and the weak
+        // wrappers stored in this dictionary.
+        private readonly ConcurrentDictionary<object, Entry>? _weak;
 
         internal EntryStore(bool weakKeys, IEqualityComparer<TKey> comparer)
         {
             _weakKeys = weakKeys;
             if (weakKeys)
             {
-                _weak = new ConcurrentDictionary<ReferenceKey<TKey>, Entry>(
-                    ReferenceKeyComparer<TKey>.Instance
+                _weak = new ConcurrentDictionary<object, Entry>(
+                    WeakKeyObjectComparer<TKey>.Instance
                 );
             }
             else
@@ -49,8 +54,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 return _strong!.TryGetValue(key, out entry);
             }
 
-            ReferenceKey<TKey> probe = ReferenceKey<TKey>.CreateProbe(key);
-            return _weak!.TryGetValue(probe, out entry);
+            return _weak!.TryGetValue(key, out entry);
         }
 
         internal Entry this[TKey key]
@@ -81,8 +85,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 ReferenceKey<TKey>? key = entry.WeakKey;
                 if (key is not null)
                 {
-                    ((ICollection<KeyValuePair<ReferenceKey<TKey>, Entry>>)_weak!).Remove(
-                        new KeyValuePair<ReferenceKey<TKey>, Entry>(key, entry)
+                    ((ICollection<KeyValuePair<object, Entry>>)_weak!).Remove(
+                        new KeyValuePair<object, Entry>(key, entry)
                     );
                 }
 

@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using FluentAssertions;
+using LoadingCache.Maintenance;
 using Microsoft.Extensions.Time.Testing;
 using NUnit.Framework;
 
@@ -26,6 +27,80 @@ public sealed class WeakCacheTests
         firstValue.Should().NotBeNull();
         cache.TryGet(equalByValue, out _).Should().BeFalse();
         cache.EstimatedCount.Should().Be(1);
+    }
+
+    [Test]
+    public void WeakKeyResidentHitDoesNotAllocateLookupProbe()
+    {
+        // Keep policy transport out of this measurement: its scheduler and
+        // read-buffer work are separate from the authoritative key lookup.
+        // The rejecting scheduler also prevents an accidental async work item.
+        using CacheEngine<Key, Value> engine = new(
+            new CacheEngineOptions<Key, Value>
+            {
+                MaximumSize = 8,
+                MaxConcurrentLoads = 1,
+                WeakKeys = true,
+                Policy = new NoopCacheEnginePolicy(),
+                MaintenanceScheduler = new RejectingMaintenanceScheduler(),
+            }
+        );
+        Key key = new(7);
+        engine.Put(key, new Value());
+        engine.CleanUp();
+
+        for (int index = 0; index < 10_000; index++)
+        {
+            engine.TryGet(key, out _).Should().BeTrue();
+        }
+        engine.CleanUp();
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        bool allHits = true;
+        for (int index = 0; index < 10_000; index++)
+        {
+            allHits &= engine.TryGet(key, out _);
+        }
+
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        allHits.Should().BeTrue();
+        allocated.Should().Be(0);
+    }
+
+    [Test]
+    public void WeakKeyLookupDoesNotInvokeKeyEqualityOrHashCodeOverrides()
+    {
+        using ICache<ThrowingKey, Value> cache = CacheBuilder
+            .Create<ThrowingKey, Value>()
+            .MaximumSize(8)
+            .MaxConcurrentLoads(1)
+            .WeakKeys()
+            .Build();
+        ThrowingKey key = new();
+        Value value = new();
+
+        cache.Put(key, value);
+
+        cache.TryGet(key, out Value? current).Should().BeTrue();
+        current.Should().BeSameAs(value);
+    }
+
+    [Test]
+    public void ReplacedWeakKeyEntryCanBeCollectedAfterLookupAndCleanup()
+    {
+        using ICache<Key, Value> cache = CacheBuilder
+            .Create<Key, Value>()
+            .MaximumSize(8)
+            .MaxConcurrentLoads(1)
+            .WeakKeys()
+            .Build();
+        WeakReference key = PopulateReplacedWeakKey(cache);
+
+        ForceCollection(key);
+
+        key.IsAlive.Should().BeFalse();
+        cache.CleanUp();
+        cache.EstimatedCount.Should().Be(0);
     }
 
     [Test]
@@ -326,6 +401,20 @@ public sealed class WeakCacheTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference PopulateReplacedWeakKey(ICache<Key, Value> cache)
+    {
+        Key key = new(7);
+        cache.Put(key, new Value());
+        cache.Put(key, new Value());
+        cache.TryGet(key, out Value? value).Should().BeTrue();
+        value.Should().NotBeNull();
+        WeakReference reference = new(key);
+        GC.KeepAlive(key);
+        GC.KeepAlive(value);
+        return reference;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private static WeakReference PopulateWeakValue(ICache<Key, Value> cache, Key key)
     {
         Value value = new();
@@ -441,6 +530,45 @@ public sealed class WeakCacheTests
         public override bool Equals(object? obj) => obj is Key other && other._number == _number;
 
         public override int GetHashCode() => _number;
+    }
+
+    private sealed class ThrowingKey
+    {
+        public override bool Equals(object? obj) => throw new InvalidOperationException();
+
+        public override int GetHashCode() => throw new InvalidOperationException();
+    }
+
+    private sealed class RejectingMaintenanceScheduler : IMaintenanceScheduler
+    {
+        public bool TrySchedule(Action callback) => false;
+    }
+
+    private sealed class NoopCacheEnginePolicy : ICacheEnginePolicy
+    {
+        public long Maximum => long.MaxValue;
+
+        public long WeightedSize => 0;
+
+        public int ResidentCount => 0;
+
+        public void SetMaximum(long maximum, bool weighted) { }
+
+        public IReadOnlyList<object> Snapshot(bool hottest, int limit) => Array.Empty<object>();
+
+        public void OnAccess(object? entryToken) { }
+
+        public void OnPublish(object? entryToken, long weight) { }
+
+        public void OnRemove(object? entryToken) { }
+
+        public void Clear() { }
+
+        public bool CleanUp() => false;
+
+        public ReadBufferStatistics GetReadBufferStatistics() => default;
+
+        public void Dispose() { }
     }
 
     private sealed class Value
