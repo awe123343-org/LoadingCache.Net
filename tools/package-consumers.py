@@ -79,7 +79,7 @@ def main() -> int:
             for key, value in {
                 "OutputType": "Exe", "TargetFramework": "", "TargetFrameworks": "net8.0;net10.0",
                 "ManagePackageVersionsCentrally": "false", "IsPackable": "false",
-                "GenerateDocumentationFile": "false",
+                "GenerateDocumentationFile": "true",
             }.items():
                 ET.SubElement(properties, key).text = value
             items = ET.SubElement(project, "ItemGroup")
