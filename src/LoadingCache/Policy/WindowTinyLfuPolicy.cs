@@ -138,6 +138,16 @@ internal sealed class WindowTinyLfuPolicy<T>
 
     internal IReadOnlyList<PolicyNode<T>> Add(PolicyNode<T> node)
     {
+        return AddCore(node, deferEviction: false);
+    }
+
+    internal IReadOnlyList<PolicyNode<T>> AddDeferred(PolicyNode<T> node)
+    {
+        return AddCore(node, deferEviction: true);
+    }
+
+    private IReadOnlyList<PolicyNode<T>> AddCore(PolicyNode<T> node, bool deferEviction)
+    {
         ArgumentNullException.ThrowIfNull(node);
         node.Claim(_ownerId);
         RecordMiss(node.Hash);
@@ -161,6 +171,11 @@ internal sealed class WindowTinyLfuPolicy<T>
 
         _window.AddLast(node);
         WeightedSize = checked(WeightedSize + node.Weight);
+        if (deferEviction)
+        {
+            return evicted is null ? Array.Empty<PolicyNode<T>>() : evicted;
+        }
+
         IReadOnlyList<PolicyNode<T>> drained = DrainEvictions();
         return CombineEvictions(evicted, drained);
     }
@@ -219,6 +234,20 @@ internal sealed class WindowTinyLfuPolicy<T>
 
     internal IReadOnlyList<PolicyNode<T>> UpdateWeight(PolicyNode<T> node, long weight)
     {
+        return UpdateWeightCore(node, weight, deferEviction: false);
+    }
+
+    internal IReadOnlyList<PolicyNode<T>> UpdateWeightDeferred(PolicyNode<T> node, long weight)
+    {
+        return UpdateWeightCore(node, weight, deferEviction: true);
+    }
+
+    private IReadOnlyList<PolicyNode<T>> UpdateWeightCore(
+        PolicyNode<T> node,
+        long weight,
+        bool deferEviction
+    )
+    {
         ArgumentNullException.ThrowIfNull(node);
         ArgumentOutOfRangeException.ThrowIfNegative(weight);
         if (!IsOwnedLiveNode(node))
@@ -257,8 +286,18 @@ internal sealed class WindowTinyLfuPolicy<T>
 
         AttachToQueue(node, queue);
         WeightedSize = checked(WeightedSize + weight);
+        if (deferEviction)
+        {
+            return evicted is null ? Array.Empty<PolicyNode<T>>() : evicted;
+        }
+
         IReadOnlyList<PolicyNode<T>> drained = DrainEvictions();
         return CombineEvictions(evicted, drained);
+    }
+
+    internal IReadOnlyList<PolicyNode<T>> EvictEntries(int budget = int.MaxValue)
+    {
+        return DrainEvictions(budget);
     }
 
     internal IReadOnlyList<PolicyNode<T>> SetMaximum(long maximum)

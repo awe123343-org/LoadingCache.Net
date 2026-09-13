@@ -24,7 +24,14 @@ internal interface ICacheEnginePolicy
 
     void OnPublish(object? entryToken, long weight);
 
+    // The engine owns the same coordination monitor as the built-in policy. Custom policies use
+    // the default forwarding method and retain their existing OnPublish contract.
+    void OnPublishLocked(object? entryToken, long weight) => OnPublish(entryToken, weight);
+
     void OnRemove(object? entryToken);
+
+    // See OnPublishLocked. The suffix documents caller-owned monitor ownership.
+    void OnRemoveLocked(object? entryToken) => OnRemove(entryToken);
 
     // Only the mutation boundary outside engine locks requests a worker. Test
     // policies without buffered writes retain their synchronous contract.

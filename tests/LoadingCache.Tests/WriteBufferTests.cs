@@ -288,6 +288,274 @@ public sealed class WriteBufferTests
     }
 
     [Test]
+    public void DeferredBatchPreservesLongWeightOverflowAccounting()
+    {
+        List<object> evicted = [];
+        using WindowTinyLfuEnginePolicy policy = new(
+            maximum: long.MaxValue,
+            maximumResidentCount: 2,
+            evicted.Add,
+            requestMaintenance: static () => false,
+            beforeMaintenance: null,
+            beforeMaintenanceSignalClear: null,
+            readStripeCount: 1,
+            readStripeCapacity: 4,
+            writeBufferCapacity: 4
+        );
+        object residentEntry = new();
+        object rejectedEntry = new();
+        WindowTinyLfuEnginePolicy.EngineEntryToken resident = new(residentEntry, 1);
+        WindowTinyLfuEnginePolicy.EngineEntryToken rejected = new(rejectedEntry, 2);
+
+        policy.OnPublish(resident, long.MaxValue);
+        policy.OnPublish(rejected, 1);
+        policy.FlushWrites();
+
+        resident.Node.Should().NotBeNull();
+        rejected.Node.Should().BeNull();
+        policy.ResidentCount.Should().Be(1);
+        policy.WeightedSize.Should().Be(long.MaxValue);
+        evicted.Should().ContainSingle().Which.Should().BeSameAs(rejectedEntry);
+        policy.AssertInvariants();
+    }
+
+    [Test]
+    public void DeferredBatchKeepsTinyCountBoundForZeroWeightEntries()
+    {
+        using WindowTinyLfuEnginePolicy policy = new(
+            maximum: 2,
+            maximumResidentCount: 1,
+            static _ => { },
+            requestMaintenance: static () => false,
+            beforeMaintenance: null,
+            beforeMaintenanceSignalClear: null,
+            readStripeCount: 1,
+            readStripeCapacity: 4,
+            writeBufferCapacity: 4
+        );
+        WindowTinyLfuEnginePolicy.EngineEntryToken first = new(new object(), 1);
+        WindowTinyLfuEnginePolicy.EngineEntryToken second = new(new object(), 2);
+        WindowTinyLfuEnginePolicy.EngineEntryToken third = new(new object(), 3);
+
+        policy.OnPublish(first, 0);
+        policy.OnPublish(second, 0);
+        policy.OnPublish(third, 0);
+        policy.FlushWrites();
+
+        policy.ResidentCount.Should().Be(1);
+        policy.WeightedSize.Should().Be(0);
+        policy.Snapshot(hottest: false, limit: 4).Should().ContainSingle();
+        policy.AssertInvariants();
+    }
+
+    [Test]
+    public void OversizedPublicationIsRemovedAtSynchronousFlushBoundary()
+    {
+        List<object> evicted = [];
+        using WindowTinyLfuEnginePolicy policy = new(
+            maximum: 2,
+            maximumResidentCount: 2,
+            evicted.Add,
+            requestMaintenance: static () => false,
+            beforeMaintenance: null,
+            beforeMaintenanceSignalClear: null,
+            readStripeCount: 1,
+            readStripeCapacity: 4,
+            writeBufferCapacity: 4
+        );
+        object entry = new();
+        WindowTinyLfuEnginePolicy.EngineEntryToken token = new(entry, 1);
+
+        policy.OnPublish(token, 3);
+        policy.FlushWrites();
+
+        token.Node.Should().BeNull();
+        policy.ResidentCount.Should().Be(0);
+        policy.WeightedSize.Should().Be(0);
+        evicted.Should().ContainSingle().Which.Should().BeSameAs(entry);
+        policy.AssertInvariants();
+    }
+
+    [Test]
+    public void NegativePublicationWeightIsRejectedBeforeQueueAdmission()
+    {
+        using WindowTinyLfuEnginePolicy policy = new(
+            maximum: 2,
+            maximumResidentCount: 2,
+            static _ => { },
+            requestMaintenance: static () => false,
+            beforeMaintenance: null,
+            beforeMaintenanceSignalClear: null,
+            readStripeCount: 1,
+            readStripeCapacity: 4,
+            writeBufferCapacity: 4
+        );
+        WindowTinyLfuEnginePolicy.EngineEntryToken token = new(new object(), 1);
+
+        policy.Invoking(p => p.OnPublish(token, -1)).Should().Throw<ArgumentOutOfRangeException>();
+
+        token.PendingPolicyWrites.Should().Be(0);
+        policy.HasPendingWrites.Should().BeFalse();
+        policy.GetWriteBufferStatistics().Enqueued.Should().Be(0);
+        policy.AssertInvariants();
+    }
+
+    [Test]
+    public void ResizeCommitsMaximumBeforeCallbackFailureAndClearUsesIt()
+    {
+        int callbackCount = 0;
+        using WindowTinyLfuEnginePolicy policy = new(
+            maximum: 4,
+            maximumResidentCount: 4,
+            _ =>
+            {
+                if (callbackCount++ == 0)
+                {
+                    throw new InvalidOperationException("injected resize callback failure");
+                }
+            },
+            requestMaintenance: static () => false,
+            beforeMaintenance: null,
+            beforeMaintenanceSignalClear: null,
+            readStripeCount: 1,
+            readStripeCapacity: 4,
+            writeBufferCapacity: 4
+        );
+        WindowTinyLfuEnginePolicy.EngineEntryToken first = new(new object(), 1);
+        WindowTinyLfuEnginePolicy.EngineEntryToken second = new(new object(), 2);
+        WindowTinyLfuEnginePolicy.EngineEntryToken third = new(new object(), 3);
+
+        policy.OnPublish(first, 1);
+        policy.OnPublish(second, 1);
+        policy.OnPublish(third, 1);
+        policy.FlushWrites();
+
+        policy
+            .Invoking(static p => p.SetMaximum(1, weighted: true))
+            .Should()
+            .Throw<InvalidOperationException>();
+        policy.Maximum.Should().Be(1);
+
+        policy.Clear();
+
+        policy.Maximum.Should().Be(1);
+        policy.ResidentCount.Should().Be(0);
+        policy.AssertInvariants();
+    }
+
+    [Test]
+    public void NonWeightedResizeCommitsBothLimitsBeforeCallbackFailureAndClearUsesThem()
+    {
+        int callbackCount = 0;
+        using WindowTinyLfuEnginePolicy policy = new(
+            maximum: 4,
+            maximumResidentCount: 4,
+            _ =>
+            {
+                if (callbackCount++ == 0)
+                {
+                    throw new InvalidOperationException("injected resize callback failure");
+                }
+            },
+            requestMaintenance: static () => false,
+            beforeMaintenance: null,
+            beforeMaintenanceSignalClear: null,
+            readStripeCount: 1,
+            readStripeCapacity: 4,
+            writeBufferCapacity: 4
+        );
+        WindowTinyLfuEnginePolicy.EngineEntryToken first = new(new object(), 1);
+        WindowTinyLfuEnginePolicy.EngineEntryToken second = new(new object(), 2);
+
+        policy.OnPublish(first, 2);
+        policy.OnPublish(second, 2);
+        policy.FlushWrites();
+
+        policy
+            .Invoking(static p => p.SetMaximum(1, weighted: false))
+            .Should()
+            .Throw<InvalidOperationException>();
+        policy.Maximum.Should().Be(1);
+
+        policy.Clear();
+
+        policy.Maximum.Should().Be(1);
+        policy.ResidentCount.Should().Be(0);
+        policy.AssertInvariants();
+    }
+
+    [Test]
+    public void EvictionCallbackFailureStillCleansEveryRetiredNode()
+    {
+        List<object> evicted = [];
+        int callbackCount = 0;
+        using WindowTinyLfuEnginePolicy policy = new(
+            maximum: 1,
+            maximumResidentCount: 3,
+            entry =>
+            {
+                evicted.Add(entry);
+                if (callbackCount++ == 0)
+                {
+                    throw new InvalidOperationException("injected eviction callback failure");
+                }
+            },
+            requestMaintenance: static () => false,
+            beforeMaintenance: null,
+            beforeMaintenanceSignalClear: null,
+            readStripeCount: 1,
+            readStripeCapacity: 4,
+            writeBufferCapacity: 4
+        );
+        WindowTinyLfuEnginePolicy.EngineEntryToken first = new(new object(), 1);
+        WindowTinyLfuEnginePolicy.EngineEntryToken second = new(new object(), 2);
+        WindowTinyLfuEnginePolicy.EngineEntryToken third = new(new object(), 3);
+
+        policy.OnPublish(first, 1);
+        policy.OnPublish(second, 1);
+        policy.OnPublish(third, 1);
+
+        policy.Invoking(static p => p.FlushWrites()).Should().Throw<InvalidOperationException>();
+        evicted.Should().HaveCount(2);
+        policy.AssertInvariants();
+
+        policy.FlushWrites();
+        policy.AssertInvariants();
+    }
+
+    [Test]
+    public void FullFallbackInstallsSequenceBeforeApplyingOlderEvent()
+    {
+        List<object> evicted = [];
+        using WindowTinyLfuEnginePolicy policy = new(
+            maximum: 1,
+            maximumResidentCount: 1,
+            evicted.Add,
+            requestMaintenance: static () => false,
+            beforeMaintenance: null,
+            beforeMaintenanceSignalClear: null,
+            readStripeCount: 1,
+            readStripeCapacity: 4,
+            writeBufferCapacity: 1
+        );
+        object residentEntry = new();
+        WindowTinyLfuEnginePolicy.EngineEntryToken resident = new(residentEntry, 1);
+        WindowTinyLfuEnginePolicy.EngineEntryToken invalidated = new(new object(), 2);
+
+        policy.OnPublish(resident, 1);
+        policy.FlushWrites();
+        policy.OnPublish(invalidated, 1);
+        policy.OnRemove(invalidated);
+        policy.FlushWrites();
+
+        resident.Node.Should().NotBeNull();
+        invalidated.Node.Should().BeNull();
+        policy.ResidentCount.Should().Be(1);
+        evicted.Should().BeEmpty();
+        policy.AssertInvariants();
+    }
+
+    [Test]
     public void FlushWritesProcessesOnlyTheCapturedBatch()
     {
         using WindowTinyLfuEnginePolicy policy = new(

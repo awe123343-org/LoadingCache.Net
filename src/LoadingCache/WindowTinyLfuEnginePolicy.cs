@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using LoadingCache.Maintenance;
 using LoadingCache.Policy;
@@ -14,6 +16,9 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
     private int? _maximumResidentCount;
     private readonly uint _policySeed = CreatePolicySeed();
     private WindowTinyLfuPolicy<object> _policy;
+
+    // Engine-owned bookkeeping under _policyGate; this is not a user callback and must remain
+    // non-reentrant.
     private readonly Action<object> _evicted;
     private readonly Func<bool> _requestMaintenance;
     private readonly Action? _beforeMaintenance;
@@ -27,6 +32,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
     private long _nextWriteSequence;
     private int _maintenanceSignal;
     private int _writeMaintenanceSignal;
+    private bool _evictionPending;
 
     internal WindowTinyLfuEnginePolicy(
         long maximum,
@@ -72,18 +78,29 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
 
     public void SetMaximum(long maximum, bool weighted)
     {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximum);
+        if (!weighted && maximum > int.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(maximum),
+                "A size maximum must fit in an Int32."
+            );
+        }
+
         lock (_policyGate)
         {
             FlushWritesLocked();
             DrainAccessesLocked(MaximumReadDrainPerPass);
+            IReadOnlyList<PolicyNode<object>> countChanged = [];
             if (!weighted)
             {
                 _maximumResidentCount = checked((int)maximum);
-                Process(_policy.SetMaximumCount(_maximumResidentCount));
+                countChanged = _policy.SetMaximumCount(_maximumResidentCount);
             }
 
-            Process(_policy.SetMaximum(maximum));
+            IReadOnlyList<PolicyNode<object>> changed = _policy.SetMaximum(maximum);
             Maximum = maximum;
+            ProcessBoth(countChanged, changed);
         }
     }
 
@@ -158,15 +175,25 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
 
         lock (_policyGate)
         {
-            EnqueueWriteLocked(
-                new PolicyWriteEvent(
-                    PolicyWriteKind.Publish,
-                    token,
-                    weight,
-                    NextWriteSequenceLocked()
-                )
-            );
+            OnPublishTokenLocked(token, weight);
         }
+    }
+
+    public void OnPublishLocked(object? entryToken, long weight)
+    {
+        Debug.Assert(Monitor.IsEntered(_policyGate));
+        if (entryToken is EngineEntryToken token)
+        {
+            OnPublishTokenLocked(token, weight);
+        }
+    }
+
+    private void OnPublishTokenLocked(EngineEntryToken token, long weight)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(weight);
+        EnqueueWriteLocked(
+            new PolicyWriteEvent(PolicyWriteKind.Publish, token, weight, NextWriteSequenceLocked())
+        );
     }
 
     public void OnRemove(object? entryToken)
@@ -178,20 +205,34 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
 
         lock (_policyGate)
         {
-            if (token.Node is null && token.PendingPolicyWrites == 0)
-            {
-                return;
-            }
-
-            EnqueueWriteLocked(
-                new PolicyWriteEvent(
-                    PolicyWriteKind.Remove,
-                    token,
-                    weight: 0,
-                    NextWriteSequenceLocked()
-                )
-            );
+            OnRemoveTokenLocked(token);
         }
+    }
+
+    public void OnRemoveLocked(object? entryToken)
+    {
+        Debug.Assert(Monitor.IsEntered(_policyGate));
+        if (entryToken is EngineEntryToken token)
+        {
+            OnRemoveTokenLocked(token);
+        }
+    }
+
+    private void OnRemoveTokenLocked(EngineEntryToken token)
+    {
+        if (token.Node is null && token.PendingPolicyWrites == 0)
+        {
+            return;
+        }
+
+        EnqueueWriteLocked(
+            new PolicyWriteEvent(
+                PolicyWriteKind.Remove,
+                token,
+                weight: 0,
+                NextWriteSequenceLocked()
+            )
+        );
     }
 
     public void Clear()
@@ -216,6 +257,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
 
             _nodes.Clear();
             _policy = CreatePolicy();
+            _evictionPending = false;
             UpdateWriteMaintenanceSignalLocked();
             UpdateMaintenanceSignalLocked();
         }
@@ -226,7 +268,8 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
         lock (_policyGate)
         {
             _beforeMaintenance?.Invoke();
-            bool writesRemain = DrainWritesLocked(MaximumWriteDrainPerPass);
+            DrainWritesLocked(MaximumWriteDrainPerPass);
+            bool writesRemain = _pendingWrites.Queued != 0;
             DrainAccessesLocked(MaximumReadDrainPerPass);
             Process(_policy.Maintain());
             _beforeMaintenanceSignalClear?.Invoke();
@@ -263,6 +306,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
     /// </summary>
     public bool TryRequestWriteMaintenance() =>
         _pendingWrites.Queued != 0
+        && Volatile.Read(ref _writeMaintenanceSignal) == 0
         && Interlocked.CompareExchange(ref _writeMaintenanceSignal, 1, 0) == 0;
 
     public WriteBufferStatistics GetWriteBufferStatistics() => _pendingWrites.GetStatistics();
@@ -366,6 +410,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
             _nodes.Clear();
             Volatile.Write(ref _maintenanceSignal, 0);
             Volatile.Write(ref _writeMaintenanceSignal, 0);
+            _evictionPending = false;
         }
 
         _pendingAccesses.Dispose();
@@ -375,15 +420,15 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
     {
         while (true)
         {
-            if (_pendingWrites.TryEnqueue(write))
+            if (_pendingWrites.TryEnqueueLocked(write))
             {
                 write.Token.PendingPolicyWrites = checked(write.Token.PendingPolicyWrites + 1);
                 return;
             }
 
-            // A write may never be dropped.  Removing one older event creates a slot, and
+            // A write may never be dropped. Removing a bounded older batch creates a slot, and
             // applying it before retrying preserves the FIFO order of events already accepted.
-            if (!TryDequeueWriteLocked(out PolicyWriteEvent older))
+            if (DrainWritesLocked(MaximumWriteDrainPerPass) == 0)
             {
                 if (_pendingWrites.IsDisposed)
                 {
@@ -394,8 +439,6 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
                     "The reliable policy write buffer rejected an event without reporting a queued event."
                 );
             }
-
-            ApplyWriteLocked(older);
         }
     }
 
@@ -432,16 +475,32 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
         return ++_nextWriteSequence;
     }
 
-    private bool DrainWritesLocked(int budget)
+    private int DrainWritesLocked(int budget)
     {
-        int drained = 0;
-        while (drained < budget && TryDequeueWriteLocked(out PolicyWriteEvent write))
+        int batchSize = Math.Min(_pendingWrites.Queued, budget);
+        if (batchSize == 0)
         {
-            ApplyWriteLocked(write);
-            drained++;
+            if (_evictionPending)
+            {
+                Process(_policy.EvictEntries());
+                _evictionPending = false;
+            }
+
+            return 0;
         }
 
-        return _pendingWrites.Queued != 0;
+        _evictionPending = true;
+        int drained = 0;
+        while (drained < batchSize && TryDequeueWriteLocked(out PolicyWriteEvent write))
+        {
+            drained++;
+            ApplyWriteLocked(write);
+        }
+
+        Process(_policy.EvictEntries());
+        _evictionPending = false;
+
+        return drained;
     }
 
     private void FlushWritesLocked()
@@ -452,7 +511,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
         // bounded still protects the boundary if a newer event is concurrently
         // pending for the same token or a custom policy callback re-enters.
         int budget = _pendingWrites.Queued;
-        if (budget != 0)
+        if (budget != 0 || _evictionPending)
         {
             DrainWritesLocked(budget);
         }
@@ -460,7 +519,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
 
     private bool TryDequeueWriteLocked(out PolicyWriteEvent write)
     {
-        if (_pendingWrites.TryDequeue(out write))
+        if (_pendingWrites.TryDequeueLocked(out write))
         {
             if (write.Token.PendingPolicyWrites <= 0)
             {
@@ -503,7 +562,14 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
             }
 
             node.AppliedPolicyWriteSequence = write.Sequence;
-            Process(_policy.UpdateWeight(node, write.Weight));
+            IReadOnlyList<PolicyNode<object>> evicted = _policy.UpdateWeightDeferred(
+                node,
+                write.Weight
+            );
+            if (evicted.Count != 0)
+            {
+                Process(evicted);
+            }
             return;
         }
 
@@ -511,7 +577,11 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
         node.AppliedPolicyWriteSequence = write.Sequence;
         token.Node = node;
         _nodes.Add(node);
-        Process(_policy.Add(node));
+        IReadOnlyList<PolicyNode<object>> added = _policy.AddDeferred(node);
+        if (added.Count != 0)
+        {
+            Process(added);
+        }
     }
 
     private void ApplyRemoveLocked(EngineEntryToken token, long sequence)
@@ -598,8 +668,10 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
 
     private void Process(IReadOnlyList<PolicyNode<object>> changed)
     {
-        foreach (PolicyNode<object> node in changed)
+        Exception? firstFailure = null;
+        for (int index = 0; index < changed.Count; index++)
         {
+            PolicyNode<object> node = changed[index];
             if (node.Value is not EngineEntryToken token)
             {
                 continue;
@@ -613,8 +685,50 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
             _nodes.Remove(node);
             if (node.AppliedPolicyWriteSequence >= token.LastPolicyWriteSequence)
             {
-                _evicted(token.Entry);
+                try
+                {
+                    _evicted(token.Entry);
+                }
+                catch (Exception exception)
+                {
+                    firstFailure ??= exception;
+                }
             }
+        }
+
+        if (firstFailure is not null)
+        {
+            ExceptionDispatchInfo.Capture(firstFailure).Throw();
+        }
+    }
+
+    private void ProcessBoth(
+        IReadOnlyList<PolicyNode<object>> first,
+        IReadOnlyList<PolicyNode<object>> second
+    )
+    {
+        Exception? firstFailure = null;
+        try
+        {
+            Process(first);
+        }
+        catch (Exception exception)
+        {
+            firstFailure = exception;
+        }
+
+        try
+        {
+            Process(second);
+        }
+        catch (Exception exception)
+        {
+            firstFailure ??= exception;
+        }
+
+        if (firstFailure is not null)
+        {
+            ExceptionDispatchInfo.Capture(firstFailure).Throw();
         }
     }
 

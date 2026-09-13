@@ -11,6 +11,35 @@ public sealed class EngineWriteBufferTests
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
 
     [Test]
+    public void RejectsAnIndependentlyConstructedBuiltInPolicy()
+    {
+        using var policy = new WindowTinyLfuEnginePolicy(
+            maximum: 4,
+            maximumResidentCount: 4,
+            static _ => { },
+            requestMaintenance: static () => false,
+            beforeMaintenance: null,
+            beforeMaintenanceSignalClear: null,
+            readStripeCount: 1,
+            readStripeCapacity: 4,
+            writeBufferCapacity: 4
+        );
+
+        var options = new CacheEngineOptions<int, string>
+        {
+            MaximumSize = 4,
+            MaxConcurrentLoads = 1,
+            Policy = policy,
+        };
+
+        options
+            .Invoking(static o => _ = new CacheEngine<int, string>(o))
+            .Should()
+            .Throw<ArgumentException>()
+            .WithMessage("*built-in policy*custom test policy*");
+    }
+
+    [Test]
     public void QueuedWritesShareOneMaintenanceRequestAndRearmAfterDraining()
     {
         var scheduler = new ControlledScheduler();

@@ -6,7 +6,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
 {
     private void PublishPolicyWriteLocked(object? token, long weight)
     {
-        _policy.OnPublish(token, weight);
+        _policy.OnPublishLocked(token, weight);
         if (_evictionListener is not null || weight > _policy.Maximum)
         {
             // Capture this publication's evictions before another maintenance
@@ -18,7 +18,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
     private void RemovePolicyWriteLocked(object? token)
     {
-        _policy.OnRemove(token);
+        _policy.OnRemoveLocked(token);
         if (_evictionListener is not null)
         {
             _policy.FlushWrites();

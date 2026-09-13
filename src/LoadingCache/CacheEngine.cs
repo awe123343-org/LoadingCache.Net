@@ -73,6 +73,16 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     internal CacheEngine(CacheEngineOptions<TKey, TValue> options)
     {
         ArgumentNullException.ThrowIfNull(options);
+        // Policy injection is a custom-test seam. The built-in adapter must be created here so it
+        // shares the engine coordination gate used by locked policy writes.
+        if (options.Policy is WindowTinyLfuEnginePolicy)
+        {
+            throw new ArgumentException(
+                "The built-in policy must be created by CacheEngine; inject only a custom test policy.",
+                nameof(options)
+            );
+        }
+
         if (options is { WeakKeys: true, Comparer: not null })
         {
             throw new ArgumentException(

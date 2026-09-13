@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace LoadingCache.Maintenance;
 
 /// <summary>
@@ -47,40 +49,58 @@ internal sealed class BoundedWriteBuffer<TEvent> : IDisposable
     {
         lock (_gate)
         {
-            if (_disposed != 0)
-            {
-                SaturatingIncrement(ref _droppedShutdown);
-                return false;
-            }
-
-            if (_queue.Count >= _capacity)
-            {
-                SaturatingIncrement(ref _full);
-                return false;
-            }
-
-            _queue.Enqueue(value);
-            Volatile.Write(ref _queued, _queued + 1);
-            SaturatingIncrement(ref _enqueued);
-            return true;
+            return TryEnqueueLocked(value);
         }
+    }
+
+    /// <summary>
+    /// Attempts to publish while the caller owns the coordination monitor.
+    /// </summary>
+    internal bool TryEnqueueLocked(TEvent value)
+    {
+        Debug.Assert(Monitor.IsEntered(_gate));
+        if (_disposed != 0)
+        {
+            SaturatingIncrement(ref _droppedShutdown);
+            return false;
+        }
+
+        if (_queue.Count >= _capacity)
+        {
+            SaturatingIncrement(ref _full);
+            return false;
+        }
+
+        _queue.Enqueue(value);
+        Volatile.Write(ref _queued, _queued + 1);
+        SaturatingIncrement(ref _enqueued);
+        return true;
     }
 
     internal bool TryDequeue(out TEvent value)
     {
         lock (_gate)
         {
-            if (_queue.Count == 0)
-            {
-                value = default!;
-                return false;
-            }
-
-            value = _queue.Dequeue();
-            Volatile.Write(ref _queued, _queued - 1);
-            SaturatingIncrement(ref _dequeued);
-            return true;
+            return TryDequeueLocked(out value);
         }
+    }
+
+    /// <summary>
+    /// Attempts to dequeue while the caller owns the coordination monitor.
+    /// </summary>
+    internal bool TryDequeueLocked(out TEvent value)
+    {
+        Debug.Assert(Monitor.IsEntered(_gate));
+        if (_queue.Count == 0)
+        {
+            value = default!;
+            return false;
+        }
+
+        value = _queue.Dequeue();
+        Volatile.Write(ref _queued, _queued - 1);
+        SaturatingIncrement(ref _dequeued);
+        return true;
     }
 
     /// <summary>
