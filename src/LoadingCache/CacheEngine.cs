@@ -322,21 +322,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         get
         {
             ThrowIfDisposed();
-            long count = 0;
-            foreach (Entry entry in _entries.Values)
-            {
-                if (
-                    Volatile.Read(ref entry.IsReady)
-                    && !Volatile.Read(ref entry.PolicyDetached)
-                    && entry.TryGetKey(out _)
-                    && entry.TryGetValue(out _)
-                )
-                {
-                    count++;
-                }
-            }
-
-            return count;
+            return _entries.CountMaterialized();
         }
     }
 

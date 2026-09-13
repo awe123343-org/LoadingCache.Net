@@ -43,6 +43,32 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
         internal IEnumerable<Entry> Values => _weakKeys ? _weak!.Values : _strong!.Values;
 
+        internal long CountMaterialized() =>
+            _weakKeys ? CountMaterialized(_weak!) : CountMaterialized(_strong!);
+
+        private static long CountMaterialized<TDictionaryKey>(
+            ConcurrentDictionary<TDictionaryKey, Entry> entries
+        )
+            where TDictionaryKey : notnull
+        {
+            long count = 0;
+            foreach (KeyValuePair<TDictionaryKey, Entry> pair in entries)
+            {
+                Entry entry = pair.Value;
+                if (
+                    Volatile.Read(ref entry.IsReady)
+                    && !Volatile.Read(ref entry.PolicyDetached)
+                    && entry.TryGetKey(out _)
+                    && entry.TryGetValue(out _)
+                )
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
         internal bool TryGetValue(
             TKey key,
             [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Entry? entry
