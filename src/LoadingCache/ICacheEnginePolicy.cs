@@ -30,6 +30,9 @@ internal interface ICacheEnginePolicy
     // policies without buffered writes retain their synchronous contract.
     bool HasPendingWrites => false;
 
+    // A queued batch needs one request; the drain owner re-arms the signal.
+    bool TryRequestWriteMaintenance() => HasPendingWrites;
+
     void FlushWrites() { }
 
     WriteBufferStatistics GetWriteBufferStatistics() => default;

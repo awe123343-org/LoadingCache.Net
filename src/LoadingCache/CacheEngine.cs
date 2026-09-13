@@ -211,7 +211,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 options.TestHooks?.BeforeMaintenanceSignalClear,
                 options.MaintenanceReadStripeCount,
                 options.MaintenanceReadStripeCapacity,
-                options.MaintenanceWriteBufferCapacity
+                options.MaintenanceWriteBufferCapacity,
+                coordinationGate: _gate
             );
         _maintenanceCoordinator = new MaintenanceCoordinator(
             DrainPolicyMaintenance,
@@ -1063,7 +1064,10 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 }
             }
         }
-        else if (_maintenanceCoordinator.Request() == MaintenanceRequestResult.ScheduleRejected)
+        else if (
+            _policy.TryRequestWriteMaintenance()
+            && _maintenanceCoordinator.Request() == MaintenanceRequestResult.ScheduleRejected
+        )
         {
             DrainRejectedPolicyWrites();
         }
@@ -1220,8 +1224,10 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                         residents++;
                         if (
                             entry.PolicyToken
-                                is not WindowTinyLfuEnginePolicy.EngineEntryToken token
-                            || token.Node is not { IsAlive: true }
+                                is not WindowTinyLfuEnginePolicy.EngineEntryToken
+                                {
+                                    Node.IsAlive: true
+                                } token
                             || !ReferenceEquals(token.Entry, entry)
                         )
                         {

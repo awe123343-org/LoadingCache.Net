@@ -78,6 +78,8 @@ internal sealed class PolicyNode<T>
 
     internal long OwnerId { get; private set; }
 
+    internal long AppliedPolicyWriteSequence { get; set; }
+
     internal void Claim(long ownerId)
     {
         if (ownerId == 0)

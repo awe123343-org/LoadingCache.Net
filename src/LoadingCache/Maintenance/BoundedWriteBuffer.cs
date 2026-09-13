@@ -7,14 +7,17 @@ namespace LoadingCache.Maintenance;
 /// <remarks>
 /// Unlike the read transport, a full write transport cannot report success while dropping an
 /// event.  The policy adapter therefore uses <see cref="TryEnqueue"/> and cooperatively drains
-/// an older event before retrying.  The buffer itself only owns admission and lifetime; event
-/// processing is always performed by the policy owner outside this buffer's lock.
+/// an older event before retrying.  The buffer itself only owns admission and lifetime; it never
+/// processes events or invokes callbacks. The policy owner processes a dequeued event after the
+/// buffer operation returns. When a coordination monitor is shared, that outer monitor can still
+/// be held by the owner, but no user callback runs inside the buffer operation.
 /// </remarks>
 internal sealed class BoundedWriteBuffer<TEvent> : IDisposable
 {
-    private readonly object _gate = new();
+    private readonly object _gate;
     private readonly Queue<TEvent> _queue;
     private readonly int _capacity;
+    private int _queued;
     private long _enqueued;
     private long _dequeued;
     private long _full;
@@ -22,10 +25,11 @@ internal sealed class BoundedWriteBuffer<TEvent> : IDisposable
     private long _droppedShutdown;
     private int _disposed;
 
-    internal BoundedWriteBuffer(int capacity)
+    internal BoundedWriteBuffer(int capacity, object? coordinationGate = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
         _capacity = capacity;
+        _gate = coordinationGate ?? new object();
         _queue = new Queue<TEvent>(capacity);
     }
 
@@ -33,16 +37,7 @@ internal sealed class BoundedWriteBuffer<TEvent> : IDisposable
 
     internal bool IsDisposed => Volatile.Read(ref _disposed) != 0;
 
-    internal int Count
-    {
-        get
-        {
-            lock (_gate)
-            {
-                return _queue.Count;
-            }
-        }
-    }
+    internal int Queued => Volatile.Read(ref _queued);
 
     /// <summary>
     /// Attempts to publish without waiting.  A false result means that the caller must drain
@@ -65,6 +60,7 @@ internal sealed class BoundedWriteBuffer<TEvent> : IDisposable
             }
 
             _queue.Enqueue(value);
+            Volatile.Write(ref _queued, _queued + 1);
             SaturatingIncrement(ref _enqueued);
             return true;
         }
@@ -81,6 +77,7 @@ internal sealed class BoundedWriteBuffer<TEvent> : IDisposable
             }
 
             value = _queue.Dequeue();
+            Volatile.Write(ref _queued, _queued - 1);
             SaturatingIncrement(ref _dequeued);
             return true;
         }
@@ -89,12 +86,30 @@ internal sealed class BoundedWriteBuffer<TEvent> : IDisposable
     /// <summary>
     /// Drops events invalidated by a clear barrier.  This is the only non-shutdown discard path.
     /// </summary>
-    internal int Clear()
+    /// <remarks>
+    /// The optional callback is reserved for internal accounting. It must not re-enter the buffer,
+    /// invoke user code, or throw.
+    /// </remarks>
+    internal int Clear(Action<TEvent>? onDiscard = null)
     {
         lock (_gate)
         {
-            int dropped = _queue.Count;
-            _queue.Clear();
+            int dropped = 0;
+            if (onDiscard is null)
+            {
+                dropped = _queue.Count;
+                _queue.Clear();
+            }
+            else
+            {
+                while (_queue.Count != 0)
+                {
+                    onDiscard(_queue.Dequeue());
+                    dropped++;
+                }
+            }
+
+            Volatile.Write(ref _queued, 0);
             SaturatingAdd(ref _droppedClear, dropped);
             return dropped;
         }
@@ -107,7 +122,7 @@ internal sealed class BoundedWriteBuffer<TEvent> : IDisposable
             return new WriteBufferStatistics(
                 isDisposed: _disposed != 0,
                 capacity: _capacity,
-                queued: _queue.Count,
+                queued: _queued,
                 enqueued: _enqueued,
                 dequeued: _dequeued,
                 full: _full,
@@ -118,9 +133,30 @@ internal sealed class BoundedWriteBuffer<TEvent> : IDisposable
     }
 
     /// <summary>
+    /// Copies the queued values for invariant inspection. This is intentionally a diagnostic-only
+    /// operation and is not used by the maintenance hot path.
+    /// </summary>
+    internal int CopyTo(List<TEvent> destination)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        lock (_gate)
+        {
+            destination.Clear();
+            destination.AddRange(_queue);
+            return _queue.Count;
+        }
+    }
+
+    /// <summary>
     /// Stops admission and releases all queued event references.
     /// </summary>
-    public void Dispose()
+    /// <remarks>
+    /// The optional callback is reserved for internal accounting. It must not re-enter the buffer,
+    /// invoke user code, or throw.
+    /// </remarks>
+    public void Dispose() => Dispose(onDiscard: null);
+
+    internal void Dispose(Action<TEvent>? onDiscard)
     {
         lock (_gate)
         {
@@ -130,8 +166,22 @@ internal sealed class BoundedWriteBuffer<TEvent> : IDisposable
             }
 
             _disposed = 1;
-            int dropped = _queue.Count;
-            _queue.Clear();
+            int dropped = 0;
+            if (onDiscard is null)
+            {
+                dropped = _queue.Count;
+                _queue.Clear();
+            }
+            else
+            {
+                while (_queue.Count != 0)
+                {
+                    onDiscard(_queue.Dequeue());
+                    dropped++;
+                }
+            }
+
+            Volatile.Write(ref _queued, 0);
             SaturatingAdd(ref _droppedShutdown, dropped);
         }
     }

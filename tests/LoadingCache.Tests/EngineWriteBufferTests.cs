@@ -11,6 +11,49 @@ public sealed class EngineWriteBufferTests
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
 
     [Test]
+    public void QueuedWritesShareOneMaintenanceRequestAndRearmAfterDraining()
+    {
+        var scheduler = new ControlledScheduler();
+        var engine = CreateEngine(scheduler, capacity: 8);
+        using var cache = new Cache<int, string>(engine);
+
+        for (int key = 0; key < 128; key++)
+        {
+            cache.Put(key, "value");
+        }
+
+        engine.GetMaintenanceStatistics().Requests.Should().Be(1);
+        scheduler.Pending.Should().Be(1);
+        engine.GetPolicyWriteBufferStatistics().Full.Should().BeGreaterThan(0);
+
+        scheduler.RunAll();
+        engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
+        cache.Put(128, "next batch");
+        engine.GetMaintenanceStatistics().Requests.Should().Be(2);
+        scheduler.Pending.Should().Be(1);
+        scheduler.RunAll();
+        engine.AssertInvariants();
+    }
+
+    [Test]
+    public void PolicySnapshotFlushDoesNotStrandTheFollowingWrite()
+    {
+        var scheduler = new ControlledScheduler();
+        var engine = CreateEngine(scheduler);
+        using var cache = new Cache<int, string>(engine);
+
+        cache.Put(1, "first");
+        cache.Policy.Eviction!.WeightedSize.Should().Be(1);
+        engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
+        cache.Put(2, "following write");
+        scheduler.RunAll();
+
+        engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
+        cache.Policy.Eviction.WeightedSize.Should().Be(2);
+        engine.AssertInvariants();
+    }
+
+    [Test]
     public void ReadyMappingsAreVisibleBeforeDeferredPolicyWritesRun()
     {
         var scheduler = new ControlledScheduler();
