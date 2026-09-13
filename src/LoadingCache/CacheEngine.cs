@@ -1,7 +1,8 @@
-using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
+using LoadingCache.Diagnostics;
 using LoadingCache.Expiration;
 using LoadingCache.Maintenance;
+using LoadingCache.ReferenceStorage;
 
 namespace LoadingCache;
 
@@ -15,7 +16,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     where TKey : notnull
     where TValue : notnull
 {
-    private readonly ConcurrentDictionary<TKey, Entry> _entries;
+    private readonly EntryStore _entries;
     private readonly object _gate = new();
     private readonly Func<TKey, TValue, long>? _weigher;
     private readonly Action<TValue>? _onValueRetired;
@@ -61,16 +62,6 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     private int _shutdownCancellationCompleted;
     private int _shutdownSourceDisposed;
 
-    private long _hits;
-    private long _misses;
-    private long _loadsStarted;
-    private long _loadSuccesses;
-    private long _loadFailures;
-    private long _loadCancellations;
-    private long _loadTimeouts;
-    private long _coalescedWaiters;
-    private long _evictions;
-
     private enum ExpirationKind
     {
         Access,
@@ -82,8 +73,30 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     internal CacheEngine(CacheEngineOptions<TKey, TValue> options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        Comparer = options.Comparer ?? EqualityComparer<TKey>.Default;
-        _entries = new ConcurrentDictionary<TKey, Entry>(Comparer);
+        if (options is { WeakKeys: true, Comparer: not null })
+        {
+            throw new ArgumentException(
+                "Weak keys use identity equality and cannot use a custom comparer.",
+                nameof(options)
+            );
+        }
+
+        _weakKeys = options.WeakKeys;
+        _weakValues = options.WeakValues;
+        Comparer = _weakKeys
+            ? ReferenceIdentityComparer<TKey>.Instance
+            : options.Comparer ?? EqualityComparer<TKey>.Default;
+        _entries = new EntryStore(_weakKeys, Comparer);
+
+        if (_weakKeys && typeof(TKey).IsValueType)
+        {
+            throw new ArgumentException("Weak keys require a reference type.", nameof(options));
+        }
+
+        if (_weakValues && typeof(TValue).IsValueType)
+        {
+            throw new ArgumentException("Weak values require a reference type.", nameof(options));
+        }
 
         if (options.MaximumSize is <= 0)
         {
@@ -147,7 +160,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         }
 
         ArgumentNullException.ThrowIfNull(options.TimeProvider);
-        if (options.MemoryPressureSamplingInterval is TimeSpan pressureInterval)
+        if (options.MemoryPressureSamplingInterval is { } pressureInterval)
         {
             ArgumentNullException.ThrowIfNull(options.MemoryPressureSource);
             MemoryPressureController<TKey, TValue>.ValidateOptions(
@@ -176,6 +189,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         _weigher = options.Weigher;
         _onValueRetired = options.OnValueRetired;
         _maxConcurrentLoads = options.MaxConcurrentLoads;
+        ConfigureBulkLimits(options.MaxPendingLoadKeys, options.MaximumBulkKeys);
         _expireAfterWriteTicks = options.ExpireAfterWrite?.Ticks ?? -1;
         _expireAfterAccessTicks = options.ExpireAfterAccess?.Ticks ?? -1;
         _refreshAfterWriteTicks = options.RefreshAfterWrite?.Ticks ?? -1;
@@ -246,7 +260,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             }
         }
 
-        if (options.MemoryPressureSamplingInterval is TimeSpan samplingInterval)
+        if (options.MemoryPressureSamplingInterval is { } samplingInterval)
         {
             try
             {
@@ -265,9 +279,28 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 _expirationTimer?.Dispose();
                 _maintenanceCoordinator.Dispose();
                 _policy.Dispose();
+                DisposeDiagnostics();
                 _shutdownCts.Dispose();
                 throw;
             }
+        }
+
+        // Publish diagnostics only after the policy, maintenance coordinator,
+        // expiration state, and optional pressure timer are fully initialized.
+        // A MeterListener can observe instruments synchronously during setup.
+        try
+        {
+            InitializeDiagnostics(options);
+        }
+        catch
+        {
+            _memoryPressureController?.Dispose();
+            _expirationTimer?.Dispose();
+            _maintenanceCoordinator.Dispose();
+            _policy.Dispose();
+            DisposeDiagnostics();
+            _shutdownCts.Dispose();
+            throw;
         }
     }
 
@@ -279,7 +312,12 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             long count = 0;
             foreach (Entry entry in _entries.Values)
             {
-                if (Volatile.Read(ref entry.IsReady) && !Volatile.Read(ref entry.PolicyDetached))
+                if (
+                    Volatile.Read(ref entry.IsReady)
+                    && !Volatile.Read(ref entry.PolicyDetached)
+                    && entry.TryGetKey(out _)
+                    && entry.TryGetValue(out _)
+                )
                 {
                     count++;
                 }
@@ -304,18 +342,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     internal CacheStatistics GetStatistics()
     {
         ThrowIfDisposed();
-        return new CacheStatistics(
-            _recordStatistics ? Interlocked.Read(ref _hits) : 0,
-            _recordStatistics ? Interlocked.Read(ref _misses) : 0,
-            _recordStatistics ? Interlocked.Read(ref _loadsStarted) : 0,
-            _recordStatistics ? Interlocked.Read(ref _loadSuccesses) : 0,
-            _recordStatistics ? Interlocked.Read(ref _loadFailures) : 0,
-            _recordStatistics ? Interlocked.Read(ref _loadCancellations) : 0,
-            _recordStatistics ? Interlocked.Read(ref _loadTimeouts) : 0,
-            _recordStatistics ? Interlocked.Read(ref _coalescedWaiters) : 0,
-            _recordStatistics ? Interlocked.Read(ref _evictions) : 0,
-            Volatile.Read(ref _runningLoads)
-        );
+        return GetStatisticsSnapshot(exposeCounters: _recordStatistics);
     }
 
     internal bool TryGet(TKey key, [MaybeNullWhen(false)] out TValue value)
@@ -381,6 +408,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         AsyncFlight? flight = null;
         bool created = false;
         bool fallbackHit = false;
+        bool fallbackExpired = false;
+        bool fallbackCollected = false;
         object? fallbackPolicyToken = null;
         Entry? fallbackEntry = null;
         bool fallbackRefreshEligible = false;
@@ -398,10 +427,14 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                     lock (current.Sync)
                     {
                         long now = _timeProvider.GetTimestamp();
-                        if (Volatile.Read(ref current.IsReady) && !IsExpired(current, now))
+                        if (
+                            Volatile.Read(ref current.IsReady)
+                            && !IsExpired(current, now)
+                            && current.TryGetValue(out TValue? liveValue)
+                        )
                         {
                             TouchWithoutLock(current, now);
-                            readyValue = current.Value;
+                            readyValue = liveValue;
                             fallbackPolicyToken = current.PolicyToken;
                             fallbackEntry = current;
                             fallbackVariableTimestamp = current.VariableTimestamp;
@@ -411,6 +444,13 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                                 : GetRemainingDuration(current, now, ExpirationKind.Variable);
                             fallbackRefreshEligible = IsRefreshEligibleLocked(current, now);
                             fallbackHit = true;
+                        }
+                        else if (Volatile.Read(ref current.IsReady))
+                        {
+                            fallbackCollected =
+                                (_weakKeys && !current.TryGetKey(out _))
+                                || (_weakValues && !current.TryGetValue(out _));
+                            fallbackExpired = !fallbackCollected;
                         }
                     }
 
@@ -427,7 +467,12 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                         }
                         else
                         {
-                            RemoveCurrentEntryLocked(current);
+                            RemoveCurrentEntryLocked(
+                                current,
+                                fallbackCollected ? RemovalCause.Collected
+                                    : fallbackExpired ? RemovalCause.Expired
+                                    : RemovalCause.Explicit
+                            );
                         }
                     }
                 }
@@ -449,13 +494,14 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             if (flight is null && !fallbackHit)
             {
                 RecordMiss();
-                if (_reservedLoads >= _maxConcurrentLoads)
+                if (!CanReserveFlightsLocked(1))
                 {
+                    RecordCounter(CacheCounterKind.LoadRejections);
                     return ValueTask.FromException<TValue>(new CacheLoadRejectedException());
                 }
 
                 flight = new AsyncFlight(key, _epoch, ++_nextGeneration, factory);
-                Entry entry = Entry.Loading(key, _epoch, flight.Generation, flight);
+                Entry entry = Entry.Loading(key, _epoch, flight.Generation, flight, _weakKeys);
                 _entries[key] = entry;
                 _activeFlights.Add(flight);
                 _reservedLoads++;
@@ -491,13 +537,13 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             catch (Exception exception)
             {
                 CompleteFailure(flight!, exception);
-                return WaitForFlight(flight!, cancellationToken);
+                return WaitForFlight(flight!, key, cancellationToken);
             }
         }
 
         // A joiner is allowed to start a flight whose installer is paused.
         StartAsyncFlight(flight!);
-        return WaitForFlight(flight!, cancellationToken);
+        return WaitForFlight(flight!, key, cancellationToken);
     }
 
     internal bool TryGetTask(TKey key, [NotNullWhen(true)] out Task<TValue>? valueTask)
@@ -518,7 +564,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         {
             if (entry.Flight is AsyncFlight asyncFlight)
             {
-                valueTask = asyncFlight.Completion.Task;
+                RecordMiss();
+                valueTask = GetBulkTask(asyncFlight, key);
                 return true;
             }
         }
@@ -576,6 +623,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         SyncFlight? flight = null;
         bool created = false;
         bool fallbackHit = false;
+        bool fallbackExpired = false;
+        bool fallbackCollected = false;
         object? fallbackPolicyToken = null;
         Entry? fallbackEntry = null;
         bool fallbackRefreshEligible = false;
@@ -592,10 +641,14 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                     lock (current.Sync)
                     {
                         long now = _timeProvider.GetTimestamp();
-                        if (Volatile.Read(ref current.IsReady) && !IsExpired(current, now))
+                        if (
+                            Volatile.Read(ref current.IsReady)
+                            && !IsExpired(current, now)
+                            && current.TryGetValue(out TValue? liveValue)
+                        )
                         {
                             TouchWithoutLock(current, now);
-                            readyValue = current.Value;
+                            readyValue = liveValue;
                             fallbackPolicyToken = current.PolicyToken;
                             fallbackEntry = current;
                             fallbackVariableTimestamp = current.VariableTimestamp;
@@ -605,6 +658,13 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                                 : GetRemainingDuration(current, now, ExpirationKind.Variable);
                             fallbackRefreshEligible = IsRefreshEligibleLocked(current, now);
                             fallbackHit = true;
+                        }
+                        else if (Volatile.Read(ref current.IsReady))
+                        {
+                            fallbackCollected =
+                                (_weakKeys && !current.TryGetKey(out _))
+                                || (_weakValues && !current.TryGetValue(out _));
+                            fallbackExpired = !fallbackCollected;
                         }
                     }
 
@@ -621,7 +681,12 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                         }
                         else
                         {
-                            RemoveCurrentEntryLocked(current);
+                            RemoveCurrentEntryLocked(
+                                current,
+                                fallbackCollected ? RemovalCause.Collected
+                                    : fallbackExpired ? RemovalCause.Expired
+                                    : RemovalCause.Explicit
+                            );
                         }
                     }
                 }
@@ -643,13 +708,14 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             if (flight is null && !fallbackHit)
             {
                 RecordMiss();
-                if (_reservedLoads >= _maxConcurrentLoads)
+                if (!CanReserveFlightsLocked(1))
                 {
+                    RecordCounter(CacheCounterKind.LoadRejections);
                     throw new CacheLoadRejectedException();
                 }
 
                 flight = new SyncFlight(key, _epoch, ++_nextGeneration, factory);
-                _entries[key] = Entry.Loading(key, _epoch, flight.Generation, flight);
+                _entries[key] = Entry.Loading(key, _epoch, flight.Generation, flight, _weakKeys);
                 _activeFlights.Add(flight);
                 _reservedLoads++;
                 created = true;
@@ -688,7 +754,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         }
 
         StartSyncFlight(flight!);
-        return flight!.Wait();
+        return WaitForBulkSync(flight!, key);
     }
 
     internal void Put(TKey key, TValue value)
@@ -738,6 +804,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         lock (_gate)
         {
             ThrowIfDisposedLocked();
+            RecordBulkMutationLocked();
             Entry entry = Entry.Ready(
                 key,
                 _epoch,
@@ -745,7 +812,9 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 value,
                 _timeProvider.GetTimestamp(),
                 weight,
-                variableDuration
+                variableDuration,
+                _weakKeys,
+                _weakValues
             );
             entry.PolicyToken = new WindowTinyLfuEnginePolicy.EngineEntryToken(
                 entry,
@@ -777,13 +846,18 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         lock (_gate)
         {
             ThrowIfDisposedLocked();
-            if (_reservedLoads >= _maxConcurrentLoads)
+            RecordBulkMutationLocked();
+            if (!CanReserveFlightsLocked(1))
             {
+                RecordCounter(CacheCounterKind.LoadRejections);
                 throw new CacheLoadRejectedException();
             }
 
             flight = new AsyncFlight(key, _epoch, ++_nextGeneration, null, valueTask);
-            ReplaceCurrentLocked(key, Entry.Loading(key, _epoch, flight.Generation, flight));
+            ReplaceCurrentLocked(
+                key,
+                Entry.Loading(key, _epoch, flight.Generation, flight, _weakKeys)
+            );
             _activeFlights.Add(flight);
             _reservedLoads++;
         }
@@ -815,10 +889,12 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             ThrowIfDisposedLocked();
             if (!_entries.TryGetValue(key, out Entry? entry))
             {
+                RecordBulkMutationLocked();
                 return false;
             }
 
-            RemoveCurrentEntryLocked(entry);
+            RecordBulkMutationLocked();
+            RemoveCurrentEntryLocked(entry, RemovalCause.Explicit);
             removed = true;
         }
 
@@ -830,12 +906,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     {
         ArgumentNullException.ThrowIfNull(keys);
         ThrowIfDisposed();
-        TKey[] snapshot = [.. keys];
+        TKey[] snapshot = SnapshotBulkKeys(keys, BulkFallbackInputLimit);
         int count = 0;
-        foreach (TKey key in snapshot)
-        {
-            ArgumentNullException.ThrowIfNull(key);
-        }
 
         foreach (TKey key in snapshot)
         {
@@ -854,8 +926,12 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         lock (_gate)
         {
             ThrowIfDisposedLocked();
+            RecordBulkMutationLocked();
             _epoch = ++_nextEpoch;
-            RetireOwnedValuesLocked();
+            foreach (Entry entry in _entries.Snapshot())
+            {
+                RemoveCurrentEntryLocked(entry, RemovalCause.Cleared);
+            }
             _entries.Clear();
             _policy.Clear();
             ResetExpirationStateLocked();
@@ -870,6 +946,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         lock (_gate)
         {
             ThrowIfDisposedLocked();
+            CleanUpCollectedReferencesLocked();
             if (_expirationWheel is not null)
             {
                 AdvanceExpirationLocked(GetExpirationNowLocked());
@@ -921,7 +998,10 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         lock (_gate)
         {
             _epoch = ++_nextEpoch;
-            RetireOwnedValuesLocked();
+            foreach (Entry entry in _entries.Snapshot())
+            {
+                RemoveCurrentEntryLocked(entry, RemovalCause.Cleared);
+            }
             _entries.Clear();
             _policy.Clear();
             ResetExpirationStateLocked();
@@ -933,10 +1013,14 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         _policy.Dispose();
         _memoryPressureController?.Dispose();
         StopExpirationTimer();
+        DisposeDiagnostics();
 
         foreach (Flight flight in flights)
         {
-            flight.SetDisposed();
+            if (!CompleteBulkDisposed(flight))
+            {
+                flight.SetDisposed();
+            }
         }
 
         DisposeFlightTimeoutTimers(timeoutTimers);
@@ -962,7 +1046,10 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         lock (_gate)
         {
             _epoch = ++_nextEpoch;
-            RetireOwnedValuesLocked();
+            foreach (Entry entry in _entries.Snapshot())
+            {
+                RemoveCurrentEntryLocked(entry, RemovalCause.Cleared);
+            }
             _entries.Clear();
             _policy.Clear();
             ResetExpirationStateLocked();
@@ -974,10 +1061,14 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         _policy.Dispose();
         _memoryPressureController?.Dispose();
         StopExpirationTimer();
+        DisposeDiagnostics();
 
         foreach (Flight flight in flights)
         {
-            flight.SetDisposed();
+            if (!CompleteBulkDisposed(flight))
+            {
+                flight.SetDisposed();
+            }
         }
 
         DisposeFlightTimeoutTimers(timeoutTimers);
@@ -1038,10 +1129,16 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 }
             }
 
+            int pending = PendingLoadKeyCountLocked();
             if (
                 reserved != _reservedLoads
                 || running != _runningLoads
                 || _reservedLoads > _maxConcurrentLoads
+                || _bulkGroupCount < 0
+                || _bulkGroupCount > _activeFlights.Count
+                || _bulkPendingKeyCount < 0
+                || pending < 0
+                || pending > BulkPendingKeyLimit
             )
             {
                 throw new InvalidOperationException(
@@ -1063,21 +1160,26 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             return;
         }
 
+        bool disposed;
         lock (_gate)
         {
-            if (_disposed != 0)
+            disposed = _disposed != 0;
+            if (!disposed)
+            {
+                flight.ExecutionStarted = 1;
+                _runningLoads++;
+            }
+        }
+
+        if (disposed)
+        {
+            if (!CompleteBulkDisposed(flight))
             {
                 flight.SetDisposed();
-                RetireFlight(flight, underlyingCompleted: true);
-                return;
             }
 
-            flight.ExecutionStarted = 1;
-            _runningLoads++;
-            if (_recordStatistics)
-            {
-                Interlocked.Increment(ref _loadsStarted);
-            }
+            RetireFlight(flight, underlyingCompleted: true);
+            return;
         }
 
         if (!PrepareFlightExecution(flight))
@@ -1098,6 +1200,12 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         Task<TValue>? load = suppliedTask ?? flight.SuppliedTask;
         if (load is null)
         {
+            // Count a load only once the cache is about to invoke the user
+            // loader.  A synchronously firing timeout can terminalize a
+            // flight while its timeout is being armed; that flight never
+            // invoked the backend and must not fabricate a load start or
+            // terminal loader outcome in statistics.
+            RecordFlightStarted(flight);
             try
             {
                 load = InvokeAsyncFactory(flight.Factory!, flight.Key, loadCancellationToken);
@@ -1125,21 +1233,26 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             return;
         }
 
+        bool disposed;
         lock (_gate)
         {
-            if (_disposed != 0)
+            disposed = _disposed != 0;
+            if (!disposed)
+            {
+                flight.ExecutionStarted = 1;
+                _runningLoads++;
+            }
+        }
+
+        if (disposed)
+        {
+            if (!CompleteBulkDisposed(flight))
             {
                 flight.SetDisposed();
-                RetireFlight(flight, underlyingCompleted: true);
-                return;
             }
 
-            flight.ExecutionStarted = 1;
-            _runningLoads++;
-            if (_recordStatistics)
-            {
-                Interlocked.Increment(ref _loadsStarted);
-            }
+            RetireFlight(flight, underlyingCompleted: true);
+            return;
         }
 
         if (!PrepareFlightExecution(flight))
@@ -1155,6 +1268,10 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
 
         try
         {
+            // Keep the invocation boundary immediately adjacent to the user
+            // callback.  PrepareFlightExecution may synchronously timeout
+            // and prevent this call from happening at all.
+            RecordFlightStarted(flight);
             TValue value = InvokeSyncFactory(flight.Factory, flight.Key);
             if (value is null)
             {
@@ -1303,6 +1420,11 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         try
         {
             InvokeHook(_testHooks?.BeforePublish);
+            if (TryCompleteBulkSuccess(flight, value))
+            {
+                return;
+            }
+
             long weight = ComputeWeight(flight.Key, value);
             TimeSpan variableDuration = ComputeCreateDuration(flight.Key, value);
 
@@ -1327,7 +1449,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                     long timestamp = _timeProvider.GetTimestamp();
                     lock (entry.Sync)
                     {
-                        entry.Value = value;
+                        entry.SetValue(value, _weakValues);
                         entry.Weight = weight;
                         entry.WriteTimestamp = timestamp;
                         entry.AccessTimestamp = timestamp;
@@ -1337,7 +1459,9 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                         entry.PublicationRevision++;
                         publishedRevision = entry.PublicationRevision;
                         entry.Flight = null;
-                        entry.SharedTask = (flight as AsyncFlight)?.Completion.Task;
+                        entry.SharedTask = _weakValues
+                            ? null
+                            : (flight as AsyncFlight)?.Completion.Task;
                         entry.PolicyToken = new WindowTinyLfuEnginePolicy.EngineEntryToken(
                             entry,
                             GetPolicyHash(flight.Key)
@@ -1360,9 +1484,9 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                     }
                 }
 
-                if (claimed && _recordStatistics)
+                if (claimed)
                 {
-                    Interlocked.Increment(ref _loadSuccesses);
+                    RecordFlightResult(flight, CacheCounterKind.LoadSuccesses);
                 }
             }
 
@@ -1409,10 +1533,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             if (claimed)
             {
                 RemoveCurrentEntryLocked(flight);
-                if (_recordStatistics)
-                {
-                    Interlocked.Increment(ref _loadCancellations);
-                }
+                RecordFlightResult(flight, CacheCounterKind.LoadCancellations);
             }
         }
 
@@ -1422,6 +1543,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             return;
         }
 
+        FailBulkFlight(flight, exception);
         CompletePromise(
             flight,
             static (asyncFlight, error) =>
@@ -1445,10 +1567,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             if (claimed)
             {
                 RemoveCurrentEntryLocked(flight);
-                if (_recordStatistics)
-                {
-                    Interlocked.Increment(ref _loadFailures);
-                }
+                RecordFlightResult(flight, CacheCounterKind.LoadFailures);
             }
         }
 
@@ -1458,6 +1577,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             return;
         }
 
+        FailBulkFlight(flight, exception);
         CompletePromise(
             flight,
             static (current, error) => current.TrySetException(error),
@@ -1520,7 +1640,10 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                             )
                         )
                         {
-                            publishedEntry.SharedTask = Task.FromResult(publishedEntry.Value);
+                            if (publishedEntry.TryGetValue(out TValue? liveValue))
+                            {
+                                publishedEntry.SharedTask = Task.FromResult(liveValue);
+                            }
                         }
                     }
                 }
@@ -1663,6 +1786,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             }
 
             flight.Retired = 1;
+            RetireBulkFlight(flight);
             _activeFlights.Remove(flight);
 
             if (flight.ResourcesReleased == 0)
@@ -1704,7 +1828,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     {
         if (_entries.TryGetValue(key, out Entry? existing))
         {
-            RemoveCurrentEntryLocked(existing);
+            RemoveCurrentEntryLocked(existing, RemovalCause.Replaced);
         }
 
         _entries[key] = replacement;
@@ -1712,15 +1836,27 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
 
     private void RemoveCurrentEntryLocked(Entry entry)
     {
-        if (
-            !_entries.TryGetValue(entry.Key, out Entry? current) || !ReferenceEquals(current, entry)
-        )
+        RemoveCurrentEntryLocked(entry, RemovalCause.Explicit, collected: false);
+    }
+
+    private void RemoveCurrentEntryLocked(Entry entry, bool collected)
+    {
+        RemoveCurrentEntryLocked(
+            entry,
+            collected ? RemovalCause.Collected : RemovalCause.Explicit,
+            collected
+        );
+    }
+
+    private void RemoveCurrentEntryLocked(Entry entry, RemovalCause cause, bool collected = false)
+    {
+        if (!_entries.IsCurrent(entry))
         {
             return;
         }
 
         RetireExpirationNodeLocked(entry);
-        _entries.TryRemove(entry.Key, out _);
+        _entries.TryRemoveExact(entry);
         entry.Retired = true;
         Flight? refreshFlight = entry.RefreshFlight;
         if (refreshFlight is not null)
@@ -1733,9 +1869,14 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             return;
         }
 
+        QueueRemovalNotificationLocked(entry, cause, IsEvictionCause(cause), collected);
+
         // Trusted ownership bookkeeping only. It may enqueue bounded work but
         // must never invoke a user disposer on this thread or throw.
-        _onValueRetired?.Invoke(entry.Value);
+        if (entry.TryGetValue(out TValue? retiredValue))
+        {
+            _onValueRetired?.Invoke(retiredValue);
+        }
 
         if (entry.PolicyDetached)
         {
@@ -1761,28 +1902,17 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         }
     }
 
-    private void RemoveExpired(Entry entry)
-    {
-        lock (_gate)
-        {
-            RemoveExpiredEntryLocked(entry);
-        }
-
-        RequestExpirationTimer();
-    }
-
     private void RemoveExpiredEntryLocked(Entry entry)
     {
         Flight? refreshFlight = entry.RefreshFlight;
         if (
-            !_entries.TryGetValue(entry.Key, out Entry? current)
-            || !ReferenceEquals(current, entry)
+            !_entries.IsCurrent(entry)
             || !Volatile.Read(ref entry.IsReady)
             || refreshFlight is null
             || !IsCurrentRefreshFlightLocked(entry, refreshFlight)
         )
         {
-            RemoveCurrentEntryLocked(entry);
+            RemoveCurrentEntryLocked(entry, RemovalCause.Expired);
             return;
         }
 
@@ -1824,6 +1954,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         long variableRevision = 0;
         TimeSpan variableDuration = TimeSpan.MaxValue;
         bool preserveForRefresh = false;
+        bool valueCollected = false;
         lock (entry.Sync)
         {
             // Sample the monotonic clock while holding the entry snapshot lock.
@@ -1840,24 +1971,45 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             else
             {
                 TouchWithoutLock(entry, now);
-                value = entry.Value;
-                policyToken = entry.PolicyToken;
-                sharedTask = entry.SharedTask;
-                variableTimestamp = entry.VariableTimestamp;
-                variableRevision = entry.VariableRevision;
-                variableDuration = _expiry is null
-                    ? TimeSpan.MaxValue
-                    : GetRemainingDuration(entry, now, ExpirationKind.Variable);
-                readyEntry = entry;
-                refreshEligible = IsRefreshEligibleLocked(entry, now);
+                if (!entry.TryGetValue(out TValue? liveValue))
+                {
+                    preserveForRefresh = false;
+                    valueCollected = true;
+                    value = default!;
+                }
+                else
+                {
+                    value = liveValue!;
+                    policyToken = entry.PolicyToken;
+                    sharedTask = entry.SharedTask;
+                    variableTimestamp = entry.VariableTimestamp;
+                    variableRevision = entry.VariableRevision;
+                    variableDuration = _expiry is null
+                        ? TimeSpan.MaxValue
+                        : GetRemainingDuration(entry, now, ExpirationKind.Variable);
+                    readyEntry = entry;
+                    refreshEligible = IsRefreshEligibleLocked(entry, now);
+                }
             }
         }
 
         if (policyToken is null)
         {
-            if (!preserveForRefresh)
+            if (preserveForRefresh)
             {
-                RemoveExpired(entry);
+                return false;
+            }
+
+            lock (_gate)
+            {
+                if (valueCollected)
+                {
+                    RemoveCurrentEntryLocked(entry, collected: true);
+                }
+                else
+                {
+                    RemoveExpiredEntryLocked(entry);
+                }
             }
             return false;
         }
@@ -1971,12 +2123,19 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             return;
         }
 
-        RemoveCurrentEntryLocked(entry);
-        if (_recordStatistics)
-        {
-            Interlocked.Increment(ref _evictions);
-        }
+        RemovalCause cause = _weigher is null ? RemovalCause.Size : RemovalCause.Weight;
+        RemoveCurrentEntryLocked(entry, cause);
+        RecordCounter(CacheCounterKind.Evictions);
+        RecordCounter(CacheCounterKind.EvictedWeight, entry.Weight);
     }
+
+    private static bool IsEvictionCause(RemovalCause cause) =>
+        cause
+            is RemovalCause.Size
+                or RemovalCause.Weight
+                or RemovalCause.Expired
+                or RemovalCause.Collected
+                or RemovalCause.MemoryPressure;
 
     private long ComputeWeight(TKey key, TValue value)
     {
@@ -2000,16 +2159,6 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     private uint GetPolicyHash(TKey key)
     {
         return unchecked((uint)Comparer.GetHashCode(key));
-    }
-
-    private static ValueTask<TValue> WaitForFlight(
-        AsyncFlight flight,
-        CancellationToken cancellationToken
-    )
-    {
-        return cancellationToken.CanBeCanceled
-            ? new ValueTask<TValue>(flight.Completion.Task.WaitAsync(cancellationToken))
-            : new ValueTask<TValue>(flight.Completion.Task);
     }
 
     private static Task<TValue> WaitForSyncFlight(
@@ -2099,26 +2248,17 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
 
     private void RecordHit()
     {
-        if (_recordStatistics)
-        {
-            Interlocked.Increment(ref _hits);
-        }
+        RecordCounter(CacheCounterKind.Hits);
     }
 
     private void RecordMiss()
     {
-        if (_recordStatistics)
-        {
-            Interlocked.Increment(ref _misses);
-        }
+        RecordCounter(CacheCounterKind.Misses);
     }
 
     private void RecordCoalescedWaiter()
     {
-        if (_recordStatistics)
-        {
-            Interlocked.Increment(ref _coalescedWaiters);
-        }
+        RecordCounter(CacheCounterKind.CoalescedWaiters);
     }
 
     private static CancellationToken GetCancellationToken(OperationCanceledException exception)

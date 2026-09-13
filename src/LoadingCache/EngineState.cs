@@ -1,4 +1,6 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.ExceptionServices;
+using LoadingCache.ReferenceStorage;
 
 namespace LoadingCache;
 
@@ -49,6 +51,20 @@ internal sealed partial class CacheEngine<TKey, TValue>
         internal int TimeoutCancellationStarted;
 
         internal int CancellationCleanupCompleted = 1;
+
+        internal long LoadStartTimestamp;
+
+        // Set only at the loader invocation boundary.  A timeout can fire
+        // while the flight's timer is being armed, before the user callback
+        // is invoked; such a flight must not fabricate duration or outcome
+        // statistics from the default timestamp.
+        internal int StatisticsStarted;
+
+        internal int StatisticsRecorded;
+
+        // A refresh reuses the resident entry object.  The old value version
+        // therefore needs its own once-only replacement notification fence.
+        internal int ReplacementNotificationRecorded;
 
         // Keep the asynchronous cancellation cleanup task rooted by the flight
         // until the cache-owned cleanup reaches its retirement boundary.
@@ -176,15 +192,24 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
     private sealed class Entry
     {
-        private Entry(TKey key, long epoch, long generation)
+        private Entry(TKey key, long epoch, long generation, bool weakKey)
         {
-            Key = key;
+            if (weakKey)
+            {
+                WeakKey = ReferenceKey<TKey>.CreateWeak(key);
+            }
+            else
+            {
+                _strongKey = key;
+            }
+
             Epoch = epoch;
             Generation = generation;
         }
 
         internal readonly object Sync = new();
-        internal readonly TKey Key;
+        private readonly TKey? _strongKey;
+        internal readonly ReferenceKey<TKey>? WeakKey;
         internal readonly long Epoch;
         internal readonly long Generation;
         internal object? PolicyToken;
@@ -192,7 +217,9 @@ internal sealed partial class CacheEngine<TKey, TValue>
         internal bool IsReady;
         internal bool Retired;
         internal bool PolicyDetached;
-        internal TValue Value = default!;
+        internal bool RemovalNotified;
+        private TValue _strongValue = default!;
+        internal ReferenceValue<TValue>? WeakValue;
         internal long Weight;
         internal long WriteTimestamp;
         internal long AccessTimestamp;
@@ -213,9 +240,15 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
         internal bool HasRefreshFailure;
 
-        internal static Entry Loading(TKey key, long epoch, long generation, Flight flight)
+        internal static Entry Loading(
+            TKey key,
+            long epoch,
+            long generation,
+            Flight flight,
+            bool weakKey = false
+        )
         {
-            var entry = new Entry(key, epoch, generation) { Flight = flight };
+            var entry = new Entry(key, epoch, generation, weakKey) { Flight = flight };
             if (flight is AsyncFlight asyncFlight)
             {
                 entry.SharedTask = asyncFlight.Completion.Task;
@@ -231,12 +264,13 @@ internal sealed partial class CacheEngine<TKey, TValue>
             TValue value,
             long timestamp,
             long weight,
-            TimeSpan? variableDuration = null
+            TimeSpan? variableDuration = null,
+            bool weakKey = false,
+            bool weakValue = false
         ) =>
-            new(key, epoch, generation)
+            new(key, epoch, generation, weakKey)
             {
                 IsReady = true,
-                Value = value,
                 Weight = weight,
                 WriteTimestamp = timestamp,
                 AccessTimestamp = timestamp,
@@ -244,7 +278,48 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 VariableRevision = 1,
                 PublicationRevision = 1,
                 VariableDuration = variableDuration ?? TimeSpan.MaxValue,
-                SharedTask = Task.FromResult(value),
+                WeakValue = weakValue ? ReferenceValue<TValue>.Weak(value) : null,
+                _strongValue = weakValue ? default! : value,
+                SharedTask = weakValue ? null : Task.FromResult(value),
             };
+
+        internal bool TryGetKey([MaybeNullWhen(false)] out TKey key)
+        {
+            if (WeakKey is null)
+            {
+                key = _strongKey!;
+                return true;
+            }
+
+            return WeakKey.TryGetTarget(out key);
+        }
+
+        internal bool TryGetValue([MaybeNullWhen(false)] out TValue value)
+        {
+            if (WeakValue is not null)
+            {
+                return WeakValue.TryGetValue(out value);
+            }
+
+            value = _strongValue;
+            return true;
+        }
+
+        internal void SetValue(TValue value, bool weak)
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            if (weak)
+            {
+                WeakValue = ReferenceValue<TValue>.Weak(value);
+                _strongValue = default!;
+            }
+            else
+            {
+                _strongValue = value;
+                WeakValue = null;
+            }
+        }
+
+        internal bool IsValueCollected => WeakValue?.IsCollected == true;
     }
 }

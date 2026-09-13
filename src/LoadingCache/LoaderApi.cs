@@ -17,6 +17,26 @@ public interface ISyncCacheLoader<in TKey, TValue>
     TValue Reload(TKey key, TValue oldValue) => Load(key);
 }
 
+/// <summary>
+/// Adds an optional true bulk operation to a synchronous cache loader.
+/// </summary>
+/// <typeparam name="TKey">The cache key type.</typeparam>
+/// <typeparam name="TValue">The cache value type.</typeparam>
+[PublicAPI]
+public interface IBulkSyncCacheLoader<TKey, TValue> : ISyncCacheLoader<TKey, TValue>
+    where TKey : notnull
+    where TValue : notnull
+{
+    /// <summary>
+    /// Loads the requested keys in one backend operation. The result may also
+    /// contain prefetched keys; the cache validates and admits those keys
+    /// independently of the requested result.
+    /// </summary>
+    /// <param name="keys">A comparer-unique, bounded key snapshot.</param>
+    /// <returns>The loaded and optionally prefetched values.</returns>
+    IReadOnlyDictionary<TKey, TValue> LoadAll(IReadOnlyCollection<TKey> keys);
+}
+
 /// <summary>Loads and reloads values for an asynchronous loading cache.</summary>
 /// <typeparam name="TKey">The cache key type.</typeparam>
 /// <typeparam name="TValue">The cache value type.</typeparam>
@@ -31,6 +51,30 @@ public interface IAsyncCacheLoader<in TKey, TValue>
     /// <summary>Reloads a current value. The default delegates to <see cref="LoadAsync"/>.</summary>
     Task<TValue> ReloadAsync(TKey key, TValue oldValue, CancellationToken cancellationToken) =>
         LoadAsync(key, cancellationToken);
+}
+
+/// <summary>
+/// Adds an optional true bulk operation to an asynchronous cache loader.
+/// </summary>
+/// <typeparam name="TKey">The cache key type.</typeparam>
+/// <typeparam name="TValue">The cache value type.</typeparam>
+[PublicAPI]
+public interface IBulkAsyncCacheLoader<TKey, TValue> : IAsyncCacheLoader<TKey, TValue>
+    where TKey : notnull
+    where TValue : notnull
+{
+    /// <summary>
+    /// Loads the requested keys in one backend operation. The result may also
+    /// contain prefetched keys; the cache validates and admits those keys
+    /// independently of the requested result.
+    /// </summary>
+    /// <param name="keys">A comparer-unique, bounded key snapshot.</param>
+    /// <param name="cancellationToken">The cache-owned loader token.</param>
+    /// <returns>The loaded and optionally prefetched values.</returns>
+    Task<IReadOnlyDictionary<TKey, TValue>> LoadAllAsync(
+        IReadOnlyCollection<TKey> keys,
+        CancellationToken cancellationToken
+    );
 }
 
 internal sealed class DelegateSyncCacheLoader<TKey, TValue> : ISyncCacheLoader<TKey, TValue>

@@ -1,3 +1,5 @@
+using LoadingCache.Diagnostics;
+
 namespace LoadingCache;
 
 internal readonly record struct MemoryPressureDiagnostics(
@@ -246,13 +248,17 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 if (
                     candidate is not Entry entry
                     || entry.Epoch != _epoch
-                    || !_entries.TryGetValue(entry.Key, out Entry? current)
-                    || !ReferenceEquals(current, entry)
+                    || !_entries.IsCurrent(entry)
                 )
                     continue;
                 lock (entry.Sync)
                 {
-                    if (Volatile.Read(ref entry.IsReady) && !entry.PolicyDetached)
+                    if (
+                        Volatile.Read(ref entry.IsReady)
+                        && !entry.PolicyDetached
+                        && entry.TryGetKey(out _)
+                        && entry.TryGetValue(out _)
+                    )
                         selected.Add(new MemoryPressureCandidate(entry, entry.PublicationRevision));
                 }
             }
@@ -284,11 +290,12 @@ internal sealed partial class CacheEngine<TKey, TValue>
                     continue;
                 }
 
+                Entry current = candidateEntry;
+
                 if (
                     _disposed != 0
                     || _epoch != snapshot.Epoch
-                    || !_entries.TryGetValue(candidateEntry.Key, out Entry? current)
-                    || !ReferenceEquals(current, candidateEntry)
+                    || !_entries.IsCurrent(candidateEntry)
                     || current.Epoch != snapshot.Epoch
                     || !Volatile.Read(ref current.IsReady)
                     || current.PublicationRevision != candidate.PublicationRevision
@@ -297,11 +304,9 @@ internal sealed partial class CacheEngine<TKey, TValue>
                     continue;
                 }
 
-                RemoveCurrentEntryLocked(current);
-                if (_recordStatistics)
-                {
-                    Interlocked.Increment(ref _evictions);
-                }
+                RemoveCurrentEntryLocked(current, RemovalCause.MemoryPressure);
+                RecordCounter(CacheCounterKind.Evictions);
+                RecordCounter(CacheCounterKind.EvictedWeight, current.Weight);
 
                 removed++;
             }

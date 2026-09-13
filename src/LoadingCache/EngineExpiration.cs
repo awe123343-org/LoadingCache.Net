@@ -66,6 +66,11 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 return null;
             }
 
+            if ((_weakKeys && !entry.TryGetKey(out _)) || !entry.TryGetValue(out _))
+            {
+                return null;
+            }
+
             long now = _timeProvider.GetTimestamp();
             return IsExpired(entry, now) ? TimeSpan.Zero : GetRemainingDuration(entry, now, kind);
         }
@@ -86,6 +91,11 @@ internal sealed partial class CacheEngine<TKey, TValue>
         lock (entry.Sync)
         {
             if (!Volatile.Read(ref entry.IsReady))
+            {
+                return null;
+            }
+
+            if ((_weakKeys && !entry.TryGetKey(out _)) || !entry.TryGetValue(out _))
             {
                 return null;
             }
@@ -122,10 +132,18 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
             long now = _timeProvider.GetTimestamp();
             bool expired;
+            bool collected = false;
             lock (entry.Sync)
             {
-                expired = !Volatile.Read(ref entry.IsReady) || IsExpired(entry, now);
-                if (expired)
+                bool ready = Volatile.Read(ref entry.IsReady);
+                collected =
+                    ready
+                    && (
+                        (_weakKeys && !entry.TryGetKey(out _))
+                        || (_weakValues && !entry.TryGetValue(out _))
+                    );
+                expired = !ready || (!collected && IsExpired(entry, now));
+                if (expired || collected)
                 {
                     // The cleanup below runs after the entry snapshot lock so
                     // an ongoing refresh can retain its exact flight owner.
@@ -144,6 +162,12 @@ internal sealed partial class CacheEngine<TKey, TValue>
                         reschedule = true;
                     }
                 }
+            }
+
+            if (collected)
+            {
+                RemoveCurrentEntryLocked(entry, collected: true);
+                return false;
             }
 
             if (expired)
@@ -438,8 +462,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             if (
                 !nodes.TryGetValue(entry, out IdentityTimerNode<Entry>? currentNode)
                 || !ReferenceEquals(currentNode, node)
-                || !_entries.TryGetValue(entry.Key, out Entry? current)
-                || !ReferenceEquals(current, entry)
+                || !_entries.IsCurrent(entry)
             )
             {
                 if (!node.IsRetired)
@@ -452,12 +475,24 @@ internal sealed partial class CacheEngine<TKey, TValue>
             }
 
             bool expired;
+            bool collected;
             lock (entry.Sync)
             {
-                expired = !Volatile.Read(ref entry.IsReady) || IsExpired(entry, timestamp);
+                bool ready = Volatile.Read(ref entry.IsReady);
+                collected =
+                    ready
+                    && (
+                        (_weakKeys && !entry.TryGetKey(out _))
+                        || (_weakValues && !entry.TryGetValue(out _))
+                    );
+                expired = !ready || (!collected && IsExpired(entry, timestamp));
             }
 
-            if (expired)
+            if (collected)
+            {
+                RemoveCurrentEntryLocked(entry, collected: true);
+            }
+            else if (expired)
             {
                 RemoveExpiredEntryLocked(entry);
             }
@@ -521,11 +556,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
         ulong now = normalizedNow < wheel.CurrentTime ? wheel.CurrentTime : normalizedNow;
 
-        if (
-            !_entries.TryGetValue(entry.Key, out Entry? current)
-            || !ReferenceEquals(current, entry)
-            || !Volatile.Read(ref entry.IsReady)
-        )
+        if (!_entries.IsCurrent(entry) || !Volatile.Read(ref entry.IsReady))
         {
             RetireExpirationNodeLocked(entry);
             return;
@@ -543,6 +574,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         }
 
         TimeSpan remaining;
+        bool collected;
         lock (entry.Sync)
         {
             if (!Volatile.Read(ref entry.IsReady))
@@ -551,7 +583,17 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 return;
             }
 
-            remaining = GetEntryExpirationDuration(entry, now);
+            collected =
+                (_weakKeys && !entry.TryGetKey(out _))
+                || (_weakValues && !entry.TryGetValue(out _));
+            remaining = collected ? TimeSpan.Zero : GetEntryExpirationDuration(entry, now);
+        }
+
+        if (collected)
+        {
+            RetireExpirationNodeLocked(entry);
+            RemoveCurrentEntryLocked(entry, collected: true);
+            return;
         }
 
         if (remaining == TimeSpan.MaxValue)

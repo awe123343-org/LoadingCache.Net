@@ -1,3 +1,5 @@
+using LoadingCache.Diagnostics;
+
 namespace LoadingCache;
 
 internal sealed partial class CacheEngine<TKey, TValue>
@@ -172,9 +174,17 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 RemoveCurrentEntryLocked(flight);
             }
 
-            if (_recordStatistics)
+            RecordCounter(CacheCounterKind.LoadTimeouts);
+            if (flight.IsRefresh)
             {
-                Interlocked.Increment(ref _loadTimeouts);
+                if (TryRecordFlightDuration(flight))
+                {
+                    RecordCounter(CacheCounterKind.RefreshFailures);
+                }
+            }
+            else
+            {
+                TryRecordFlightDuration(flight);
             }
 
             timedOut = true;
@@ -200,6 +210,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
     private void CompleteTimeoutPromise(Flight flight)
     {
         var exception = new TimeoutException("The cache loading flight exceeded its deadline.");
+        CompleteBulkTimeout(flight, exception);
         try
         {
             InvokeHook(_testHooks?.BeforeCompletion);

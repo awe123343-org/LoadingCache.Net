@@ -73,6 +73,22 @@ internal sealed class ReferenceKey<TKey>
     }
 
     /// <summary>
+    /// Creates an ephemeral strong probe for a live lookup. The probe is never
+    /// inserted into the mapping and only keeps the caller's target alive for
+    /// the dictionary operation.
+    /// </summary>
+    internal static ReferenceKey<TKey> CreateProbe(TKey key)
+    {
+        if (key is null)
+        {
+            throw new ArgumentNullException(nameof(key));
+        }
+        EnsureReferenceType();
+        object target = key;
+        return new ReferenceKey<TKey>(key, weak: false, RuntimeHelpers.GetHashCode(target));
+    }
+
+    /// <summary>
     /// Creates a weak handle with a controlled hash for collision tests.
     /// </summary>
     /// <remarks>
@@ -191,5 +207,20 @@ internal sealed class ReferenceKeyComparer<TKey> : IEqualityComparer<ReferenceKe
     {
         ArgumentNullException.ThrowIfNull(obj);
         return obj.IdentityHash;
+    }
+}
+
+/// <summary>Reference-identity comparer for public key snapshots in weak-key mode.</summary>
+internal sealed class ReferenceIdentityComparer<TKey> : IEqualityComparer<TKey>
+    where TKey : notnull
+{
+    internal static ReferenceIdentityComparer<TKey> Instance { get; } = new();
+
+    public bool Equals(TKey? x, TKey? y) => ReferenceEquals(x, y);
+
+    public int GetHashCode(TKey obj)
+    {
+        ArgumentNullException.ThrowIfNull(obj);
+        return RuntimeHelpers.GetHashCode(obj);
     }
 }

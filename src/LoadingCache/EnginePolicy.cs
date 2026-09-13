@@ -10,14 +10,29 @@ internal sealed partial class CacheEngine<TKey, TValue>
         ThrowIfDisposed();
         if (_entries.TryGetValue(key, out Entry? entry))
         {
+            bool collected = false;
             lock (entry.Sync)
             {
                 if (
                     Volatile.Read(ref entry.IsReady)
                     && !IsExpired(entry, _timeProvider.GetTimestamp())
+                    && entry.TryGetValue(out TValue? value)
                 )
                 {
-                    return (true, entry.Value);
+                    return (true, value);
+                }
+
+                collected = Volatile.Read(ref entry.IsReady) && entry.IsValueCollected;
+            }
+
+            if (collected)
+            {
+                lock (_gate)
+                {
+                    if (_disposed == 0)
+                    {
+                        RemoveCurrentEntryLocked(entry, collected: true);
+                    }
                 }
             }
         }
@@ -93,8 +108,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
                     if (
                         token is not Entry entry
                         || entry.Epoch != engine._epoch
-                        || !engine._entries.TryGetValue(entry.Key, out Entry? current)
-                        || !ReferenceEquals(current, entry)
+                        || !engine._entries.IsCurrent(entry)
                     )
                     {
                         continue;
@@ -108,7 +122,13 @@ internal sealed partial class CacheEngine<TKey, TValue>
                             && !engine.IsExpired(entry, engine._timeProvider.GetTimestamp())
                         )
                         {
-                            result.Add(new KeyValuePair<TKey, TValue>(entry.Key, entry.Value));
+                            if (
+                                entry.TryGetKey(out TKey? key)
+                                && entry.TryGetValue(out TValue? value)
+                            )
+                            {
+                                result.Add(new KeyValuePair<TKey, TValue>(key, value));
+                            }
                         }
                     }
                 }

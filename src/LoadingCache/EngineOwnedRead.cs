@@ -19,12 +19,11 @@ internal sealed partial class CacheEngine<TKey, TValue>
         ArgumentNullException.ThrowIfNull(tryAcquire);
         ThrowIfDisposed();
 
-        Entry? readyEntry = null;
-        object? policyToken = null;
-        long variableTimestamp = 0;
-        long variableRevision = 0;
-        TimeSpan variableDuration = TimeSpan.MaxValue;
-        bool acquired = false;
+        Entry readyEntry;
+        object? policyToken;
+        long variableTimestamp;
+        long variableRevision;
+        TimeSpan variableDuration;
 
         lock (_gate)
         {
@@ -41,14 +40,21 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 long now = _timeProvider.GetTimestamp();
                 if (!Volatile.Read(ref entry.IsReady) || IsExpired(entry, now))
                 {
-                    RemoveCurrentEntryLocked(entry);
+                    RemoveCurrentEntryLocked(entry, RemovalCause.Expired);
                     value = default;
                     RecordMiss();
                     return false;
                 }
 
-                acquired = tryAcquire(entry.Value);
-                if (!acquired)
+                if (!entry.TryGetValue(out TValue? liveValue))
+                {
+                    RemoveCurrentEntryLocked(entry, collected: true);
+                    value = default;
+                    RecordMiss();
+                    return false;
+                }
+
+                if (!tryAcquire(liveValue))
                 {
                     value = default;
                     RecordMiss();
@@ -56,7 +62,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 }
 
                 TouchWithoutLock(entry, now);
-                value = entry.Value;
+                value = liveValue;
                 readyEntry = entry;
                 policyToken = entry.PolicyToken;
                 variableTimestamp = entry.VariableTimestamp;
@@ -65,12 +71,6 @@ internal sealed partial class CacheEngine<TKey, TValue>
                     ? TimeSpan.MaxValue
                     : GetRemainingDuration(entry, now, ExpirationKind.Variable);
             }
-        }
-
-        if (!acquired || readyEntry is null)
-        {
-            value = default;
-            return false;
         }
 
         if (_expiry is not null)

@@ -71,23 +71,23 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
         int stripeIndex = Environment.CurrentManagedThreadId & _stripeMask;
         if (Volatile.Read(ref _disposed) != 0)
         {
-            Interlocked.Increment(ref _droppedShutdownByStripe[stripeIndex]);
+            SaturatingIncrement(ref _droppedShutdownByStripe[stripeIndex]);
             return false;
         }
 
         if (_stripes[stripeIndex].Writer.TryWrite(value))
         {
-            Interlocked.Increment(ref _enqueuedByStripe[stripeIndex]);
+            SaturatingIncrement(ref _enqueuedByStripe[stripeIndex]);
             return true;
         }
 
         if (Volatile.Read(ref _disposed) != 0)
         {
-            Interlocked.Increment(ref _droppedShutdownByStripe[stripeIndex]);
+            SaturatingIncrement(ref _droppedShutdownByStripe[stripeIndex]);
         }
         else
         {
-            Interlocked.Increment(ref _droppedFullByStripe[stripeIndex]);
+            SaturatingIncrement(ref _droppedFullByStripe[stripeIndex]);
         }
 
         return false;
@@ -112,7 +112,7 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
             }
 
             _nextReadStripe = (stripeIndex + 1) & _stripeMask;
-            Interlocked.Increment(ref _dequeuedByStripe[stripeIndex]);
+            SaturatingIncrement(ref _dequeuedByStripe[stripeIndex]);
             return true;
         }
 
@@ -132,10 +132,16 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
         {
             Channel<TEvent> stripe = _stripes[index];
             queued += stripe.Reader.Count;
-            enqueued += Interlocked.Read(ref _enqueuedByStripe[index]);
-            dequeued += Interlocked.Read(ref _dequeuedByStripe[index]);
-            droppedFull += Interlocked.Read(ref _droppedFullByStripe[index]);
-            droppedShutdown += Interlocked.Read(ref _droppedShutdownByStripe[index]);
+            enqueued = SaturatingAdd(enqueued, Interlocked.Read(ref _enqueuedByStripe[index]));
+            dequeued = SaturatingAdd(dequeued, Interlocked.Read(ref _dequeuedByStripe[index]));
+            droppedFull = SaturatingAdd(
+                droppedFull,
+                Interlocked.Read(ref _droppedFullByStripe[index])
+            );
+            droppedShutdown = SaturatingAdd(
+                droppedShutdown,
+                Interlocked.Read(ref _droppedShutdownByStripe[index])
+            );
         }
 
         return new ReadBufferStatistics(
@@ -146,6 +152,25 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
             droppedFull,
             droppedShutdown
         );
+    }
+
+    internal void AddStatisticsForTesting(
+        int stripeIndex,
+        long enqueued = 0,
+        long dequeued = 0,
+        long droppedFull = 0,
+        long droppedShutdown = 0
+    )
+    {
+        if ((uint)stripeIndex >= (uint)_stripes.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(stripeIndex));
+        }
+
+        AddNonNegativeForTesting(ref _enqueuedByStripe[stripeIndex], enqueued);
+        AddNonNegativeForTesting(ref _dequeuedByStripe[stripeIndex], dequeued);
+        AddNonNegativeForTesting(ref _droppedFullByStripe[stripeIndex], droppedFull);
+        AddNonNegativeForTesting(ref _droppedShutdownByStripe[stripeIndex], droppedShutdown);
     }
 
     /// <summary>
@@ -169,8 +194,37 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
         {
             while (_stripes[index].Reader.TryRead(out _))
             {
-                Interlocked.Increment(ref _droppedShutdownByStripe[index]);
+                SaturatingIncrement(ref _droppedShutdownByStripe[index]);
             }
         }
     }
+
+    private static void AddNonNegativeForTesting(ref long location, long delta)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(delta);
+        SaturatingAdd(ref location, delta);
+    }
+
+    private static void SaturatingIncrement(ref long location) => SaturatingAdd(ref location, 1);
+
+    private static void SaturatingAdd(ref long location, long delta)
+    {
+        if (delta == 0)
+        {
+            return;
+        }
+
+        while (true)
+        {
+            long current = Volatile.Read(ref location);
+            long next = delta >= long.MaxValue - current ? long.MaxValue : current + delta;
+            if (Interlocked.CompareExchange(ref location, next, current) == current)
+            {
+                return;
+            }
+        }
+    }
+
+    private static long SaturatingAdd(long left, long right) =>
+        right >= long.MaxValue - left ? long.MaxValue : left + right;
 }

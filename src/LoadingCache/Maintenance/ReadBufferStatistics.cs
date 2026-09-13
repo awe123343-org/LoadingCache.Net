@@ -34,5 +34,8 @@ internal readonly struct ReadBufferStatistics
 
     internal long DroppedShutdown { get; }
 
-    internal long Dropped => DroppedFull + DroppedShutdown;
+    internal long Dropped => SaturatingAdd(DroppedFull, DroppedShutdown);
+
+    private static long SaturatingAdd(long left, long right) =>
+        right >= long.MaxValue - left ? long.MaxValue : left + right;
 }

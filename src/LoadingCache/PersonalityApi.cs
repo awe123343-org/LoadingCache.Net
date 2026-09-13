@@ -45,6 +45,12 @@ public interface ICache<TKey, TValue> : IDisposable
     /// <summary>Gets a point-in-time statistics snapshot.</summary>
     CacheStatistics Statistics { get; }
 
+    /// <summary>
+    /// Gets a point-in-time snapshot of the bounded listener dispatcher. This remains available
+    /// after disposal so shutdown drops can be observed.
+    /// </summary>
+    CacheNotificationStatistics GetNotificationStatistics();
+
     /// <summary>Gets the read-only policy view.</summary>
     ICachePolicy<TKey, TValue> Policy { get; }
 
@@ -110,6 +116,12 @@ public interface IAsyncCache<TKey, TValue> : IAsyncDisposable
     /// <summary>Gets a point-in-time statistics snapshot.</summary>
     CacheStatistics Statistics { get; }
 
+    /// <summary>
+    /// Gets a point-in-time snapshot of the bounded listener dispatcher. This remains available
+    /// after disposal so shutdown drops can be observed.
+    /// </summary>
+    CacheNotificationStatistics GetNotificationStatistics();
+
     /// <summary>Gets the read-only policy view.</summary>
     ICachePolicy<TKey, TValue> Policy { get; }
 
@@ -145,21 +157,8 @@ public class Cache<TKey, TValue> : ICache<TKey, TValue>
         Engine.GetOrAdd(key, valueFactory);
 
     /// <summary>Returns all currently resident values for the supplied keys.</summary>
-    public IReadOnlyDictionary<TKey, TValue> GetAllPresent(IEnumerable<TKey> keys)
-    {
-        ArgumentNullException.ThrowIfNull(keys);
-        EnsureUsable();
-        var result = new Dictionary<TKey, TValue>(Engine.Comparer);
-        foreach (TKey key in keys)
-        {
-            if (TryGet(key, out TValue? value))
-            {
-                result[key] = value!;
-            }
-        }
-
-        return result;
-    }
+    public IReadOnlyDictionary<TKey, TValue> GetAllPresent(IEnumerable<TKey> keys) =>
+        Engine.GetAllPresent(keys);
 
     /// <summary>Stores a value for a key.</summary>
     public void Put(TKey key, TValue value) => Engine.Put(key, value);
@@ -169,22 +168,7 @@ public class Cache<TKey, TValue> : ICache<TKey, TValue>
     public void Put(TKey key, TValue value, TimeSpan duration) => Engine.Put(key, value, duration);
 
     /// <summary>Stores a snapshot of key/value pairs.</summary>
-    public void PutAll(IEnumerable<KeyValuePair<TKey, TValue>> values)
-    {
-        ArgumentNullException.ThrowIfNull(values);
-        Engine.EnsureUsable();
-        KeyValuePair<TKey, TValue>[] snapshot = [.. values];
-        foreach (KeyValuePair<TKey, TValue> pair in snapshot)
-        {
-            ArgumentNullException.ThrowIfNull(pair.Key);
-            ArgumentNullException.ThrowIfNull(pair.Value);
-        }
-
-        foreach (KeyValuePair<TKey, TValue> pair in snapshot)
-        {
-            Put(pair.Key, pair.Value);
-        }
-    }
+    public void PutAll(IEnumerable<KeyValuePair<TKey, TValue>> values) => Engine.PutAll(values);
 
     /// <summary>Removes the current value for a key.</summary>
     public bool Invalidate(TKey key) => Engine.Invalidate(key);
@@ -203,6 +187,10 @@ public class Cache<TKey, TValue> : ICache<TKey, TValue>
 
     /// <summary>Gets a point-in-time statistics snapshot.</summary>
     public CacheStatistics Statistics => Engine.GetStatistics();
+
+    /// <summary>Gets a point-in-time snapshot of the bounded listener dispatcher.</summary>
+    public CacheNotificationStatistics GetNotificationStatistics() =>
+        Engine.GetNotificationStatistics();
 
     /// <summary>Gets the read-only policy view.</summary>
     public ICachePolicy<TKey, TValue> Policy => Engine.Policy;
@@ -227,16 +215,22 @@ public sealed class LoadingCache<TKey, TValue> : Cache<TKey, TValue>, ILoadingCa
 {
     private readonly Func<TKey, TValue> _loader;
     private readonly Func<TKey, TValue, TValue> _reload;
+    private readonly Func<
+        IReadOnlyCollection<TKey>,
+        IReadOnlyDictionary<TKey, TValue>
+    >? _bulkLoader;
 
     internal LoadingCache(
         CacheEngine<TKey, TValue> engine,
         Func<TKey, TValue> loader,
-        Func<TKey, TValue, TValue>? reload = null
+        Func<TKey, TValue, TValue>? reload = null,
+        Func<IReadOnlyCollection<TKey>, IReadOnlyDictionary<TKey, TValue>>? bulkLoader = null
     )
         : base(engine)
     {
         _loader = loader;
         _reload = reload ?? Reload;
+        _bulkLoader = bulkLoader;
     }
 
     private TValue Reload(TKey key, TValue _) => _loader(key);
@@ -248,14 +242,7 @@ public sealed class LoadingCache<TKey, TValue> : Cache<TKey, TValue>, ILoadingCa
     public IReadOnlyDictionary<TKey, TValue> GetAll(IEnumerable<TKey> keys)
     {
         ArgumentNullException.ThrowIfNull(keys);
-        EnsureUsable();
-        var result = new Dictionary<TKey, TValue>(KeyComparer);
-        foreach (TKey key in keys)
-        {
-            result[key] = Get(key);
-        }
-
-        return result;
+        return Engine.GetAll(keys, _loader, _reload, _bulkLoader);
     }
 
     /// <summary>Reloads or loads a key without converting an async loader to sync code.</summary>
@@ -308,6 +295,10 @@ public class AsyncCache<TKey, TValue> : IAsyncCache<TKey, TValue>
     /// <summary>Gets a point-in-time statistics snapshot.</summary>
     public CacheStatistics Statistics => _engine.GetStatistics();
 
+    /// <summary>Gets a point-in-time snapshot of the bounded listener dispatcher.</summary>
+    public CacheNotificationStatistics GetNotificationStatistics() =>
+        _engine.GetNotificationStatistics();
+
     /// <summary>Gets the read-only policy view.</summary>
     public ICachePolicy<TKey, TValue> Policy => _engine.Policy;
 
@@ -334,17 +325,28 @@ public class AsyncLoadingCache<TKey, TValue>
     private readonly CacheEngine<TKey, TValue> _engine;
     private readonly Func<TKey, CancellationToken, Task<TValue>> _loader;
     private readonly Func<TKey, TValue, CancellationToken, Task<TValue>> _reload;
+    private readonly Func<
+        IReadOnlyCollection<TKey>,
+        CancellationToken,
+        Task<IReadOnlyDictionary<TKey, TValue>>
+    >? _bulkLoader;
 
     internal AsyncLoadingCache(
         CacheEngine<TKey, TValue> engine,
         Func<TKey, CancellationToken, Task<TValue>> loader,
-        Func<TKey, TValue, CancellationToken, Task<TValue>>? reload = null
+        Func<TKey, TValue, CancellationToken, Task<TValue>>? reload = null,
+        Func<
+            IReadOnlyCollection<TKey>,
+            CancellationToken,
+            Task<IReadOnlyDictionary<TKey, TValue>>
+        >? bulkLoader = null
     )
         : base(engine)
     {
         _engine = engine;
         _loader = loader;
         _reload = reload ?? ReloadAsync;
+        _bulkLoader = bulkLoader;
     }
 
     private Task<TValue> ReloadAsync(TKey key, TValue _, CancellationToken cancellationToken) =>
@@ -378,22 +380,5 @@ public class AsyncLoadingCache<TKey, TValue>
     public ValueTask<IReadOnlyDictionary<TKey, TValue>> GetAllAsync(
         IEnumerable<TKey> keys,
         CancellationToken cancellationToken = default
-    ) => GetAllAsyncCore(keys, cancellationToken);
-
-    private async ValueTask<IReadOnlyDictionary<TKey, TValue>> GetAllAsyncCore(
-        IEnumerable<TKey> keys,
-        CancellationToken cancellationToken
-    )
-    {
-        ArgumentNullException.ThrowIfNull(keys);
-        _engine.EnsureUsable();
-        cancellationToken.ThrowIfCancellationRequested();
-        var result = new Dictionary<TKey, TValue>(_engine.Comparer);
-        foreach (TKey key in keys)
-        {
-            result[key] = await GetAsync(key, cancellationToken).ConfigureAwait(false);
-        }
-
-        return result;
-    }
+    ) => _engine.GetAllAsync(_loader, _reload, _bulkLoader, keys, cancellationToken);
 }

@@ -1,3 +1,5 @@
+using JetBrains.Annotations;
+
 namespace LoadingCache;
 
 /// <summary>Entry point for the typed cache builder.</summary>
@@ -22,6 +24,16 @@ public sealed class CacheBuilder<TKey, TValue>
     private int? _maximumResidentCount;
     private Func<TKey, TValue, long>? _weigher;
     private int _maxConcurrentLoads;
+    private int? _maxPendingLoadKeys;
+    private int? _maximumBulkKeys;
+    private bool _weakKeys;
+    private bool _weakValues;
+    private bool _hasCustomComparer;
+    private Action<RemovalNotification<TKey, TValue>>? _removalListener;
+    private Action<RemovalNotification<TKey, TValue>>? _evictionListener;
+    private int _notificationCapacity = 1024;
+    private bool _enableMetrics;
+    private string? _metricsName;
     private TimeSpan? _expireAfterWrite;
     private TimeSpan? _expireAfterAccess;
     private TimeSpan? _refreshAfterWrite;
@@ -78,6 +90,46 @@ public sealed class CacheBuilder<TKey, TValue>
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumConcurrentLoads);
         _maxConcurrentLoads = maximumConcurrentLoads;
+        return this;
+    }
+
+    /// <summary>Bounds pending key generations, including retired loads still running.</summary>
+    public CacheBuilder<TKey, TValue> MaxPendingLoadKeys(int maximumPendingLoadKeys)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumPendingLoadKeys);
+        _maxPendingLoadKeys = maximumPendingLoadKeys;
+        return this;
+    }
+
+    /// <summary>Bounds enumerated input and output entries in a bulk operation.</summary>
+    public CacheBuilder<TKey, TValue> MaximumBulkKeys(int maximumBulkKeys)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumBulkKeys);
+        _maximumBulkKeys = maximumBulkKeys;
+        return this;
+    }
+
+    /// <summary>Stores reference-type keys weakly and compares keys by object identity.</summary>
+    /// <remarks>Cannot be combined with an explicitly configured key comparer.</remarks>
+    public CacheBuilder<TKey, TValue> WeakKeys()
+    {
+        if (typeof(TKey).IsValueType)
+        {
+            throw new InvalidOperationException("Weak keys require a reference key type.");
+        }
+        _weakKeys = true;
+        return this;
+    }
+
+    /// <summary>Stores reference-type values weakly in a synchronous cache.</summary>
+    /// <remarks>Asynchronous caches retain shared tasks and cannot use weak values.</remarks>
+    public CacheBuilder<TKey, TValue> WeakValues()
+    {
+        if (typeof(TValue).IsValueType)
+        {
+            throw new InvalidOperationException("Weak values require a reference value type.");
+        }
+        _weakValues = true;
         return this;
     }
 
@@ -195,6 +247,7 @@ public sealed class CacheBuilder<TKey, TValue>
     {
         ArgumentNullException.ThrowIfNull(comparer);
         _comparer = comparer;
+        _hasCustomComparer = true;
         return this;
     }
 
@@ -202,6 +255,46 @@ public sealed class CacheBuilder<TKey, TValue>
     public CacheBuilder<TKey, TValue> RecordStatistics()
     {
         _recordStatistics = true;
+        return this;
+    }
+
+    /// <summary>Registers a bounded asynchronous notification for every removal cause.</summary>
+    /// <remarks>Runs outside cache locks. Notifications may be dropped under pressure or shutdown.</remarks>
+    public CacheBuilder<TKey, TValue> RemovalListener(
+        Action<RemovalNotification<TKey, TValue>> listener
+    )
+    {
+        ArgumentNullException.ThrowIfNull(listener);
+        _removalListener = listener;
+        return this;
+    }
+
+    /// <summary>Registers a bounded asynchronous notification for policy-driven removals.</summary>
+    /// <remarks>Eviction and removal callbacks are diagnostic notifications, not disposal guarantees.</remarks>
+    public CacheBuilder<TKey, TValue> EvictionListener(
+        Action<RemovalNotification<TKey, TValue>> listener
+    )
+    {
+        ArgumentNullException.ThrowIfNull(listener);
+        _evictionListener = listener;
+        return this;
+    }
+
+    /// <summary>Sets the listener queue capacity. The default is 1024 notifications.</summary>
+    public CacheBuilder<TKey, TValue> NotificationCapacity(int capacity)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
+        _notificationCapacity = capacity;
+        return this;
+    }
+
+    /// <summary>Enables optional System.Diagnostics.Metrics instruments for this cache.</summary>
+    /// <param name="cacheName">A stable, low-cardinality name. Never use request, user or tenant identifiers.</param>
+    public CacheBuilder<TKey, TValue> EnableMetrics(string cacheName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(cacheName);
+        _enableMetrics = true;
+        _metricsName = cacheName;
         return this;
     }
 
@@ -219,15 +312,19 @@ public sealed class CacheBuilder<TKey, TValue>
     public ILoadingCache<TKey, TValue> BuildLoading(ISyncCacheLoader<TKey, TValue> loader)
     {
         ArgumentNullException.ThrowIfNull(loader);
+        var bulkLoader = loader as IBulkSyncCacheLoader<TKey, TValue>;
+        ValidateBulkCapability(bulkLoader is not null);
         return new LoadingCache<TKey, TValue>(
             CreateEngine(hasFixedLoader: true),
             loader.Load,
-            loader.Reload
+            loader.Reload,
+            bulkLoader is null ? null : bulkLoader.LoadAll
         );
     }
 
     /// <summary>Builds a manual asynchronous cache.</summary>
-    public IAsyncCache<TKey, TValue> BuildAsync() => new AsyncCache<TKey, TValue>(CreateEngine());
+    public IAsyncCache<TKey, TValue> BuildAsync() =>
+        new AsyncCache<TKey, TValue>(CreateEngine(isAsync: true));
 
     /// <summary>Builds an asynchronous loading cache.</summary>
     public IAsyncLoadingCache<TKey, TValue> BuildAsyncLoading(
@@ -244,19 +341,29 @@ public sealed class CacheBuilder<TKey, TValue>
     )
     {
         ArgumentNullException.ThrowIfNull(loader);
+        var bulkLoader = loader as IBulkAsyncCacheLoader<TKey, TValue>;
+        ValidateBulkCapability(bulkLoader is not null);
         return new AsyncLoadingCache<TKey, TValue>(
-            CreateEngine(hasFixedLoader: true),
+            CreateEngine(hasFixedLoader: true, isAsync: true),
             loader.LoadAsync,
-            loader.ReloadAsync
+            loader.ReloadAsync,
+            bulkLoader is null ? null : bulkLoader.LoadAllAsync
         );
     }
 
     internal CacheEngine<TKey, TValue> CreateEngine(
         LoadingCacheTestHooks? testHooks = null,
-        bool hasFixedLoader = false
+        bool hasFixedLoader = false,
+        bool isAsync = false
     )
     {
         ValidateBuild(hasFixedLoader);
+        if (_weakValues && isAsync)
+        {
+            throw new InvalidOperationException(
+                "Weak values cannot be used with asynchronous caches."
+            );
+        }
         return new CacheEngine<TKey, TValue>(
             new CacheEngineOptions<TKey, TValue>
             {
@@ -265,6 +372,10 @@ public sealed class CacheBuilder<TKey, TValue>
                 MaximumResidentCount = _maximumResidentCount,
                 Weigher = _weigher,
                 MaxConcurrentLoads = _maxConcurrentLoads,
+                MaxPendingLoadKeys = _maxPendingLoadKeys,
+                MaximumBulkKeys = _maximumBulkKeys,
+                WeakKeys = _weakKeys,
+                WeakValues = _weakValues,
                 ExpireAfterWrite = _expireAfterWrite,
                 ExpireAfterAccess = _expireAfterAccess,
                 RefreshAfterWrite = _refreshAfterWrite,
@@ -273,13 +384,18 @@ public sealed class CacheBuilder<TKey, TValue>
                 Expiry = _expiry,
                 TimeProvider = _timeProvider,
                 RecordStatistics = _recordStatistics,
+                RemovalListener = _removalListener,
+                EvictionListener = _evictionListener,
+                NotificationCapacity = _notificationCapacity,
+                EnableMetrics = _enableMetrics,
+                MetricsName = _metricsName,
                 EnableExpirationScheduler = _enableExpirationScheduler,
                 MemoryPressureSamplingInterval = _memoryPressureSamplingInterval,
                 MemoryPressureThreshold = _memoryPressureThreshold,
                 MemoryPressureTrimFraction = _memoryPressureTrimFraction,
                 MemoryPressureMaximumTrimCount = _memoryPressureMaximumTrimCount,
                 MemoryPressureSource = _memoryPressureSource,
-                Comparer = _comparer,
+                Comparer = _weakKeys ? null : _comparer,
                 TestHooks = testHooks,
             }
         );
@@ -287,6 +403,24 @@ public sealed class CacheBuilder<TKey, TValue>
 
     private void ValidateBuild(bool hasFixedLoader)
     {
+        if (_weakKeys && _hasCustomComparer)
+        {
+            throw new InvalidOperationException(
+                "Weak keys use identity equality and cannot use a custom comparer."
+            );
+        }
+
+        if (
+            _maximumBulkKeys.HasValue
+            && _maxPendingLoadKeys.HasValue
+            && _maximumBulkKeys > _maxPendingLoadKeys
+        )
+        {
+            throw new InvalidOperationException(
+                "MaximumBulkKeys cannot exceed MaxPendingLoadKeys."
+            );
+        }
+
         if (_maximumSize.HasValue == _maximumWeight.HasValue)
         {
             throw new InvalidOperationException(
@@ -333,6 +467,16 @@ public sealed class CacheBuilder<TKey, TValue>
         }
     }
 
+    private void ValidateBulkCapability(bool hasBulkLoader)
+    {
+        if (hasBulkLoader && (!_maxPendingLoadKeys.HasValue || !_maximumBulkKeys.HasValue))
+        {
+            throw new InvalidOperationException(
+                "Bulk loaders require explicit MaxPendingLoadKeys and MaximumBulkKeys limits."
+            );
+        }
+    }
+
     private static void ValidateDuration(TimeSpan? duration, string parameterName)
     {
         if (
@@ -347,6 +491,7 @@ public sealed class CacheBuilder<TKey, TValue>
         }
     }
 
+    [AssertionMethod]
     private static void ValidateMemoryPressureOptions(
         TimeSpan samplingInterval,
         double pressureThreshold,

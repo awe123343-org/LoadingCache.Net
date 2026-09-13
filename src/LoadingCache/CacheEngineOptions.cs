@@ -1,4 +1,5 @@
 using LoadingCache.Maintenance;
+using LoadingCache.Notifications;
 
 namespace LoadingCache;
 
@@ -15,6 +16,10 @@ internal sealed class CacheEngineOptions<TKey, TValue>
     // retires its internal ownership token; it never executes user code.
     internal Action<TValue>? OnValueRetired { get; init; }
     internal int MaxConcurrentLoads { get; init; }
+    internal int? MaxPendingLoadKeys { get; init; }
+    internal int? MaximumBulkKeys { get; init; }
+    internal bool WeakKeys { get; init; }
+    internal bool WeakValues { get; init; }
     internal TimeSpan? ExpireAfterWrite { get; init; }
     internal TimeSpan? ExpireAfterAccess { get; init; }
     internal TimeSpan? RefreshAfterWrite { get; init; }
@@ -37,4 +42,13 @@ internal sealed class CacheEngineOptions<TKey, TValue>
     internal int MaintenanceMaxPasses { get; init; } = 32;
     internal int MaintenanceReadStripeCount { get; init; } = 4;
     internal int MaintenanceReadStripeCapacity { get; init; } = 256;
+
+    // M5 diagnostics. Public builder methods map directly to these fields;
+    // the engine keeps callbacks behind a bounded, lock-outside dispatcher.
+    internal Action<RemovalNotification<TKey, TValue>>? RemovalListener { get; init; }
+    internal Action<RemovalNotification<TKey, TValue>>? EvictionListener { get; init; }
+    internal int NotificationCapacity { get; init; } = 1024;
+    internal bool EnableMetrics { get; init; }
+    internal string? MetricsName { get; init; }
+    internal INotificationScheduler? NotificationScheduler { get; init; }
 }

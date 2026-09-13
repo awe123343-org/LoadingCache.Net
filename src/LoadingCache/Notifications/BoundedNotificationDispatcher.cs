@@ -65,18 +65,18 @@ internal sealed class BoundedNotificationDispatcher<TNotification> : IDisposable
         {
             if (_disposed)
             {
-                _droppedShutdown++;
+                _droppedShutdown = SaturatingIncrement(_droppedShutdown);
                 return false;
             }
 
             if (_queue.Count >= _capacity)
             {
-                _droppedFull++;
+                _droppedFull = SaturatingIncrement(_droppedFull);
                 return false;
             }
 
             _queue.Enqueue(notification);
-            _enqueued++;
+            _enqueued = SaturatingIncrement(_enqueued);
             if (!_drainScheduled)
             {
                 _drainScheduled = true;
@@ -158,7 +158,7 @@ internal sealed class BoundedNotificationDispatcher<TNotification> : IDisposable
     {
         lock (_gate)
         {
-            _scheduleRejections++;
+            _scheduleRejections = SaturatingIncrement(_scheduleRejections);
             if (!_drainScheduled)
             {
                 return;
@@ -212,7 +212,7 @@ internal sealed class BoundedNotificationDispatcher<TNotification> : IDisposable
                     {
                         notification = _queue.Dequeue();
                         _handlerRunning = true;
-                        _invoked++;
+                        _invoked = SaturatingIncrement(_invoked);
                     }
                 }
 
@@ -227,14 +227,14 @@ internal sealed class BoundedNotificationDispatcher<TNotification> : IDisposable
                     _handler(notification);
                     lock (_gate)
                     {
-                        _delivered++;
+                        _delivered = SaturatingIncrement(_delivered);
                     }
                 }
                 catch (Exception)
                 {
                     lock (_gate)
                     {
-                        _handlerFailures++;
+                        _handlerFailures = SaturatingIncrement(_handlerFailures);
                     }
                 }
                 finally
@@ -260,7 +260,13 @@ internal sealed class BoundedNotificationDispatcher<TNotification> : IDisposable
 
     private void DropQueuedLocked(ref long counter)
     {
-        counter += _queue.Count;
+        counter = SaturatingAdd(counter, _queue.Count);
         _queue.Clear();
     }
+
+    private static long SaturatingIncrement(long value) =>
+        value == long.MaxValue ? value : value + 1;
+
+    private static long SaturatingAdd(long left, int right) =>
+        right >= long.MaxValue - left ? long.MaxValue : left + right;
 }

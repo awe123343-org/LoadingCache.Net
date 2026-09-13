@@ -80,7 +80,7 @@ internal sealed class MaintenanceCoordinator : IDisposable
     {
         lock (_gate)
         {
-            _requests++;
+            SaturatingIncrement(ref _requests);
             switch (_state)
             {
                 case MaintenanceCoordinatorState.Disposed:
@@ -92,16 +92,16 @@ internal sealed class MaintenanceCoordinator : IDisposable
                     break;
 
                 case MaintenanceCoordinatorState.Scheduled:
-                    _coalescedRequests++;
+                    SaturatingIncrement(ref _coalescedRequests);
                     return MaintenanceRequestResult.Accepted;
 
                 case MaintenanceCoordinatorState.Running:
                     _state = MaintenanceCoordinatorState.RunningRequired;
-                    _coalescedRequests++;
+                    SaturatingIncrement(ref _coalescedRequests);
                     return MaintenanceRequestResult.Accepted;
 
                 case MaintenanceCoordinatorState.RunningRequired:
-                    _coalescedRequests++;
+                    SaturatingIncrement(ref _coalescedRequests);
                     return MaintenanceRequestResult.Accepted;
 
                 default:
@@ -135,7 +135,7 @@ internal sealed class MaintenanceCoordinator : IDisposable
             }
 
             _state = MaintenanceCoordinatorState.Idle;
-            _scheduleRejections++;
+            SaturatingIncrement(ref _scheduleRejections);
             return MaintenanceRequestResult.ScheduleRejected;
         }
     }
@@ -165,7 +165,7 @@ internal sealed class MaintenanceCoordinator : IDisposable
                 case MaintenanceCoordinatorState.Scheduled:
                     _state = MaintenanceCoordinatorState.Running;
                     _fallbackRequired = false;
-                    _synchronousCleanUps++;
+                    SaturatingIncrement(ref _synchronousCleanUps);
                     break;
 
                 default:
@@ -192,6 +192,17 @@ internal sealed class MaintenanceCoordinator : IDisposable
                 _budgetExhaustions,
                 _fallbackRequired
             );
+        }
+    }
+
+    internal void AddStatisticsForTesting(long scheduleRejections = 0, long drainFaults = 0)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(scheduleRejections);
+        ArgumentOutOfRangeException.ThrowIfNegative(drainFaults);
+        lock (_gate)
+        {
+            SaturatingAdd(ref _scheduleRejections, scheduleRejections);
+            SaturatingAdd(ref _drainFaults, drainFaults);
         }
     }
 
@@ -274,10 +285,10 @@ internal sealed class MaintenanceCoordinator : IDisposable
                 bool rearm;
                 lock (_gate)
                 {
-                    _drainPasses++;
+                    SaturatingIncrement(ref _drainPasses);
                     if (faulted)
                     {
-                        _drainFaults++;
+                        SaturatingIncrement(ref _drainFaults);
                     }
 
                     if (_state == MaintenanceCoordinatorState.Disposed)
@@ -289,7 +300,7 @@ internal sealed class MaintenanceCoordinator : IDisposable
                     {
                         if (moreWork)
                         {
-                            _moreWorkPasses++;
+                            SaturatingIncrement(ref _moreWorkPasses);
                         }
 
                         if (pass + 1 < _maxPassesPerInvocation)
@@ -300,7 +311,7 @@ internal sealed class MaintenanceCoordinator : IDisposable
                             continue;
                         }
 
-                        _budgetExhaustions++;
+                        SaturatingIncrement(ref _budgetExhaustions);
                         _state = MaintenanceCoordinatorState.Scheduled;
                         _inlineCallbackObserved = false;
                         rearm = true;
@@ -355,7 +366,7 @@ internal sealed class MaintenanceCoordinator : IDisposable
 
         lock (_gate)
         {
-            _scheduleRejections++;
+            SaturatingIncrement(ref _scheduleRejections);
             switch (_state)
             {
                 case MaintenanceCoordinatorState.Scheduled:
@@ -376,5 +387,23 @@ internal sealed class MaintenanceCoordinator : IDisposable
                     return new MaintenanceCleanupResult(true, true, _fallbackRequired);
             }
         }
+    }
+
+    private static void SaturatingIncrement(ref long value)
+    {
+        if (value != long.MaxValue)
+        {
+            value++;
+        }
+    }
+
+    private static void SaturatingAdd(ref long value, long delta)
+    {
+        if (delta == 0)
+        {
+            return;
+        }
+
+        value = delta >= long.MaxValue - value ? long.MaxValue : value + delta;
     }
 }

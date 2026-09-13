@@ -136,7 +136,30 @@ public readonly struct CacheStatistics
         long loadTimeouts,
         long coalescedWaiters,
         long evictions,
-        long inFlightLoads
+        long inFlightLoads,
+        long totalLoadTimeTicks,
+        long bulkLoads,
+        long refreshAttempts,
+        long refreshSuccesses,
+        long refreshFailures,
+        long refreshSkipped,
+        long refreshBackoff,
+        long loadRejections,
+        long evictedWeight,
+        long collected,
+        long explicitRemovals,
+        long replacedRemovals,
+        long expiredRemovals,
+        long clearedRemovals,
+        long sizeRemovals,
+        long weightRemovals,
+        long memoryPressureRemovals,
+        long listenerDrops,
+        long listenerFailures,
+        long maintenanceBacklog,
+        long droppedReadEvents,
+        long maintenanceScheduleRejections,
+        long maintenanceFaults
     )
     {
         Hits = hits;
@@ -149,6 +172,29 @@ public readonly struct CacheStatistics
         CoalescedWaiters = coalescedWaiters;
         Evictions = evictions;
         InFlightLoads = inFlightLoads;
+        TotalLoadTimeTicks = totalLoadTimeTicks;
+        BulkLoads = bulkLoads;
+        RefreshAttempts = refreshAttempts;
+        RefreshSuccesses = refreshSuccesses;
+        RefreshFailures = refreshFailures;
+        RefreshSkipped = refreshSkipped;
+        RefreshBackoff = refreshBackoff;
+        LoadRejections = loadRejections;
+        EvictedWeight = evictedWeight;
+        Collected = collected;
+        ExplicitRemovals = explicitRemovals;
+        ReplacedRemovals = replacedRemovals;
+        ExpiredRemovals = expiredRemovals;
+        ClearedRemovals = clearedRemovals;
+        SizeRemovals = sizeRemovals;
+        WeightRemovals = weightRemovals;
+        MemoryPressureRemovals = memoryPressureRemovals;
+        ListenerDrops = listenerDrops;
+        ListenerFailures = listenerFailures;
+        MaintenanceBacklog = maintenanceBacklog;
+        DroppedReadEvents = droppedReadEvents;
+        MaintenanceScheduleRejections = maintenanceScheduleRejections;
+        MaintenanceFaults = maintenanceFaults;
     }
 
     /// <summary>Gets the number of resident hits.</summary>
@@ -166,20 +212,100 @@ public readonly struct CacheStatistics
     /// <summary>Gets the number of loader invocations that failed.</summary>
     public long LoadFailures { get; }
 
-    /// <summary>Gets the number of loader invocations that were canceled.</summary>
+    /// <summary>
+    /// Gets the number of loader invocations that reached a cancellation terminal outcome.
+    /// Cache-owned timeouts are counted only by <see cref="LoadTimeouts" />, even when the
+    /// cooperative cancellation signal is accepted by the loader.
+    /// </summary>
     public long LoadCancellations { get; }
 
-    /// <summary>Gets the number of load flights that exceeded their cache-owned deadline.</summary>
+    /// <summary>
+    /// Gets the number of load flights terminalized by their cache-owned deadline. This outcome is
+    /// mutually exclusive with load success, failure, and cancellation counters; a
+    /// non-cooperative loader may still be executing after this counter is recorded.
+    /// </summary>
     public long LoadTimeouts { get; }
 
     /// <summary>Gets the number of callers that joined an existing flight.</summary>
     public long CoalescedWaiters { get; }
 
-    /// <summary>Gets the number of values removed by capacity maintenance.</summary>
+    /// <summary>Gets the number of Size, Weight, and MemoryPressure removals.</summary>
     public long Evictions { get; }
 
     /// <summary>Gets the number of loader invocations still executing.</summary>
     public long InFlightLoads { get; }
+
+    /// <summary>Gets the aggregate loader duration in <see cref="TimeSpan.Ticks"/>.</summary>
+    public long TotalLoadTimeTicks { get; }
+
+    /// <summary>Gets the aggregate loader duration.</summary>
+    public TimeSpan TotalLoadTime => TimeSpan.FromTicks(TotalLoadTimeTicks);
+
+    /// <summary>Gets the number of bulk loader invocations.</summary>
+    public long BulkLoads { get; }
+
+    /// <summary>Gets the number of refresh flights started.</summary>
+    public long RefreshAttempts { get; }
+
+    /// <summary>Gets the number of refresh flights that published successfully.</summary>
+    public long RefreshSuccesses { get; }
+
+    /// <summary>Gets the number of refresh flights that failed.</summary>
+    public long RefreshFailures { get; }
+
+    /// <summary>Gets the number of refresh attempts skipped by admission or backoff.</summary>
+    public long RefreshSkipped { get; }
+
+    /// <summary>Gets the number of refresh attempts suppressed by failure backoff.</summary>
+    public long RefreshBackoff { get; }
+
+    /// <summary>Gets the number of distinct-key load attempts rejected by capacity.</summary>
+    public long LoadRejections { get; }
+
+    /// <summary>Gets the cumulative weight removed by eviction policy.</summary>
+    public long EvictedWeight { get; }
+
+    /// <summary>Gets the number of entries removed after weak-reference collection.</summary>
+    public long Collected { get; }
+
+    /// <summary>Gets the number of explicitly invalidated resident values.</summary>
+    public long ExplicitRemovals { get; }
+
+    /// <summary>Gets the number of resident values replaced by a newer value.</summary>
+    public long ReplacedRemovals { get; }
+
+    /// <summary>Gets the number of resident values removed by expiration.</summary>
+    public long ExpiredRemovals { get; }
+
+    /// <summary>Gets the number of resident values removed by Clear.</summary>
+    public long ClearedRemovals { get; }
+
+    /// <summary>Gets the number of resident values removed by the size bound.</summary>
+    public long SizeRemovals { get; }
+
+    /// <summary>Gets the number of resident values removed by the weight bound.</summary>
+    public long WeightRemovals { get; }
+
+    /// <summary>Gets the number of resident values removed by memory pressure.</summary>
+    public long MemoryPressureRemovals { get; }
+
+    /// <summary>Gets the number of notifications dropped by bounded dispatch.</summary>
+    public long ListenerDrops { get; }
+
+    /// <summary>Gets the number of listener callback or scheduler failures.</summary>
+    public long ListenerFailures { get; }
+
+    /// <summary>Gets the current number of policy read events awaiting maintenance.</summary>
+    public long MaintenanceBacklog { get; }
+
+    /// <summary>Gets the number of policy read events dropped by the bounded transport.</summary>
+    public long DroppedReadEvents { get; }
+
+    /// <summary>Gets the number of rejected policy maintenance schedules.</summary>
+    public long MaintenanceScheduleRejections { get; }
+
+    /// <summary>Gets the number of policy maintenance drain faults.</summary>
+    public long MaintenanceFaults { get; }
 }
 
 /// <summary>

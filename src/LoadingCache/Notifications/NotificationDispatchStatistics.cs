@@ -58,5 +58,15 @@ internal readonly struct NotificationDispatchStatistics
 
     internal long ScheduleRejections { get; }
 
-    internal long Dropped => DroppedFull + DroppedSchedule + DroppedShutdown;
+    internal long Dropped
+    {
+        get
+        {
+            long total = SaturatingAdd(DroppedFull, DroppedSchedule);
+            return SaturatingAdd(total, DroppedShutdown);
+        }
+    }
+
+    private static long SaturatingAdd(long left, long right) =>
+        right >= long.MaxValue - left ? long.MaxValue : left + right;
 }

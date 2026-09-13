@@ -1,3 +1,5 @@
+using LoadingCache.Diagnostics;
+
 namespace LoadingCache;
 
 internal sealed partial class CacheEngine<TKey, TValue>
@@ -16,13 +18,14 @@ internal sealed partial class CacheEngine<TKey, TValue>
             return false;
         }
 
-        if (
+        bool inFailureBackoff =
             entry.HasRefreshFailure
             && _refreshFailureBackoffTicks > 0
             && _timeProvider.GetElapsedTime(entry.RefreshFailureTimestamp, now)
-                < TimeSpan.FromTicks(_refreshFailureBackoffTicks)
-        )
+                < TimeSpan.FromTicks(_refreshFailureBackoffTicks);
+        if (inFailureBackoff)
         {
+            RecordCounter(CacheCounterKind.RefreshBackoff);
             return false;
         }
 
@@ -34,8 +37,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
     {
         return IsCurrentRefreshFlightSnapshot(entry, flight)
             && flight.Epoch == _epoch
-            && _entries.TryGetValue(entry.Key, out Entry? current)
-            && ReferenceEquals(current, entry);
+            && _entries.IsCurrent(entry);
     }
 
     private static bool IsCurrentRefreshFlightSnapshot(Entry entry, Flight? flight)
@@ -53,11 +55,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         AsyncFlight flight;
         lock (_gate)
         {
-            if (
-                _disposed != 0
-                || !_entries.TryGetValue(entry.Key, out Entry? current)
-                || !ReferenceEquals(current, entry)
-            )
+            if (_disposed != 0 || !_entries.IsCurrent(entry))
             {
                 return;
             }
@@ -65,18 +63,23 @@ internal sealed partial class CacheEngine<TKey, TValue>
             lock (entry.Sync)
             {
                 long now = _timeProvider.GetTimestamp();
-                if (!IsRefreshEligibleLocked(entry, now) || _reservedLoads >= _maxConcurrentLoads)
+                if (!IsRefreshEligibleLocked(entry, now) || !CanReserveFlightsLocked(1))
                 {
+                    RecordCounter(CacheCounterKind.RefreshSkipped);
                     return;
                 }
 
-                TValue oldValue = entry.Value;
+                if (!entry.TryGetValue(out TValue? oldValue))
+                {
+                    RemoveCurrentEntryLocked(entry, collected: true);
+                    return;
+                }
                 TimeSpan oldDuration = _expiry is null
                     ? TimeSpan.MaxValue
                     : GetRemainingDuration(entry, now, ExpirationKind.Variable);
                 flight = CreateRefreshFlightLocked(
                     entry,
-                    (key, cancellationToken) => reloadFactory(key, oldValue, cancellationToken),
+                    (key, cancellationToken) => reloadFactory(key, oldValue!, cancellationToken),
                     oldDuration
                 );
             }
@@ -90,11 +93,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         SyncFlight flight;
         lock (_gate)
         {
-            if (
-                _disposed != 0
-                || !_entries.TryGetValue(entry.Key, out Entry? current)
-                || !ReferenceEquals(current, entry)
-            )
+            if (_disposed != 0 || !_entries.IsCurrent(entry))
             {
                 return;
             }
@@ -102,18 +101,23 @@ internal sealed partial class CacheEngine<TKey, TValue>
             lock (entry.Sync)
             {
                 long now = _timeProvider.GetTimestamp();
-                if (!IsRefreshEligibleLocked(entry, now) || _reservedLoads >= _maxConcurrentLoads)
+                if (!IsRefreshEligibleLocked(entry, now) || !CanReserveFlightsLocked(1))
                 {
+                    RecordCounter(CacheCounterKind.RefreshSkipped);
                     return;
                 }
 
-                TValue oldValue = entry.Value;
+                if (!entry.TryGetValue(out TValue? oldValue))
+                {
+                    RemoveCurrentEntryLocked(entry, collected: true);
+                    return;
+                }
                 TimeSpan oldDuration = _expiry is null
                     ? TimeSpan.MaxValue
                     : GetRemainingDuration(entry, now, ExpirationKind.Variable);
                 flight = CreateRefreshFlightLocked(
                     entry,
-                    key => reloadFactory(key, oldValue),
+                    key => reloadFactory(key, oldValue!),
                     oldDuration
                 );
             }
@@ -128,7 +132,12 @@ internal sealed partial class CacheEngine<TKey, TValue>
         TimeSpan oldDuration
     )
     {
-        var flight = new AsyncFlight(entry.Key, _epoch, ++_nextGeneration, factory)
+        if (!entry.TryGetKey(out TKey? entryKey))
+        {
+            throw new InvalidOperationException("A refresh entry no longer has a live key.");
+        }
+
+        var flight = new AsyncFlight(entryKey, _epoch, ++_nextGeneration, factory)
         {
             IsRefresh = true,
             RefreshEntry = entry,
@@ -151,7 +160,12 @@ internal sealed partial class CacheEngine<TKey, TValue>
         TimeSpan oldDuration
     )
     {
-        var flight = new SyncFlight(entry.Key, _epoch, ++_nextGeneration, factory)
+        if (!entry.TryGetKey(out TKey? entryKey))
+        {
+            throw new InvalidOperationException("A refresh entry no longer has a live key.");
+        }
+
+        var flight = new SyncFlight(entryKey, _epoch, ++_nextGeneration, factory)
         {
             IsRefresh = true,
             RefreshEntry = entry,
@@ -235,25 +249,33 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 }
                 else
                 {
-                    if (_reservedLoads >= _maxConcurrentLoads)
+                    if (!CanReserveFlightsLocked(1))
                     {
+                        RecordCounter(CacheCounterKind.LoadRejections);
                         throw new CacheLoadRejectedException();
                     }
 
                     lock (current.Sync)
                     {
                         long now = _timeProvider.GetTimestamp();
-                        TValue oldValue = current.Value;
-                        TimeSpan oldDuration = _expiry is null
-                            ? TimeSpan.MaxValue
-                            : GetRemainingDuration(current, now, ExpirationKind.Variable);
-                        flight = CreateRefreshFlightLocked(
-                            current,
-                            (refreshKey, refreshToken) =>
-                                reloadFactory(refreshKey, oldValue, refreshToken),
-                            oldDuration
-                        );
-                        start = true;
+                        if (!current.TryGetValue(out TValue? oldValue))
+                        {
+                            RemoveCurrentEntryLocked(current, collected: true);
+                            cold = true;
+                        }
+                        else
+                        {
+                            TimeSpan oldDuration = _expiry is null
+                                ? TimeSpan.MaxValue
+                                : GetRemainingDuration(current, now, ExpirationKind.Variable);
+                            flight = CreateRefreshFlightLocked(
+                                current,
+                                (refreshKey, refreshToken) =>
+                                    reloadFactory(refreshKey, oldValue!, refreshToken),
+                                oldDuration
+                            );
+                            start = true;
+                        }
                     }
                 }
             }
@@ -280,7 +302,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             StartAsyncFlight(sharedFlight);
         }
 
-        return WaitForFlight(sharedFlight, cancellationToken);
+        return WaitForFlight(sharedFlight, key, cancellationToken);
     }
 
     internal Task<TValue> RefreshSyncAsync(
@@ -327,8 +349,9 @@ internal sealed partial class CacheEngine<TKey, TValue>
         CancellationToken cancellationToken
     )
     {
-        SyncFlight flight;
+        SyncFlight flight = null!;
         bool start = false;
+        bool cold = false;
         lock (_gate)
         {
             ThrowIfDisposedLocked();
@@ -348,40 +371,54 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 }
                 else
                 {
-                    if (_reservedLoads >= _maxConcurrentLoads)
+                    if (!CanReserveFlightsLocked(1))
                     {
+                        RecordCounter(CacheCounterKind.LoadRejections);
                         throw new CacheLoadRejectedException();
                     }
 
                     lock (current.Sync)
                     {
                         long now = _timeProvider.GetTimestamp();
-                        TValue oldValue = current.Value;
-                        TimeSpan oldDuration = _expiry is null
-                            ? TimeSpan.MaxValue
-                            : GetRemainingDuration(current, now, ExpirationKind.Variable);
-                        flight = CreateRefreshFlightLocked(
-                            current,
-                            refreshKey => reloadFactory(refreshKey, oldValue),
-                            oldDuration
-                        );
-                        start = true;
+                        if (!current.TryGetValue(out TValue? oldValue))
+                        {
+                            RemoveCurrentEntryLocked(current, collected: true);
+                            cold = true;
+                        }
+                        else
+                        {
+                            TimeSpan oldDuration = _expiry is null
+                                ? TimeSpan.MaxValue
+                                : GetRemainingDuration(current, now, ExpirationKind.Variable);
+                            flight = CreateRefreshFlightLocked(
+                                current,
+                                refreshKey => reloadFactory(refreshKey, oldValue!),
+                                oldDuration
+                            );
+                            start = true;
+                        }
                     }
                 }
             }
             else
             {
-                if (_reservedLoads >= _maxConcurrentLoads)
+                if (!CanReserveFlightsLocked(1))
                 {
+                    RecordCounter(CacheCounterKind.LoadRejections);
                     throw new CacheLoadRejectedException();
                 }
 
                 flight = new SyncFlight(key, _epoch, ++_nextGeneration, loadFactory);
-                _entries[key] = Entry.Loading(key, _epoch, flight.Generation, flight);
+                _entries[key] = Entry.Loading(key, _epoch, flight.Generation, flight, _weakKeys);
                 _activeFlights.Add(flight);
                 _reservedLoads++;
                 start = true;
             }
+        }
+
+        if (cold)
+        {
+            return Task.FromResult(GetOrAdd(key, loadFactory, cancellationToken));
         }
 
         if (start || Volatile.Read(ref flight.Started) == 0)
@@ -461,7 +498,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
                             {
                                 previousSnapshot = new RefreshPublicationSnapshot(entry);
                                 previousSnapshotCaptured = true;
-                                entry.Value = value;
+                                entry.SetValue(value, _weakValues);
                                 entry.Weight = weight;
                                 entry.WriteTimestamp = timestamp;
                                 entry.AccessTimestamp = timestamp;
@@ -474,7 +511,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
                                 entry.HasRefreshFailure = false;
                                 entry.PolicyDetached = false;
                                 entry.RefreshFlight = null;
-                                entry.SharedTask = Task.FromResult(value);
+                                entry.SharedTask = _weakValues ? null : Task.FromResult(value);
                                 published = true;
                             }
                         }
@@ -505,6 +542,19 @@ internal sealed partial class CacheEngine<TKey, TValue>
             // the previous snapshot and its deadline before completing the
             // shared promise.
             RequestExpirationTimer();
+
+            if (published && publishedEntry is not null && previousSnapshotCaptured)
+            {
+                lock (_gate)
+                {
+                    QueueReplacementNotificationLocked(flight, previousSnapshot);
+                }
+            }
+
+            if (RecordFlightResult(flight, CacheCounterKind.RefreshSuccesses))
+            {
+                RecordCounter(CacheCounterKind.LoadSuccesses);
+            }
 
             CompletePromise(
                 flight,
@@ -601,12 +651,9 @@ internal sealed partial class CacheEngine<TKey, TValue>
                         catch
                         {
                             RetireExpirationNodeLocked(entry);
-                            if (
-                                _entries.TryGetValue(entry.Key, out Entry? stillCurrent)
-                                && ReferenceEquals(stillCurrent, entry)
-                            )
+                            if (_entries.IsCurrent(entry))
                             {
-                                _entries.TryRemove(entry.Key, out _);
+                                _entries.TryRemoveExact(entry);
                             }
 
                             entry.Retired = true;
@@ -628,8 +675,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
                         else if (
                             policyRestored
                             && _expirationWheel is not null
-                            && _entries.TryGetValue(entry.Key, out Entry? currentEntry)
-                            && ReferenceEquals(currentEntry, entry)
+                            && _entries.IsCurrent(entry)
                         )
                         {
                             ulong normalizedNow = GetExpirationNowLocked();
@@ -658,6 +704,15 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 // The original claimed failure is the shared terminal result.
                 // A secondary timer-arm failure must not strand it.
             }
+        }
+
+        if (RecordFlightResult(flight, CacheCounterKind.RefreshFailures))
+        {
+            RecordCounter(
+                exception is OperationCanceledException
+                    ? CacheCounterKind.LoadCancellations
+                    : CacheCounterKind.LoadFailures
+            );
         }
 
         CompletePromise(
@@ -742,18 +797,6 @@ internal sealed partial class CacheEngine<TKey, TValue>
                         RemoveExpiredEntryLocked(entry);
                     }
                 }
-
-                if (_recordStatistics)
-                {
-                    if (exception is OperationCanceledException)
-                    {
-                        Interlocked.Increment(ref _loadCancellations);
-                    }
-                    else
-                    {
-                        Interlocked.Increment(ref _loadFailures);
-                    }
-                }
             }
         }
 
@@ -761,6 +804,15 @@ internal sealed partial class CacheEngine<TKey, TValue>
         {
             RetireFlight(flight, underlyingCompleted: true);
             return;
+        }
+
+        if (RecordFlightResult(flight, CacheCounterKind.RefreshFailures))
+        {
+            RecordCounter(
+                exception is OperationCanceledException
+                    ? CacheCounterKind.LoadCancellations
+                    : CacheCounterKind.LoadFailures
+            );
         }
 
         CompletePromise(
@@ -784,7 +836,13 @@ internal sealed partial class CacheEngine<TKey, TValue>
     {
         internal RefreshPublicationSnapshot(Entry entry)
         {
-            _value = entry.Value;
+            if (!entry.TryGetValue(out TValue? liveValue))
+            {
+                throw new InvalidOperationException("A refresh snapshot lost its live value.");
+            }
+
+            Value = liveValue!;
+            _weakValue = entry.WeakValue is not null;
             Weight = entry.Weight;
             _writeTimestamp = entry.WriteTimestamp;
             _accessTimestamp = entry.AccessTimestamp;
@@ -798,7 +856,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
             _hasRefreshFailure = entry.HasRefreshFailure;
         }
 
-        private readonly TValue _value;
+        internal TValue Value { get; }
+        private readonly bool _weakValue;
         internal readonly long Weight;
         private readonly long _writeTimestamp;
         private readonly long _accessTimestamp;
@@ -813,7 +872,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
         internal void Restore(Entry entry)
         {
-            entry.Value = _value;
+            entry.SetValue(Value, _weakValue);
             entry.Weight = Weight;
             entry.WriteTimestamp = _writeTimestamp;
             entry.AccessTimestamp = _accessTimestamp;
@@ -828,9 +887,10 @@ internal sealed partial class CacheEngine<TKey, TValue>
             // value through a completed snapshot unless the old promise has
             // already completed successfully.  Normal successful publication
             // keeps the original shared-task identity.
-            entry.SharedTask = _sharedTask is { IsCompletedSuccessfully: true }
-                ? _sharedTask
-                : Task.FromResult(_value);
+            entry.SharedTask =
+                _weakValue ? null
+                : _sharedTask is { IsCompletedSuccessfully: true } ? _sharedTask
+                : Task.FromResult(Value);
             entry.PolicyDetached = PolicyDetached;
             entry.RefreshFailureTimestamp = _refreshFailureTimestamp;
             entry.HasRefreshFailure = _hasRefreshFailure;

@@ -18,7 +18,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         {
             ThrowIfDisposedLocked();
             var snapshot = new List<KeyValuePair<TKey, TValue>>(_entries.Count);
-            foreach ((TKey key, Entry entry) in _entries)
+            foreach (Entry entry in _entries.Values)
             {
                 lock (entry.Sync)
                 {
@@ -26,9 +26,11 @@ internal sealed partial class CacheEngine<TKey, TValue>
                         entry.Epoch == _epoch
                         && Volatile.Read(ref entry.IsReady)
                         && !IsExpired(entry, _timeProvider.GetTimestamp())
+                        && entry.TryGetKey(out TKey? key)
+                        && entry.TryGetValue(out TValue? value)
                     )
                     {
-                        snapshot.Add(new KeyValuePair<TKey, TValue>(key, entry.Value));
+                        snapshot.Add(new KeyValuePair<TKey, TValue>(key, value));
                     }
                 }
             }
@@ -52,6 +54,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
                         entry.Epoch == _epoch
                         && Volatile.Read(ref entry.IsReady)
                         && !IsExpired(entry, _timeProvider.GetTimestamp())
+                        && entry.TryGetKey(out _)
+                        && entry.TryGetValue(out _)
                     )
                         count++;
                 }
@@ -96,13 +100,12 @@ internal sealed partial class CacheEngine<TKey, TValue>
                     }
                 }
 
-                RemoveCurrentEntryLocked(current);
+                RemoveCurrentEntryLocked(current, RemovalCause.Expired);
             }
         }
 
         long weight = ComputeWeight(key, value);
         TimeSpan duration = ComputeCreateDuration(key, value);
-        bool added = false;
         lock (_gate)
         {
             ThrowIfDisposedLocked();
@@ -128,19 +131,13 @@ internal sealed partial class CacheEngine<TKey, TValue>
                     }
                 }
 
-                RemoveCurrentEntryLocked(current);
+                RemoveCurrentEntryLocked(current, RemovalCause.Expired);
             }
 
             PublishDictionaryEntryLocked(key, value, weight, duration);
-            added = true;
         }
-
-        if (added)
-        {
-            RequestExpirationTimer();
-        }
-
-        return added;
+        RequestExpirationTimer();
+        return true;
     }
 
     internal bool DictionaryTryUpdate(TKey key, TValue value, TValue comparisonValue)
@@ -182,7 +179,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
                         || !IsCurrentRefreshFlightLocked(expectedEntry, expectedEntry.RefreshFlight)
                     )
                     {
-                        RemoveCurrentEntryLocked(expectedEntry);
+                        RemoveCurrentEntryLocked(expectedEntry, RemovalCause.Expired);
                     }
 
                     return false;
@@ -190,7 +187,12 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
                 expectedRevision = expectedEntry.PublicationRevision;
                 expectedVariableRevision = expectedEntry.VariableRevision;
-                expectedValue = expectedEntry.Value;
+                if (!expectedEntry.TryGetValue(out TValue? liveValue))
+                {
+                    RemoveCurrentEntryLocked(expectedEntry, collected: true);
+                    return false;
+                }
+                expectedValue = liveValue!;
                 currentDuration = _expiry is null
                     ? TimeSpan.MaxValue
                     : GetRemainingDuration(
@@ -201,7 +203,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             }
         }
 
-        if (!EqualityComparer<TValue>.Default.Equals(expectedValue, comparisonValue))
+        if (!DictionaryValuesEqual(expectedValue, comparisonValue))
         {
             return false;
         }
@@ -248,6 +250,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         lock (_gate)
         {
             ThrowIfDisposedLocked();
+            RecordBulkMutationLocked();
             if (
                 !_entries.TryGetValue(key, out Entry? current)
                 || !Volatile.Read(ref current.IsReady)
@@ -268,7 +271,12 @@ internal sealed partial class CacheEngine<TKey, TValue>
                     return false;
                 }
 
-                value = current.Value;
+                if (!current.TryGetValue(out value))
+                {
+                    RemoveCurrentEntryLocked(current, collected: true);
+                    value = default;
+                    return false;
+                }
             }
 
             RemoveCurrentEntryLocked(current);
@@ -293,6 +301,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         lock (_gate)
         {
             ThrowIfDisposedLocked();
+            RecordBulkMutationLocked();
             if (
                 !_entries.TryGetValue(key, out expectedEntry)
                 || !Volatile.Read(ref expectedEntry.IsReady)
@@ -316,18 +325,23 @@ internal sealed partial class CacheEngine<TKey, TValue>
                         || !IsCurrentRefreshFlightLocked(expectedEntry, expectedEntry.RefreshFlight)
                     )
                     {
-                        RemoveCurrentEntryLocked(expectedEntry);
+                        RemoveCurrentEntryLocked(expectedEntry, RemovalCause.Expired);
                     }
 
                     return false;
                 }
 
                 expectedRevision = expectedEntry.PublicationRevision;
-                expectedValue = expectedEntry.Value;
+                if (!expectedEntry.TryGetValue(out TValue? liveValue))
+                {
+                    RemoveCurrentEntryLocked(expectedEntry, collected: true);
+                    return false;
+                }
+                expectedValue = liveValue!;
             }
         }
 
-        if (!EqualityComparer<TValue>.Default.Equals(expectedValue, comparisonValue))
+        if (!DictionaryValuesEqual(expectedValue, comparisonValue))
         {
             return false;
         }
@@ -366,14 +380,18 @@ internal sealed partial class CacheEngine<TKey, TValue>
     internal bool DictionaryContains(TKey key, TValue value)
     {
         ArgumentNullException.ThrowIfNull(key);
-        return DictionaryTryGet(key, out TValue? current)
-            && EqualityComparer<TValue>.Default.Equals(current, value);
+        return DictionaryTryGet(key, out TValue? current) && DictionaryValuesEqual(current, value);
     }
 
     internal TValue DictionaryGetOrAdd(TKey key, Func<TKey, TValue> valueFactory)
     {
         return GetOrAdd(key, valueFactory);
     }
+
+    private bool DictionaryValuesEqual(TValue left, TValue right) =>
+        _weakValues
+            ? ReferenceEquals(left, right)
+            : EqualityComparer<TValue>.Default.Equals(left, right);
 
     private void PublishDictionaryEntryLocked(
         TKey key,
@@ -382,6 +400,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         TimeSpan variableDuration
     )
     {
+        RecordBulkMutationLocked();
         Entry entry = Entry.Ready(
             key,
             _epoch,
@@ -389,7 +408,9 @@ internal sealed partial class CacheEngine<TKey, TValue>
             value,
             _timeProvider.GetTimestamp(),
             weight,
-            variableDuration
+            variableDuration,
+            _weakKeys,
+            _weakValues
         );
         entry.PolicyToken = new WindowTinyLfuEnginePolicy.EngineEntryToken(
             entry,
