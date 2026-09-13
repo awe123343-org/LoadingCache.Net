@@ -332,6 +332,256 @@ public sealed class DictionaryViewTests
     }
 
     [Test]
+    public async Task AddOrUpdateRetriesConcurrentTransformsWithoutLostUpdates()
+    {
+        using ICache<int, int> cache = CreateCache<int, int>();
+        SyncCacheDictionary<int, int> dictionary = cache.AsDictionary();
+        dictionary[1] = 0;
+
+        Task[] workers = Enumerable
+            .Range(0, 8)
+            .Select(_ =>
+                Task.Run(() =>
+                {
+                    for (int i = 0; i < 250; i++)
+                    {
+                        dictionary.AddOrUpdate(
+                            1,
+                            static _ => 1,
+                            static (_, current) => current + 1
+                        );
+                    }
+                })
+            )
+            .ToArray();
+
+        await Task.WhenAll(workers);
+
+        dictionary[1].Should().Be(2_000);
+    }
+
+    [Test]
+    public async Task ComputeRetriesMissingSnapshotAfterSetAndInvalidateAba()
+    {
+        using ICache<int, int> cache = CreateCache<int, int>();
+        SyncCacheDictionary<int, int> dictionary = cache.AsDictionary();
+        var entered = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        var release = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        int calls = 0;
+
+        Task<CacheMutation<int>> compute = Task.Run(() =>
+            dictionary.Compute(
+                1,
+                (_, current) =>
+                {
+                    int call = Interlocked.Increment(ref calls);
+                    current.HasValue.Should().BeFalse();
+                    if (call == 1)
+                    {
+                        entered.SetResult(true);
+                        release.Task.GetAwaiter().GetResult();
+                    }
+
+                    return CacheMutation.Set(call == 1 ? 10 : 20);
+                }
+            )
+        );
+
+        (await entered.Task.WaitAsync(TimeSpan.FromSeconds(10))).Should().BeTrue();
+        dictionary[1] = 2;
+        dictionary.Remove(1).Should().BeTrue();
+        release.SetResult(true);
+
+        (await compute.WaitAsync(TimeSpan.FromSeconds(10))).Kind.Should().Be(CacheMutationKind.Set);
+        calls.Should().Be(2);
+        dictionary[1].Should().Be(20);
+    }
+
+    [Test]
+    public void TryAddTreatsCollectedWeakValueAsAbsent()
+    {
+        using ICache<int, ReentrantValue> cache = CacheBuilder
+            .Create<int, ReentrantValue>()
+            .MaximumSize(8)
+            .MaxConcurrentLoads(8)
+            .WeakValues()
+            .RecordStatistics()
+            .Build();
+        WeakReference oldReference = CreateWeakValue(cache);
+        ForceCollection(oldReference);
+        oldReference.IsAlive.Should().BeFalse();
+
+        SyncCacheDictionary<int, ReentrantValue> dictionary = cache.AsDictionary();
+        var replacement = new ReentrantValue("replacement");
+        dictionary.TryAdd(1, replacement).Should().BeTrue();
+        dictionary[1].Should().BeSameAs(replacement);
+        cache.Statistics.Collected.Should().Be(1);
+    }
+
+    [Test]
+    public void ComputeUsesExplicitMutationForDefaultValuesAndRemoval()
+    {
+        using ICache<int, int> cache = CreateCache<int, int>();
+        SyncCacheDictionary<int, int> dictionary = cache.AsDictionary();
+
+        CacheMutation<int> added = dictionary.Compute(
+            1,
+            static (_, current) =>
+            {
+                current.HasValue.Should().BeFalse();
+                return CacheMutation.Set(0);
+            }
+        );
+
+        added.Kind.Should().Be(CacheMutationKind.Set);
+        dictionary[1].Should().Be(0);
+
+        CacheMutation<int> removed = dictionary.ComputeIfPresent(
+            1,
+            static (_, current) =>
+            {
+                current.Should().Be(0);
+                return CacheMutation.Remove<int>();
+            }
+        );
+
+        removed.Kind.Should().Be(CacheMutationKind.Remove);
+        dictionary.ContainsKey(1).Should().BeFalse();
+
+        bool called = false;
+        dictionary
+            .ComputeIfPresent(
+                1,
+                (_, _) =>
+                {
+                    called = true;
+                    return CacheMutation.Set(1);
+                }
+            )
+            .Kind.Should()
+            .Be(CacheMutationKind.Keep);
+        called.Should().BeFalse();
+    }
+
+    [Test]
+    public void MergeCombinesValuesAndKeepsCallbackOutsideCacheLocks()
+    {
+        using ICache<int, int> cache = CreateCache<int, int>();
+        SyncCacheDictionary<int, int> dictionary = cache.AsDictionary();
+
+        dictionary.Merge(1, 2, static (current, added) => current + added).Should().Be(2);
+        dictionary.Merge(1, 3, static (current, added) => current + added).Should().Be(5);
+
+        bool reentered = false;
+        FluentActions
+            .Invoking(() =>
+                dictionary.Compute(
+                    1,
+                    (_, current) =>
+                    {
+                        if (!reentered)
+                        {
+                            reentered = true;
+                            dictionary[1] = 10;
+                        }
+
+                        return CacheMutation.Set(current.Value + 1);
+                    }
+                )
+            )
+            .Should()
+            .ThrowExactly<LoadingCacheReentrancyException>();
+
+        dictionary[1].Should().Be(10);
+    }
+
+    [Test]
+    public void TransformCallbackFailureLeavesExistingValueUntouched()
+    {
+        using ICache<int, int> cache = CreateCache<int, int>();
+        SyncCacheDictionary<int, int> dictionary = cache.AsDictionary();
+        dictionary[1] = 7;
+
+        FluentActions
+            .Invoking(() =>
+                dictionary.Compute(
+                    1,
+                    static (_, _) => throw new InvalidOperationException("callback failure")
+                )
+            )
+            .Should()
+            .ThrowExactly<InvalidOperationException>()
+            .WithMessage("callback failure");
+
+        dictionary[1].Should().Be(7);
+    }
+
+    [Test]
+    public async Task TransformsReplacePendingAsyncFlightWithoutWaiting()
+    {
+        await using IAsyncCache<int, int> cache = CacheBuilder
+            .Create<int, int>()
+            .MaximumSize(8)
+            .MaxConcurrentLoads(8)
+            .BuildAsync();
+        AsyncCacheDictionary<int, int> dictionary = cache.AsDictionary();
+        var source = new TaskCompletionSource<int>(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        ValueTask<int> pending = dictionary.GetOrAddAsync(1, (_, _) => source.Task);
+
+        bool called = false;
+        dictionary
+            .ComputeIfPresent(
+                1,
+                (_, _) =>
+                {
+                    called = true;
+                    return CacheMutation.Set(9);
+                }
+            )
+            .Kind.Should()
+            .Be(CacheMutationKind.Keep);
+        called.Should().BeFalse();
+
+        dictionary.AddOrUpdate(1, static _ => 5, static (_, value) => value + 1).Should().Be(5);
+
+        source.SetResult(4);
+        (await pending).Should().Be(4);
+        dictionary[1].Should().Be(5);
+    }
+
+    [Test]
+    public void TransformCallbackClearFailsFastAndRestoresScope()
+    {
+        using ICache<int, int> cache = CreateCache<int, int>();
+        SyncCacheDictionary<int, int> dictionary = cache.AsDictionary();
+        dictionary[1] = 1;
+
+        FluentActions
+            .Invoking(() =>
+                dictionary.Compute(
+                    1,
+                    (_, _) =>
+                    {
+                        dictionary.Clear();
+                        return CacheMutation.Set(2);
+                    }
+                )
+            )
+            .Should()
+            .ThrowExactly<LoadingCacheReentrancyException>();
+
+        dictionary.ContainsKey(1).Should().BeFalse();
+        dictionary.Compute(1, static (_, _) => CacheMutation.Set(3));
+        dictionary[1].Should().Be(3);
+    }
+
+    [Test]
     public void OperationsAfterCacheDisposeAreRejected()
     {
         ICache<int, string> cache = CreateCache<int, string>();
@@ -366,6 +616,32 @@ public sealed class DictionaryViewTests
         where TKey : notnull
         where TValue : notnull =>
         CacheBuilder.Create<TKey, TValue>().MaximumSize(8).MaxConcurrentLoads(8).Build();
+
+    [System.Runtime.CompilerServices.MethodImpl(
+        System.Runtime.CompilerServices.MethodImplOptions.NoInlining
+    )]
+    private static WeakReference CreateWeakValue(ICache<int, ReentrantValue> cache)
+    {
+        var value = new ReentrantValue("old");
+        cache.Put(1, value);
+        WeakReference reference = new(value);
+        GC.KeepAlive(value);
+        return reference;
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(
+        System.Runtime.CompilerServices.MethodImplOptions.NoInlining
+    )]
+    private static void ForceCollection(WeakReference reference)
+    {
+        for (int attempt = 0; attempt < 20 && reference.IsAlive; attempt++)
+        {
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+            Thread.Yield();
+        }
+    }
 
     private sealed record Box(string Value);
 

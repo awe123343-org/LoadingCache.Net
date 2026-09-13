@@ -7,6 +7,8 @@ internal static class NativePolicySmoke
         WeakReferenceSmoke();
         await BulkLoadingSmokeAsync();
         await ListenerSmokeAsync();
+        await AtomicDictionarySmokeAsync();
+        SynchronousEvictionSmoke();
         using var manual = CacheBuilder
             .Create<string, int>()
             .MaximumSize(4)
@@ -83,6 +85,74 @@ internal static class NativePolicySmoke
         Require(cache.AsDictionary().TryRemove(key, value), "weak conditional removal");
         GC.KeepAlive(key);
         GC.KeepAlive(value);
+    }
+
+    private static async Task AtomicDictionarySmokeAsync()
+    {
+        await using var cache = CacheBuilder
+            .Create<string, int>()
+            .MaximumSize(8)
+            .MaxConcurrentLoads(4)
+            .Comparer(StringComparer.OrdinalIgnoreCase)
+            .BuildAsync();
+        var view = cache.AsDictionary();
+        Require(
+            view.AddOrUpdate("count", static _ => 0, static (_, value) => value + 1) == 0,
+            "atomic add accepts default value"
+        );
+        Require(
+            view.AddOrUpdate("COUNT", static _ => 0, static (_, value) => value + 1) == 1,
+            "atomic update uses comparer"
+        );
+        Require(view.Merge("count", 2, static (left, right) => left + right) == 3, "atomic merge");
+        var kept = view.Compute(
+            "count",
+            static (_, current) =>
+                current.HasValue ? CacheMutation.Keep<int>() : CacheMutation.Set(0)
+        );
+        Require(kept.Kind == CacheMutationKind.Keep && view["count"] == 3, "explicit keep");
+        var removed = view.ComputeIfPresent("count", static (_, _) => CacheMutation.Remove<int>());
+        Require(
+            removed.Kind == CacheMutationKind.Remove && !view.ContainsKey("count"),
+            "explicit removal without null sentinel"
+        );
+
+        var completion = new TaskCompletionSource<int>(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        var pending = view.GetOrAddAsync("pending", (_, _) => completion.Task);
+        Require(
+            view.AddOrUpdate("pending", static _ => 7, static (_, value) => value + 1) == 7,
+            "atomic update replaces pending flight without blocking"
+        );
+        completion.SetResult(2);
+        Require(
+            await pending == 2 && view["pending"] == 7,
+            "late completion cannot replace atomic update"
+        );
+    }
+
+    private static void SynchronousEvictionSmoke()
+    {
+        int calls = 0;
+        using var cache = CacheBuilder
+            .Create<int, int>()
+            .MaximumWeight(1)
+            .MaximumResidentCount(8)
+            .MaxConcurrentLoads(4)
+            .Weigher(static (_, _) => 2)
+            .EvictionListener(notification =>
+            {
+                Require(notification.Cause == RemovalCause.Weight, "weighted eviction cause");
+                Interlocked.Increment(ref calls);
+            })
+            .Build();
+        cache.Put(1, 1);
+        cache.CleanUp();
+        Require(
+            Volatile.Read(ref calls) == 1,
+            "synchronous eviction delivered once before cleanup returns"
+        );
     }
 
     private sealed record ReferenceToken(int Number);

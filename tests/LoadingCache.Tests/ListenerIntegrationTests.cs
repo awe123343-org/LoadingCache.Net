@@ -77,6 +77,76 @@ public sealed class ListenerIntegrationTests
     }
 
     [Test]
+    public async Task EvictionListenerRunsBeforeMutationReturnsWhenRemovalSchedulerRejects()
+    {
+        var scheduler = new ManualNotificationScheduler { Reject = true };
+        RemovalNotification<int, string>? observed = null;
+        using Cache<int, string> cache = CreateManualCache(
+            removalListener: _ => { },
+            scheduler: scheduler,
+            notificationCapacity: 1,
+            evictionListener: notification => observed = notification,
+            maximumSize: 1
+        );
+
+        cache.Put(1, "one");
+        cache.Put(2, "two");
+
+        observed.Should().NotBeNull();
+        observed!.Value.Cause.Should().Be(RemovalCause.Size);
+        observed.Value.Key.Should().Be(1);
+        await Eventually(() => cache.GetNotificationStatistics().DroppedSchedule >= 1);
+        cache.TryGet(2, out string? current).Should().BeTrue();
+        current.Should().Be("two");
+    }
+
+    [Test]
+    public void EvictionListenerFailureIsObservedWithoutBreakingTheMutation()
+    {
+        using Cache<int, string> cache = CreateManualCache(
+            removalListener: null,
+            scheduler: new ManualNotificationScheduler(),
+            evictionListener: _ => throw new InvalidOperationException("eviction failure"),
+            maximumSize: 1
+        );
+
+        cache.Put(1, "one");
+        cache.Put(2, "two");
+
+        cache.Statistics.ListenerFailures.Should().Be(1);
+        cache.TryGet(2, out string? current).Should().BeTrue();
+        current.Should().Be("two");
+    }
+
+    [Test]
+    public void EvictionListenerMayReenterAfterTheEntryLockIsReleased()
+    {
+        Cache<int, string>? cache = null;
+        int reentries = 0;
+        cache = CreateManualCache(
+            removalListener: null,
+            scheduler: new ManualNotificationScheduler(),
+            evictionListener: notification =>
+            {
+                if (notification.Key == 1 && Interlocked.Exchange(ref reentries, 1) == 0)
+                {
+                    cache!.Put(3, "reentrant");
+                }
+            },
+            maximumSize: 1
+        );
+
+        using (cache)
+        {
+            cache.Put(1, "one");
+            cache.Put(2, "two");
+
+            cache.TryGet(3, out string? current).Should().BeTrue();
+            current.Should().Be("reentrant");
+        }
+    }
+
+    [Test]
     public async Task ListenerFailureIsObservedAndDoesNotCorruptTheCache()
     {
         using ICache<int, string> cache = CacheBuilder
@@ -372,13 +442,14 @@ public sealed class ListenerIntegrationTests
         Action<RemovalNotification<int, string>>? removalListener,
         INotificationScheduler scheduler,
         int notificationCapacity = 4,
-        Action<RemovalNotification<int, string>>? evictionListener = null
+        Action<RemovalNotification<int, string>>? evictionListener = null,
+        int maximumSize = 4
     ) =>
         new(
             new CacheEngine<int, string>(
                 new CacheEngineOptions<int, string>
                 {
-                    MaximumSize = 4,
+                    MaximumSize = maximumSize,
                     MaxConcurrentLoads = 4,
                     RecordStatistics = true,
                     RemovalListener = removalListener,
