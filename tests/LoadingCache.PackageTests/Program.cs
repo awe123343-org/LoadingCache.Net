@@ -105,6 +105,7 @@ using (
     Require(weighted.Policy.Eviction!.WeightedSize == 3, "weight accounting");
 }
 await LoaderContractSmoke.RunAsync();
+await NativePolicySmoke.RunAsync();
 Console.WriteLine("Consumer smoke passed.");
 return;
 

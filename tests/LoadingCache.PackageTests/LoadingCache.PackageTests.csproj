@@ -8,6 +8,10 @@
     </PropertyGroup>
     <ItemGroup>
         <Compile
+            Include="../LoadingCache.ConsumerSmoke/NativePolicySmoke.cs"
+            Link="NativePolicySmoke.cs"
+        />
+        <Compile
             Include="../LoadingCache.ConsumerSmoke/LoaderContractSmoke.cs"
             Link="LoaderContractSmoke.cs"
         />

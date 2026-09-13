@@ -7,6 +7,10 @@
         <IsPackable>false</IsPackable>
     </PropertyGroup>
     <ItemGroup>
+        <Compile
+            Include="../../tests/LoadingCache.ConsumerSmoke/NativePolicySmoke.cs"
+            Link="NativePolicySmoke.cs"
+        />
         <Compile Include="../../tests/LoadingCache.PackageTests/Program.cs" Link="Program.cs" />
         <Compile
             Include="../../tests/LoadingCache.ConsumerSmoke/LoaderContractSmoke.cs"

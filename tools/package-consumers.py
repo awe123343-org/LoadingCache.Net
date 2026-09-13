@@ -68,6 +68,7 @@ def main() -> int:
             "Core": [
                 "tests/LoadingCache.PackageTests/Program.cs",
                 "tests/LoadingCache.ConsumerSmoke/LoaderContractSmoke.cs",
+                "tests/LoadingCache.ConsumerSmoke/NativePolicySmoke.cs",
             ],
             "DI": ["samples/LoadingCache.DiAotSmoke/Program.cs"],
         }.items():

@@ -7,6 +7,7 @@ Console.WriteLine(
 );
 await SmokeAsync();
 await LoaderContractSmoke.RunAsync();
+await NativePolicySmoke.RunAsync();
 return;
 
 static async Task SmokeAsync()
