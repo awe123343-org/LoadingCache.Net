@@ -78,6 +78,35 @@ public sealed class MaintenanceTests
     }
 
     [Test]
+    public void ReadBufferDiagnosticCountersSaturateWithoutCorruptingQueuedCount()
+    {
+        using StripedReadBuffer<int> buffer = new(2, 1);
+
+        buffer.AddStatisticsForTesting(
+            0,
+            enqueued: long.MaxValue - 1,
+            dequeued: long.MaxValue - 1,
+            droppedFull: long.MaxValue - 1,
+            droppedShutdown: long.MaxValue - 1
+        );
+        buffer.AddStatisticsForTesting(
+            1,
+            enqueued: 2,
+            dequeued: 2,
+            droppedFull: 2,
+            droppedShutdown: 2
+        );
+
+        ReadBufferStatistics statistics = buffer.GetStatistics();
+        statistics.Queued.Should().Be(0);
+        statistics.Enqueued.Should().Be(long.MaxValue);
+        statistics.Dequeued.Should().Be(long.MaxValue);
+        statistics.DroppedFull.Should().Be(long.MaxValue);
+        statistics.DroppedShutdown.Should().Be(long.MaxValue);
+        statistics.Dropped.Should().Be(long.MaxValue);
+    }
+
+    [Test]
     public async Task ConcurrentProducersPreserveAcceptedIdentityWithinBoundedCapacity()
     {
         const int producerCount = 8;
@@ -461,6 +490,22 @@ public sealed class MaintenanceTests
         scheduler.RunNext();
         passes.Should().Be(2);
         coordinator.GetStatistics().DrainFaults.Should().Be(1);
+    }
+
+    [Test]
+    public void CoordinatorDiagnosticCountersSaturateAtLongMaxValue()
+    {
+        using MaintenanceCoordinator coordinator = new(() => false);
+
+        coordinator.AddStatisticsForTesting(
+            scheduleRejections: long.MaxValue - 1,
+            drainFaults: long.MaxValue - 1
+        );
+        coordinator.AddStatisticsForTesting(scheduleRejections: 2, drainFaults: 2);
+
+        MaintenanceStatistics statistics = coordinator.GetStatistics();
+        statistics.ScheduleRejections.Should().Be(long.MaxValue);
+        statistics.DrainFaults.Should().Be(long.MaxValue);
     }
 
     [Test]
