@@ -47,6 +47,12 @@ public interface ICache<TKey, TValue> : IDisposable
 
     /// <summary>Gets the read-only policy view.</summary>
     ICachePolicy<TKey, TValue> Policy { get; }
+
+    /// <summary>
+    /// Gets a mutable cache-aware dictionary view. Reads expose only ready,
+    /// non-expired values and never invoke a loader.
+    /// </summary>
+    SyncCacheDictionary<TKey, TValue> AsDictionary();
 }
 
 /// <summary>Common operations for a synchronous loading cache.</summary>
@@ -106,6 +112,12 @@ public interface IAsyncCache<TKey, TValue> : IAsyncDisposable
 
     /// <summary>Gets the read-only policy view.</summary>
     ICachePolicy<TKey, TValue> Policy { get; }
+
+    /// <summary>
+    /// Gets a value-materialized mutable dictionary view. Reads never block on
+    /// asynchronous flights; pending values are absent from the view.
+    /// </summary>
+    AsyncCacheDictionary<TKey, TValue> AsDictionary();
 }
 
 /// <summary>A manually populated synchronous cache.</summary>
@@ -194,6 +206,9 @@ public class Cache<TKey, TValue> : ICache<TKey, TValue>
 
     /// <summary>Gets the read-only policy view.</summary>
     public ICachePolicy<TKey, TValue> Policy => Engine.Policy;
+
+    /// <summary>Gets a mutable cache-aware dictionary view.</summary>
+    public SyncCacheDictionary<TKey, TValue> AsDictionary() => new(Engine);
 
     /// <summary>Releases cache-owned resources without waiting for user code.</summary>
     public void Dispose()
@@ -295,6 +310,9 @@ public class AsyncCache<TKey, TValue> : IAsyncCache<TKey, TValue>
 
     /// <summary>Gets the read-only policy view.</summary>
     public ICachePolicy<TKey, TValue> Policy => _engine.Policy;
+
+    /// <summary>Gets a value-materialized mutable dictionary view.</summary>
+    public AsyncCacheDictionary<TKey, TValue> AsDictionary() => new(_engine);
 
     /// <summary>Releases cache-owned resources without waiting for user code.</summary>
     public ValueTask DisposeAsync()
