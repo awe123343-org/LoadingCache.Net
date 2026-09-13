@@ -29,6 +29,7 @@ internal sealed class MaintenanceCoordinator : IDisposable
     private readonly Func<bool> _drain;
     private readonly IMaintenanceScheduler _scheduler;
     private readonly Action _workerCallback;
+    private readonly Action? _rejectedRemainderFallback;
     private readonly int _maxPassesPerInvocation;
 
     private MaintenanceCoordinatorState _state = MaintenanceCoordinatorState.Idle;
@@ -46,7 +47,8 @@ internal sealed class MaintenanceCoordinator : IDisposable
     internal MaintenanceCoordinator(
         Func<bool> drain,
         IMaintenanceScheduler? scheduler = null,
-        int maxPassesPerInvocation = DefaultMaxPassesPerInvocation
+        int maxPassesPerInvocation = DefaultMaxPassesPerInvocation,
+        Action? rejectedRemainderFallback = null
     )
     {
         ArgumentNullException.ThrowIfNull(drain);
@@ -56,6 +58,7 @@ internal sealed class MaintenanceCoordinator : IDisposable
         _scheduler = scheduler ?? ThreadPoolMaintenanceScheduler.Instance;
         _workerCallback = Worker;
         _maxPassesPerInvocation = maxPassesPerInvocation;
+        _rejectedRemainderFallback = rejectedRemainderFallback;
     }
 
     internal MaintenanceCoordinatorState State
@@ -260,7 +263,15 @@ internal sealed class MaintenanceCoordinator : IDisposable
             _state = MaintenanceCoordinatorState.Running;
         }
 
-        RunPasses();
+        MaintenanceCleanupResult result = RunPasses();
+        if (result.FallbackRequired)
+        {
+            // A producer may have received Accepted while the worker was still
+            // running, just before its re-arm was rejected. Give reliable work
+            // one owner-defined bounded fallback without repeating read passes.
+            // RunPasses has released both coordinator state and active scope.
+            RunRemainderFallback();
+        }
     }
 
     private MaintenanceCleanupResult RunPasses()
@@ -280,6 +291,7 @@ internal sealed class MaintenanceCoordinator : IDisposable
                 catch (Exception)
                 {
                     faulted = true;
+                    RunRemainderFallback();
                 }
 
                 bool rearm;
@@ -385,6 +397,21 @@ internal sealed class MaintenanceCoordinator : IDisposable
                     // returning. Its worker owns the continuation; this invocation must not
                     // run a second owner.
                     return new MaintenanceCleanupResult(true, true, _fallbackRequired);
+            }
+        }
+    }
+
+    private void RunRemainderFallback()
+    {
+        try
+        {
+            _rejectedRemainderFallback?.Invoke();
+        }
+        catch (Exception)
+        {
+            lock (_gate)
+            {
+                SaturatingIncrement(ref _drainFaults);
             }
         }
     }

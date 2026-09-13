@@ -210,12 +210,14 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 options.TestHooks?.BeforePolicyMaintenance,
                 options.TestHooks?.BeforeMaintenanceSignalClear,
                 options.MaintenanceReadStripeCount,
-                options.MaintenanceReadStripeCapacity
+                options.MaintenanceReadStripeCapacity,
+                options.MaintenanceWriteBufferCapacity
             );
         _maintenanceCoordinator = new MaintenanceCoordinator(
             DrainPolicyMaintenance,
             options.MaintenanceScheduler,
-            options.MaintenanceMaxPasses
+            options.MaintenanceMaxPasses,
+            DrainRejectedPolicyWrites
         );
         Policy = new CachePolicyView<TKey, TValue>(
             new EngineEvictionView(this, options.MaximumWeight.HasValue),
@@ -334,6 +336,12 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
 
     internal ReadBufferStatistics GetPolicyReadBufferStatistics() =>
         _policy.GetReadBufferStatistics();
+
+    internal WriteBufferStatistics GetPolicyWriteBufferStatistics() =>
+        _policy.GetWriteBufferStatistics();
+
+    internal bool IsCoordinationLockHeldForTesting =>
+        Monitor.IsEntered(_gate) || Monitor.IsEntered(_expirationTimerGate);
 
     internal IEqualityComparer<TKey> Comparer { get; }
 
@@ -861,7 +869,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 GetPolicyHash(key)
             );
             ReplaceCurrentLocked(key, entry);
-            _policy.OnPublish(entry.PolicyToken, entry.Weight);
+            PublishPolicyWriteLocked(entry.PolicyToken, entry.Weight);
             if (_expirationWheel is not null)
             {
                 ulong normalizedNow = GetExpirationNowLocked();
@@ -976,12 +984,12 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             ThrowIfDisposedLocked();
             MarkAllDictionaryTransformsMutated();
             _epoch = ++_nextEpoch;
+            _policy.Clear();
             foreach (Entry entry in _entries.Snapshot())
             {
                 RemoveCurrentEntryLocked(entry, RemovalCause.Cleared);
             }
             _entries.Clear();
-            _policy.Clear();
             ResetExpirationStateLocked();
         }
 
@@ -995,6 +1003,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         lock (_gate)
         {
             ThrowIfDisposedLocked();
+            _policy.FlushWrites();
             CleanUpCollectedReferencesLocked();
             if (_expirationWheel is not null)
             {
@@ -1020,7 +1029,59 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         // pass budget; a remaining lossy read batch is retried by a later hit
         // or explicit CleanUp.
         MaintenanceCleanupResult cleanup = _maintenanceCoordinator.CleanUp();
+        if (cleanup.FallbackRequired)
+        {
+            DrainRejectedPolicyWrites();
+        }
         return cleanup.FallbackRequired;
+    }
+
+    // Called by mutation scopes only after releasing their coordination locks.
+    // An inline/rejected scheduler must never dispatch a callback beneath an
+    // outer engine lock. A nested internal step leaves the request to its owner.
+    private void CompletePolicyWriteBoundary()
+    {
+        if (
+            Volatile.Read(ref _disposed) != 0
+            || Monitor.IsEntered(_gate)
+            || Monitor.IsEntered(_expirationTimerGate)
+            || !_policy.HasPendingWrites
+        )
+        {
+            return;
+        }
+
+        if (_evictionListener is not null)
+        {
+            // Preserve synchronous eviction delivery before this operation's
+            // promise/return. Events stay in its existing scope and FIFO batch.
+            lock (_gate)
+            {
+                if (_disposed == 0)
+                {
+                    _policy.FlushWrites();
+                }
+            }
+        }
+        else if (_maintenanceCoordinator.Request() == MaintenanceRequestResult.ScheduleRejected)
+        {
+            DrainRejectedPolicyWrites();
+        }
+    }
+
+    private void DrainRejectedPolicyWrites()
+    {
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope(
+            completePolicyWrites: false
+        );
+        lock (_gate)
+        {
+            if (_disposed == 0)
+            {
+                _policy.FlushWrites();
+            }
+        }
+        evictionScope.Dispatch();
     }
 
     private bool DrainPolicyMaintenance()
@@ -1030,7 +1091,9 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             return false;
         }
 
-        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
+        using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope(
+            completePolicyWrites: false
+        );
         bool moreWork;
         lock (_gate)
         {
@@ -1038,6 +1101,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         }
 
         evictionScope.Dispatch();
+        InvokeHook(_testHooks?.AfterPolicyMaintenance);
         return moreWork;
     }
 
@@ -1053,12 +1117,12 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         lock (_gate)
         {
             _epoch = ++_nextEpoch;
+            _policy.Clear();
             foreach (Entry entry in _entries.Snapshot())
             {
                 RemoveCurrentEntryLocked(entry, RemovalCause.Cleared);
             }
             _entries.Clear();
-            _policy.Clear();
             ResetExpirationStateLocked();
             flights = [.. _activeFlights];
             timeoutTimers = DetachFlightTimeoutTimersLocked(flights);
@@ -1101,12 +1165,12 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         lock (_gate)
         {
             _epoch = ++_nextEpoch;
+            _policy.Clear();
             foreach (Entry entry in _entries.Snapshot())
             {
                 RemoveCurrentEntryLocked(entry, RemovalCause.Cleared);
             }
             _entries.Clear();
-            _policy.Clear();
             ResetExpirationStateLocked();
             flights = [.. _activeFlights];
             timeoutTimers = DetachFlightTimeoutTimersLocked(flights);
@@ -1140,6 +1204,42 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     {
         lock (_gate)
         {
+            if (_policy is WindowTinyLfuEnginePolicy bufferedPolicy)
+            {
+                bufferedPolicy.AssertInvariants();
+                if (!bufferedPolicy.HasPendingWrites)
+                {
+                    int residents = 0;
+                    foreach (Entry entry in _entries.Values)
+                    {
+                        if (!entry.IsReady || entry.PolicyDetached)
+                        {
+                            continue;
+                        }
+
+                        residents++;
+                        if (
+                            entry.PolicyToken
+                                is not WindowTinyLfuEnginePolicy.EngineEntryToken token
+                            || token.Node is not { IsAlive: true }
+                            || !ReferenceEquals(token.Entry, entry)
+                        )
+                        {
+                            throw new InvalidOperationException(
+                                "A quiescent resident mapping has no live policy node."
+                            );
+                        }
+                    }
+
+                    if (residents != bufferedPolicy.ResidentCount)
+                    {
+                        throw new InvalidOperationException(
+                            "Quiescent mapping and policy membership differ."
+                        );
+                    }
+                }
+            }
+
             int reserved = 0;
             int running = 0;
             foreach (Entry entry in _entries.Values)
@@ -1532,7 +1632,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
 
                     publishedEntry = entry;
 
-                    _policy.OnPublish(entry.PolicyToken, entry.Weight);
+                    PublishPolicyWriteLocked(entry.PolicyToken, entry.Weight);
                     if (_expirationWheel is not null)
                     {
                         ulong normalizedNow = GetExpirationNowLocked();
@@ -1960,7 +2060,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         }
         else
         {
-            _policy.OnRemove(entry.PolicyToken);
+            RemovePolicyWriteLocked(entry.PolicyToken);
         }
 
         return hasSynchronousEviction ? synchronousEviction : null;
@@ -1999,7 +2099,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             return null;
         }
 
-        _policy.OnRemove(entry.PolicyToken);
+        RemovePolicyWriteLocked(entry.PolicyToken);
         entry.PolicyDetached = true;
         return null;
     }

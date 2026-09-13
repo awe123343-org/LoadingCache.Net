@@ -67,6 +67,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
     {
         CacheCounterSnapshot counters = _counters?.Snapshot() ?? default;
         ReadBufferStatistics readBuffer = _policy.GetReadBufferStatistics();
+        WriteBufferStatistics writeBuffer = _policy.GetWriteBufferStatistics();
         MaintenanceStatistics maintenance = _maintenanceCoordinator.GetStatistics();
         long listenerDrops = exposeCounters ? counters[CacheCounterKind.ListenerDrops] : 0;
         if (exposeCounters && _listenerDispatcher is not null)
@@ -107,10 +108,12 @@ internal sealed partial class CacheEngine<TKey, TValue>
             exposeCounters ? counters[CacheCounterKind.MemoryPressureRemovals] : 0,
             listenerDrops,
             exposeCounters ? counters[CacheCounterKind.ListenerFailures] : 0,
-            readBuffer.Queued,
+            SaturatingAdd(readBuffer.Queued, writeBuffer.Queued),
             exposeCounters ? SaturatingAdd(readBuffer.DroppedFull, readBuffer.DroppedShutdown) : 0,
             exposeCounters ? maintenance.ScheduleRejections : 0,
-            exposeCounters ? maintenance.DrainFaults : 0
+            exposeCounters ? maintenance.DrainFaults : 0,
+            writeBuffer.Queued,
+            exposeCounters ? writeBuffer.Full : 0
         );
     }
 
@@ -312,17 +315,17 @@ internal sealed partial class CacheEngine<TKey, TValue>
         }
     }
 
-    private SynchronousEvictionScope BeginSynchronousEvictionScope()
+    private SynchronousEvictionScope BeginSynchronousEvictionScope(bool completePolicyWrites = true)
     {
         if (_evictionListener is null)
         {
-            return default;
+            return new SynchronousEvictionScope(completePolicyWrites ? this : null, null);
         }
 
         EvictionScope? previous = _currentEvictionScope;
         var scope = new EvictionScope(this, previous);
         _currentEvictionScope = scope;
-        return new SynchronousEvictionScope(scope);
+        return new SynchronousEvictionScope(completePolicyWrites ? this : null, scope);
     }
 
     private sealed class EvictionScope(CacheEngine<TKey, TValue> owner, EvictionScope? parent)
@@ -360,12 +363,20 @@ internal sealed partial class CacheEngine<TKey, TValue>
         }
     }
 
-    private readonly struct SynchronousEvictionScope(EvictionScope? scope) : IDisposable
+    private readonly struct SynchronousEvictionScope(
+        CacheEngine<TKey, TValue>? mutationOwner,
+        EvictionScope? scope
+    ) : IDisposable
     {
-        internal void Dispatch() => scope?.Dispatch();
+        internal void Dispatch()
+        {
+            mutationOwner?.CompletePolicyWriteBoundary();
+            scope?.Dispatch();
+        }
 
         public void Dispose()
         {
+            mutationOwner?.CompletePolicyWriteBoundary();
             if (scope is null)
             {
                 return;
@@ -686,6 +697,26 @@ internal sealed partial class CacheEngine<TKey, TValue>
                     },
                     unit: "s",
                     description: "Aggregate cache loader duration."
+                );
+                _meter.CreateObservableGauge(
+                    "loadingcache.writes.pending",
+                    () =>
+                        new Measurement<long>(
+                            snapshot().WriteBufferBacklog,
+                            new KeyValuePair<string, object?>("cache.name", _cacheName)
+                        ),
+                    unit: "{event}",
+                    description: "Reliable policy writes awaiting maintenance."
+                );
+                _meter.CreateObservableCounter(
+                    "loadingcache.writes.pressure",
+                    () =>
+                        new Measurement<long>(
+                            snapshot().WriteBufferPressure,
+                            new KeyValuePair<string, object?>("cache.name", _cacheName)
+                        ),
+                    unit: "{encounter}",
+                    description: "Full write-buffer encounters requiring producer assistance."
                 );
             }
             catch

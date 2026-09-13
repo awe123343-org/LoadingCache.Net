@@ -26,6 +26,14 @@ internal interface ICacheEnginePolicy
 
     void OnRemove(object? entryToken);
 
+    // Only the mutation boundary outside engine locks requests a worker. Test
+    // policies without buffered writes retain their synchronous contract.
+    bool HasPendingWrites => false;
+
+    void FlushWrites() { }
+
+    WriteBufferStatistics GetWriteBufferStatistics() => default;
+
     void Clear();
 
     bool CleanUp();

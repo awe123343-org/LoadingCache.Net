@@ -159,7 +159,9 @@ public readonly struct CacheStatistics
         long maintenanceBacklog,
         long droppedReadEvents,
         long maintenanceScheduleRejections,
-        long maintenanceFaults
+        long maintenanceFaults,
+        long writeBufferBacklog,
+        long writeBufferPressure
     )
     {
         Hits = hits;
@@ -195,6 +197,8 @@ public readonly struct CacheStatistics
         DroppedReadEvents = droppedReadEvents;
         MaintenanceScheduleRejections = maintenanceScheduleRejections;
         MaintenanceFaults = maintenanceFaults;
+        WriteBufferBacklog = writeBufferBacklog;
+        WriteBufferPressure = writeBufferPressure;
     }
 
     /// <summary>Gets the number of resident hits.</summary>
@@ -295,7 +299,7 @@ public readonly struct CacheStatistics
     /// <summary>Gets the number of listener callback or scheduler failures.</summary>
     public long ListenerFailures { get; }
 
-    /// <summary>Gets the current number of policy read events awaiting maintenance.</summary>
+    /// <summary>Gets the current number of policy read and write events awaiting maintenance.</summary>
     public long MaintenanceBacklog { get; }
 
     /// <summary>Gets the number of policy read events dropped by the bounded transport.</summary>
@@ -306,6 +310,15 @@ public readonly struct CacheStatistics
 
     /// <summary>Gets the number of policy maintenance drain faults.</summary>
     public long MaintenanceFaults { get; }
+
+    /// <summary>Gets the current number of deferred, reliable policy write events.</summary>
+    public long WriteBufferBacklog { get; }
+
+    /// <summary>
+    /// Gets the number of full write-buffer encounters that required producer assistance.
+    /// This saturating counter is zero when statistics recording is disabled.
+    /// </summary>
+    public long WriteBufferPressure { get; }
 }
 
 /// <summary>

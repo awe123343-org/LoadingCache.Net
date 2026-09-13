@@ -487,7 +487,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             GetPolicyHash(key)
         );
         ReplaceCurrentLocked(key, entry);
-        _policy.OnPublish(entry.PolicyToken, entry.Weight);
+        PublishPolicyWriteLocked(entry.PolicyToken, entry.Weight);
         if (_expirationWheel is not null)
         {
             ulong normalizedNow = GetExpirationNowLocked();

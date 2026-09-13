@@ -26,5 +26,9 @@ internal sealed class LoadingCacheTestHooks
     // event and is paused immediately before the signal handoff re-check.
     internal Action? BeforeMaintenanceSignalClear { get; init; }
 
+    // The pass has released all cache locks but the coordinator still owns
+    // the worker, allowing an exact final-write/re-arm interleaving.
+    internal Action? AfterPolicyMaintenance { get; init; }
+
     internal Action? BeforeCompletion { get; init; }
 }

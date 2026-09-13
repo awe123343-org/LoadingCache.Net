@@ -546,7 +546,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
                         if (published)
                         {
-                            _policy.OnPublish(entry.PolicyToken, entry.Weight);
+                            PublishPolicyWriteLocked(entry.PolicyToken, entry.Weight);
                             if (_expirationWheel is not null)
                             {
                                 ulong normalizedNow = GetExpirationNowLocked();
@@ -776,10 +776,10 @@ internal sealed partial class CacheEngine<TKey, TValue>
             // OnPublish may have updated an existing node or admitted a node
             // that was detached while the value was hard-expired.  Reconcile
             // the exact token before exposing the restored snapshot.
-            _policy.OnRemove(entry.PolicyToken);
+            RemovePolicyWriteLocked(entry.PolicyToken);
             if (!previousSnapshot.PolicyDetached)
             {
-                _policy.OnPublish(entry.PolicyToken, previousSnapshot.Weight);
+                PublishPolicyWriteLocked(entry.PolicyToken, previousSnapshot.Weight);
             }
 
             entry.PolicyDetached = previousSnapshot.PolicyDetached;
@@ -790,7 +790,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             entry.PolicyDetached = previousSnapshot.PolicyDetached;
             try
             {
-                _policy.OnRemove(entry.PolicyToken);
+                RemovePolicyWriteLocked(entry.PolicyToken);
             }
             catch
             {

@@ -4,6 +4,27 @@ internal sealed partial class CacheEngine<TKey, TValue>
     where TKey : notnull
     where TValue : notnull
 {
+    private void PublishPolicyWriteLocked(object? token, long weight)
+    {
+        _policy.OnPublish(token, weight);
+        if (_evictionListener is not null || weight > _policy.Maximum)
+        {
+            // Capture this publication's evictions before another maintenance
+            // owner can claim it. The operation scope dispatches after unlock.
+            // Oversized values likewise cannot remain deferred after publication.
+            _policy.FlushWrites();
+        }
+    }
+
+    private void RemovePolicyWriteLocked(object? token)
+    {
+        _policy.OnRemove(token);
+        if (_evictionListener is not null)
+        {
+            _policy.FlushWrites();
+        }
+    }
+
     private (bool Found, TValue Value) QuietLookup(TKey key)
     {
         ArgumentNullException.ThrowIfNull(key);
@@ -66,9 +87,13 @@ internal sealed partial class CacheEngine<TKey, TValue>
         {
             get
             {
+                using SynchronousEvictionScope evictionScope = engine.BeginSynchronousEvictionScope(
+                    completePolicyWrites: false
+                );
                 lock (engine._gate)
                 {
                     engine.ThrowIfDisposedLocked();
+                    engine._policy.FlushWrites();
                     return engine._policy.WeightedSize;
                 }
             }
@@ -107,9 +132,13 @@ internal sealed partial class CacheEngine<TKey, TValue>
         > Snapshot(int limit, bool hottest)
         {
             ArgumentOutOfRangeException.ThrowIfNegative(limit);
+            using SynchronousEvictionScope evictionScope = engine.BeginSynchronousEvictionScope(
+                completePolicyWrites: false
+            );
             lock (engine._gate)
             {
                 engine.ThrowIfDisposedLocked();
+                engine._policy.FlushWrites();
                 var tokens = engine._policy.Snapshot(hottest, limit);
                 var result = new List<KeyValuePair<TKey, TValue>>(tokens.Count);
                 foreach (var token in tokens)

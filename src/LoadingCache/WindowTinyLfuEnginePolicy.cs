@@ -19,9 +19,14 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
     private readonly Action? _beforeMaintenance;
     private readonly Action? _beforeMaintenanceSignalClear;
     private readonly StripedReadBuffer<EngineEntryToken> _pendingAccesses;
+    private readonly BoundedWriteBuffer<PolicyWriteEvent> _pendingWrites;
     private const int MaximumReadDrainPerPass = 256;
+    private const int MaximumWriteDrainPerPass = 256;
     private readonly object _policyGate = new();
     private readonly HashSet<PolicyNode<object>> _nodes = [];
+    private readonly Dictionary<PolicyNode<object>, long> _nodeWriteSequences = [];
+    private readonly Dictionary<EngineEntryToken, int> _pendingWriteCounts = [];
+    private long _nextWriteSequence;
     private int _maintenanceSignal;
 
     internal WindowTinyLfuEnginePolicy(
@@ -32,7 +37,8 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
         Action? beforeMaintenance,
         Action? beforeMaintenanceSignalClear,
         int readStripeCount,
-        int readStripeCapacity
+        int readStripeCapacity,
+        int writeBufferCapacity = 256
     )
     {
         Maximum = maximum;
@@ -46,6 +52,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
             readStripeCount,
             readStripeCapacity
         );
+        _pendingWrites = new BoundedWriteBuffer<PolicyWriteEvent>(writeBufferCapacity);
     }
 
     public long Maximum { get; private set; }
@@ -56,6 +63,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
         {
             lock (_policyGate)
             {
+                FlushWritesLocked();
                 return _policy.ResidentCount;
             }
         }
@@ -65,6 +73,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
     {
         lock (_policyGate)
         {
+            FlushWritesLocked();
             DrainAccessesLocked(MaximumReadDrainPerPass);
             if (!weighted)
             {
@@ -81,6 +90,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
     {
         lock (_policyGate)
         {
+            FlushWritesLocked();
             var nodes = _policy.Snapshot(hottest, limit);
             var entries = new List<object>(nodes.Count);
             foreach (var node in nodes)
@@ -100,6 +110,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
         {
             lock (_policyGate)
             {
+                FlushWritesLocked();
                 return _policy.WeightedSize;
             }
         }
@@ -146,43 +157,39 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
 
         lock (_policyGate)
         {
-            DrainAccessesLocked(MaximumReadDrainPerPass);
-            if (token.Node is not null && token.Node.IsAlive)
-            {
-                IReadOnlyList<PolicyNode<object>> changed = _policy.UpdateWeight(
-                    token.Node,
-                    weight
-                );
-                Process(changed);
-                return;
-            }
-
-            var node = new PolicyNode<object>(token, weight, token.Hash);
-            token.Node = node;
-            _nodes.Add(node);
-            Process(_policy.Add(node));
+            EnqueueWriteLocked(
+                new PolicyWriteEvent(
+                    PolicyWriteKind.Publish,
+                    token,
+                    weight,
+                    NextWriteSequenceLocked()
+                )
+            );
         }
     }
 
     public void OnRemove(object? entryToken)
     {
-        if (entryToken is not EngineEntryToken token || token.Node is null)
+        if (entryToken is not EngineEntryToken token)
         {
             return;
         }
 
         lock (_policyGate)
         {
-            DrainAccessesLocked(MaximumReadDrainPerPass);
-            PolicyNode<object>? node = token.Node;
-            if (node is null)
+            if (token.Node is null && !_pendingWriteCounts.ContainsKey(token))
             {
                 return;
             }
 
-            token.Node = null;
-            _nodes.Remove(node);
-            _policy.Remove(node);
+            EnqueueWriteLocked(
+                new PolicyWriteEvent(
+                    PolicyWriteKind.Remove,
+                    token,
+                    weight: 0,
+                    NextWriteSequenceLocked()
+                )
+            );
         }
     }
 
@@ -190,10 +197,16 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
     {
         lock (_policyGate)
         {
+            _pendingWrites.Clear();
             DrainAccessesLocked(MaximumReadDrainPerPass);
             PolicyNode<object>[] nodes = [.. _nodes];
             foreach (PolicyNode<object> node in nodes)
             {
+                if (node.Value is EngineEntryToken token && ReferenceEquals(token.Node, node))
+                {
+                    token.Node = null;
+                }
+
                 if (node.IsAlive)
                 {
                     _policy.Remove(node);
@@ -201,6 +214,8 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
             }
 
             _nodes.Clear();
+            _nodeWriteSequences.Clear();
+            _pendingWriteCounts.Clear();
             _policy = CreatePolicy();
         }
     }
@@ -210,18 +225,305 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
         lock (_policyGate)
         {
             _beforeMaintenance?.Invoke();
+            bool writesRemain = DrainWritesLocked(MaximumWriteDrainPerPass);
             DrainAccessesLocked(MaximumReadDrainPerPass);
             Process(_policy.Maintain());
             _beforeMaintenanceSignalClear?.Invoke();
-            return UpdateMaintenanceSignalLocked();
+            return writesRemain || _pendingWrites.Count != 0 || UpdateMaintenanceSignalLocked();
         }
     }
 
+    /// <summary>
+    /// Returns whether correctness-relevant policy writes are waiting for the owner.
+    /// </summary>
+    public bool HasPendingWrites
+    {
+        get
+        {
+            lock (_policyGate)
+            {
+                return _pendingWrites.Count != 0;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Drains one bounded snapshot of queued writes.  The caller must invoke this only at an engine
+    /// boundary where policy callbacks are allowed to enqueue their own exact removal events; a
+    /// caller that requires quiescence should repeat while <see cref="HasPendingWrites"/> is true.
+    /// </summary>
+    public void FlushWrites()
+    {
+        lock (_policyGate)
+        {
+            FlushWritesLocked();
+        }
+    }
+
+    public WriteBufferStatistics GetWriteBufferStatistics() => _pendingWrites.GetStatistics();
+
     public ReadBufferStatistics GetReadBufferStatistics() => _pendingAccesses.GetStatistics();
+
+    internal void AssertInvariants()
+    {
+        lock (_policyGate)
+        {
+            _policy.AssertInvariants();
+
+            WriteBufferStatistics statistics = _pendingWrites.GetStatistics();
+            if (statistics.Queued > statistics.Capacity)
+            {
+                throw new InvalidOperationException("Policy write buffer exceeds its capacity.");
+            }
+
+            long pendingCount = 0;
+            foreach (KeyValuePair<EngineEntryToken, int> pair in _pendingWriteCounts)
+            {
+                if (pair.Value <= 0 || pair.Value > statistics.Capacity)
+                {
+                    throw new InvalidOperationException("Policy pending-write counts are invalid.");
+                }
+
+                if (pair.Key.Node is { } node && !_nodes.Contains(node))
+                {
+                    throw new InvalidOperationException(
+                        "A pending-write token points at an unknown policy node."
+                    );
+                }
+
+                pendingCount = checked(pendingCount + pair.Value);
+            }
+
+            if (pendingCount != statistics.Queued)
+            {
+                throw new InvalidOperationException(
+                    "Policy pending-write accounting is inconsistent."
+                );
+            }
+
+            if (_nodes.Count != _policy.ResidentCount)
+            {
+                throw new InvalidOperationException(
+                    "Policy adapter node accounting is inconsistent."
+                );
+            }
+
+            if (_nodeWriteSequences.Count != _nodes.Count)
+            {
+                throw new InvalidOperationException(
+                    "Policy node sequence accounting is inconsistent."
+                );
+            }
+
+            foreach (PolicyNode<object> node in _nodes)
+            {
+                if (
+                    !node.IsAlive
+                    || node.Value is not EngineEntryToken token
+                    || !ReferenceEquals(token.Node, node)
+                    || !_nodeWriteSequences.TryGetValue(node, out long sequence)
+                    || sequence > token.LastPolicyWriteSequence
+                )
+                {
+                    throw new InvalidOperationException("A policy node has a stale identity link.");
+                }
+            }
+        }
+    }
+
+    internal void SetWriteSequenceForTesting(long sequence)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(sequence);
+        lock (_policyGate)
+        {
+            _nextWriteSequence = sequence;
+        }
+    }
 
     public void Dispose()
     {
+        lock (_policyGate)
+        {
+            _pendingWrites.Dispose();
+            foreach (PolicyNode<object> node in _nodes)
+            {
+                if (node.Value is EngineEntryToken token && ReferenceEquals(token.Node, node))
+                {
+                    token.Node = null;
+                }
+            }
+
+            _policy = CreatePolicy();
+            _nodeWriteSequences.Clear();
+            _pendingWriteCounts.Clear();
+            _nodes.Clear();
+        }
+
         _pendingAccesses.Dispose();
+    }
+
+    private void EnqueueWriteLocked(PolicyWriteEvent write)
+    {
+        while (true)
+        {
+            if (_pendingWrites.TryEnqueue(write))
+            {
+                _pendingWriteCounts.TryGetValue(write.Token, out int count);
+                _pendingWriteCounts[write.Token] = count + 1;
+                return;
+            }
+
+            // A write may never be dropped.  Removing one older event creates a slot, and
+            // applying it before retrying preserves the FIFO order of events already accepted.
+            if (!TryDequeueWriteLocked(out PolicyWriteEvent older))
+            {
+                if (_pendingWrites.IsDisposed)
+                {
+                    return;
+                }
+
+                throw new InvalidOperationException(
+                    "The reliable policy write buffer rejected an event without reporting a queued event."
+                );
+            }
+
+            ApplyWriteLocked(older);
+        }
+    }
+
+    private long NextWriteSequenceLocked()
+    {
+        if (_nextWriteSequence == long.MaxValue)
+        {
+            // Sequence comparisons are only meaningful while an old sequence remains live. A
+            // quiescent flush and reset make the wrap explicit instead of allowing a signed
+            // overflow to turn a stale event into a newer one.
+            FlushWritesLocked();
+            foreach (PolicyNode<object> node in _nodes)
+            {
+                _nodeWriteSequences[node] = 0;
+                if (node.Value is EngineEntryToken token)
+                {
+                    token.LastPolicyWriteSequence = 0;
+                }
+            }
+
+            _nextWriteSequence = 0;
+        }
+
+        return ++_nextWriteSequence;
+    }
+
+    private bool DrainWritesLocked(int budget)
+    {
+        int drained = 0;
+        while (drained < budget && TryDequeueWriteLocked(out PolicyWriteEvent write))
+        {
+            ApplyWriteLocked(write);
+            drained++;
+        }
+
+        return _pendingWrites.Count != 0;
+    }
+
+    private void FlushWritesLocked()
+    {
+        // Process one captured bounded batch. Engine eviction callbacks detach
+        // the exact node before invoking RemoveCurrentEntryLocked, so ordinary
+        // removal does not enqueue a second policy event. Keeping this batch
+        // bounded still protects the boundary if a newer event is concurrently
+        // pending for the same token or a custom policy callback re-enters.
+        int budget = _pendingWrites.Count;
+        if (budget != 0)
+        {
+            DrainWritesLocked(budget);
+        }
+    }
+
+    private bool TryDequeueWriteLocked(out PolicyWriteEvent write)
+    {
+        if (!_pendingWrites.TryDequeue(out write))
+        {
+            return false;
+        }
+
+        if (_pendingWriteCounts.TryGetValue(write.Token, out int count))
+        {
+            if (count == 1)
+            {
+                _pendingWriteCounts.Remove(write.Token);
+            }
+            else
+            {
+                _pendingWriteCounts[write.Token] = count - 1;
+            }
+        }
+
+        return true;
+    }
+
+    private void ApplyWriteLocked(PolicyWriteEvent write)
+    {
+        EngineEntryToken token = write.Token;
+        if (token.LastPolicyWriteSequence > write.Sequence)
+        {
+            // A later exact-token event superseded this one before the owner
+            // reached it. In particular, do not transiently admit a publish
+            // that is already followed by an invalidate/remove: admission can
+            // evict an unrelated live entry even though this token is no
+            // longer resident in the authoritative map.
+            return;
+        }
+
+        if (write.Kind == PolicyWriteKind.Remove)
+        {
+            ApplyRemoveLocked(token, write.Sequence);
+            return;
+        }
+
+        PolicyNode<object>? node = token.Node;
+        if (node is not null && node.IsAlive)
+        {
+            if (
+                _nodeWriteSequences.TryGetValue(node, out long nodeSequence)
+                && nodeSequence > write.Sequence
+            )
+            {
+                return;
+            }
+
+            if (node.IsAlive)
+            {
+                _nodeWriteSequences[node] = write.Sequence;
+            }
+            Process(_policy.UpdateWeight(node, write.Weight));
+            return;
+        }
+
+        node = new PolicyNode<object>(token, write.Weight, token.Hash);
+        token.Node = node;
+        _nodes.Add(node);
+        _nodeWriteSequences[node] = write.Sequence;
+        Process(_policy.Add(node));
+    }
+
+    private void ApplyRemoveLocked(EngineEntryToken token, long sequence)
+    {
+        PolicyNode<object>? node = token.Node;
+        if (node is null)
+        {
+            return;
+        }
+
+        if (_nodeWriteSequences.TryGetValue(node, out long nodeSequence) && nodeSequence > sequence)
+        {
+            return;
+        }
+
+        token.Node = null;
+        _nodes.Remove(node);
+        _nodeWriteSequences.Remove(node);
+        _policy.Remove(node);
     }
 
     private void DrainAccessesLocked(int budget)
@@ -291,8 +593,46 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
             }
 
             _nodes.Remove(node);
-            _evicted(token.Entry);
+            long nodeSequence = _nodeWriteSequences.TryGetValue(node, out long sequence)
+                ? sequence
+                : 0;
+            _nodeWriteSequences.Remove(node);
+            if (nodeSequence >= token.LastPolicyWriteSequence)
+            {
+                _evicted(token.Entry);
+            }
         }
+    }
+
+    private enum PolicyWriteKind : byte
+    {
+        Publish,
+        Remove,
+    }
+
+    private readonly struct PolicyWriteEvent
+    {
+        internal PolicyWriteEvent(
+            PolicyWriteKind kind,
+            EngineEntryToken token,
+            long weight,
+            long sequence
+        )
+        {
+            Kind = kind;
+            Token = token;
+            Weight = weight;
+            Sequence = sequence;
+            token.LastPolicyWriteSequence = sequence;
+        }
+
+        internal PolicyWriteKind Kind { get; }
+
+        internal EngineEntryToken Token { get; }
+
+        internal long Weight { get; }
+
+        internal long Sequence { get; }
     }
 
     internal sealed class EngineEntryToken
@@ -306,6 +646,8 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
         internal object Entry { get; }
 
         internal uint Hash { get; }
+
+        internal long LastPolicyWriteSequence { get; set; }
 
         private PolicyNode<object>? _node;
 

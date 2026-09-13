@@ -937,7 +937,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             Volatile.Write(ref entry.IsReady, true);
         }
 
-        _policy.OnPublish(entry.PolicyToken, entry.Weight);
+        PublishPolicyWriteLocked(entry.PolicyToken, entry.Weight);
         if (_expirationWheel is null)
         {
             return;
@@ -966,7 +966,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             GetPolicyHash(publication.Key)
         );
         _entries[publication.Key] = entry;
-        _policy.OnPublish(entry.PolicyToken, entry.Weight);
+        PublishPolicyWriteLocked(entry.PolicyToken, entry.Weight);
         if (_expirationWheel is null)
         {
             return;

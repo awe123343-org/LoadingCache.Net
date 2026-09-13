@@ -213,6 +213,8 @@ public sealed class EnginePersonalityTests
         (await cache.GetAsync(1)).Should().Be("1");
         (await cache.GetAsync(2)).Should().Be("2");
         (await cache.GetAsync(3)).Should().Be("3");
+        // Capacity is a quiescent bound; ready publication precedes policy replay.
+        cache.CleanUp();
         cache.EstimatedCount.Should().BeLessThanOrEqualTo(2);
     }
 

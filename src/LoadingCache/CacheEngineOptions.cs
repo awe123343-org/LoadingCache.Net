@@ -42,6 +42,7 @@ internal sealed class CacheEngineOptions<TKey, TValue>
     internal int MaintenanceMaxPasses { get; init; } = 32;
     internal int MaintenanceReadStripeCount { get; init; } = 4;
     internal int MaintenanceReadStripeCapacity { get; init; } = 256;
+    internal int MaintenanceWriteBufferCapacity { get; init; } = 256;
 
     // M5 diagnostics. Public builder methods map directly to these fields;
     // the engine keeps callbacks behind a bounded, lock-outside dispatcher.

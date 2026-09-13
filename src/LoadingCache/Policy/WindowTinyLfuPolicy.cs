@@ -70,6 +70,40 @@ internal sealed class WindowTinyLfuPolicy<T>
 
     internal int ResidentCount => _window.Count + _probation.Count + _protected.Count;
 
+    internal void AssertInvariants()
+    {
+        HashSet<PolicyNode<T>> nodes = [];
+        _window.AssertInvariants(_ownerId, nodes);
+        _probation.AssertInvariants(_ownerId, nodes);
+        _protected.AssertInvariants(_ownerId, nodes);
+
+        if (nodes.Count != ResidentCount)
+        {
+            throw new InvalidOperationException("Policy resident count is inconsistent.");
+        }
+
+        long weightedSize = 0;
+        foreach (PolicyNode<T> node in nodes)
+        {
+            weightedSize = checked(weightedSize + node.Weight);
+        }
+
+        if (weightedSize != WeightedSize)
+        {
+            throw new InvalidOperationException("Policy weighted size is inconsistent.");
+        }
+
+        if (WeightedSize > Maximum)
+        {
+            throw new InvalidOperationException("Policy weighted size exceeds its maximum.");
+        }
+
+        if (_maximumCount is { } maximumCount && ResidentCount > maximumCount)
+        {
+            throw new InvalidOperationException("Policy resident count exceeds its maximum.");
+        }
+    }
+
     internal long MainMaximum => Maximum - WindowMaximum;
 
     internal long MainProtectedWeightedSize => _protected.WeightedSize;
@@ -933,6 +967,36 @@ internal sealed class WindowTinyLfuPolicy<T>
             {
                 destination.Add(node);
                 node = newestFirst ? node.Previous : node.Next;
+            }
+        }
+
+        internal void AssertInvariants(long ownerId, HashSet<PolicyNode<TValue>> seen)
+        {
+            int count = 0;
+            long weightedSize = 0;
+            PolicyNode<TValue>? previous = null;
+            for (PolicyNode<TValue>? node = Head; node is not null; node = node.Next)
+            {
+                if (
+                    !seen.Add(node)
+                    || !node.IsAlive
+                    || node.OwnerId != ownerId
+                    || node.Queue != _queue
+                    || !ReferenceEquals(node.Previous, previous)
+                    || (node.Next is not null && !ReferenceEquals(node.Next.Previous, node))
+                )
+                {
+                    throw new InvalidOperationException("Policy deque links are inconsistent.");
+                }
+
+                count++;
+                weightedSize = checked(weightedSize + node.Weight);
+                previous = node;
+            }
+
+            if (!ReferenceEquals(Tail, previous) || count != Count || weightedSize != WeightedSize)
+            {
+                throw new InvalidOperationException("Policy deque accounting is inconsistent.");
             }
         }
 
