@@ -5,7 +5,9 @@ internal sealed class CachePolicyView<TKey, TValue> : ICachePolicy<TKey, TValue>
     where TValue : notnull
 {
     internal CachePolicyView(
-        ICacheEnginePolicy policy,
+        IEvictionPolicy<TKey, TValue> eviction,
+        Func<TKey, (bool Found, TValue Value)> quietLookup,
+        Func<MemoryPressureStatistics?> memoryPressureStatistics,
         Func<TimeSpan?> getExpireAfterAccess,
         Action<TimeSpan> setExpireAfterAccess,
         Func<TKey, TimeSpan?> getAccessRemaining,
@@ -21,7 +23,9 @@ internal sealed class CachePolicyView<TKey, TValue> : ICachePolicy<TKey, TValue>
         IVariableExpirationPolicy<TKey, TValue>? variableExpiration
     )
     {
-        Eviction = new EvictionView<TKey, TValue>(policy);
+        Eviction = eviction;
+        _quietLookup = quietLookup;
+        _memoryPressureStatistics = memoryPressureStatistics;
         ExpireAfterAccess = getExpireAfterAccess() is not null
             ? new FixedExpirationView<TKey, TValue>(
                 getExpireAfterAccess,
@@ -59,21 +63,19 @@ internal sealed class CachePolicyView<TKey, TValue> : ICachePolicy<TKey, TValue>
 
     public IVariableExpirationPolicy<TKey, TValue>? VariableExpiration { get; }
 
-    private sealed class EvictionView<TPolicyKey, TPolicyValue>
-        : IEvictionPolicy<TPolicyKey, TPolicyValue>
-        where TPolicyKey : notnull
-        where TPolicyValue : notnull
+    private readonly Func<TKey, (bool Found, TValue Value)> _quietLookup;
+    private readonly Func<MemoryPressureStatistics?> _memoryPressureStatistics;
+
+    public MemoryPressureStatistics? MemoryPressureStatistics => _memoryPressureStatistics();
+
+    public bool TryGetQuietly(
+        TKey key,
+        [System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out TValue value
+    )
     {
-        private readonly ICacheEnginePolicy _policy;
-
-        internal EvictionView(ICacheEnginePolicy policy)
-        {
-            _policy = policy;
-        }
-
-        public long Maximum => _policy.Maximum;
-
-        public long WeightedSize => _policy.WeightedSize;
+        (bool found, TValue result) = _quietLookup(key);
+        value = result;
+        return found;
     }
 
     private sealed class FixedExpirationView<TPolicyKey, TPolicyValue>

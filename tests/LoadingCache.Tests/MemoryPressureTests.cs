@@ -1,0 +1,665 @@
+using System.Globalization;
+using FluentAssertions;
+using Microsoft.Extensions.Time.Testing;
+using NUnit.Framework;
+
+namespace LoadingCache.Tests;
+
+public sealed class MemoryPressureTests
+{
+    [Test]
+    public void PolicyIsDisabledByDefault()
+    {
+        var source = new TestMemoryPressureSource(1);
+        using ICache<int, string> cache = CacheBuilder
+            .Create<int, string>()
+            .MaximumSize(8)
+            .MaxConcurrentLoads(2)
+            .MemoryPressureSource(source)
+            .Build();
+
+        cache.Put(1, "one");
+
+        source.Calls.Should().Be(0);
+        cache.EstimatedCount.Should().Be(1);
+        cache.Policy.MemoryPressureStatistics.Should().BeNull();
+    }
+
+    [Test]
+    public void HighPressureTrimsBoundedPolicyColdestEntry()
+    {
+        var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        var source = new TestMemoryPressureSource(1);
+        using ICache<int, string> cache = CacheBuilder
+            .Create<int, string>()
+            .MaximumSize(8)
+            .MaxConcurrentLoads(2)
+            .TimeProvider(clock)
+            .MemoryPressureSource(source)
+            .MemoryPressureEviction(
+                TimeSpan.FromSeconds(1),
+                pressureThreshold: 0.8,
+                trimFraction: 0.5,
+                maximumTrimCount: 1
+            )
+            .Build();
+
+        cache.Put(1, "one");
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+        cache.Put(2, "two");
+        cache.CleanUp();
+
+        cache.Policy.Eviction!.Coldest(1).Select(pair => pair.Key).Should().Contain(1);
+
+        clock.Advance(TimeSpan.FromSeconds(1));
+
+        cache.EstimatedCount.Should().Be(1);
+        cache.TryGet(1, out _).Should().BeFalse();
+        cache.TryGet(2, out string? value).Should().BeTrue();
+        value.Should().Be("two");
+        source.Calls.Should().Be(1);
+    }
+
+    [Test]
+    public void PressureTrimHonorsTheConfiguredMaximumTrimCount()
+    {
+        var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        var source = new TestMemoryPressureSource(1);
+        CacheEngine<int, string> engine = CacheBuilder
+            .Create<int, string>()
+            .MaximumSize(64)
+            .MaxConcurrentLoads(1)
+            .TimeProvider(clock)
+            .MemoryPressureSource(source)
+            .MemoryPressureEviction(TimeSpan.FromSeconds(1), trimFraction: 1, maximumTrimCount: 2)
+            .CreateEngine();
+        using var cache = new Cache<int, string>(engine);
+
+        for (int key = 0; key < 16; key++)
+        {
+            cache.Put(key, key.ToString(CultureInfo.InvariantCulture));
+        }
+
+        cache.CleanUp();
+        engine.SampleMemoryPressureForTesting();
+
+        cache.EstimatedCount.Should().Be(14);
+        MemoryPressureStatistics? diagnostics = cache.Policy.MemoryPressureStatistics;
+        diagnostics.Should().NotBeNull();
+        diagnostics!.Value.Samples.Should().Be(1);
+        diagnostics.Value.PressureSamples.Should().Be(1);
+        diagnostics.Value.EvictedEntries.Should().Be(2);
+    }
+
+    [Test]
+    public void PressureBelowThresholdDoesNotTrim()
+    {
+        var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        var source = new TestMemoryPressureSource(0.5);
+        using ICache<int, string> cache = CacheBuilder
+            .Create<int, string>()
+            .MaximumSize(8)
+            .MaxConcurrentLoads(2)
+            .TimeProvider(clock)
+            .MemoryPressureSource(source)
+            .MemoryPressureEviction(TimeSpan.FromSeconds(1), pressureThreshold: 0.8)
+            .Build();
+
+        cache.Put(1, "one");
+        clock.Advance(TimeSpan.FromSeconds(1));
+
+        cache.EstimatedCount.Should().Be(1);
+        cache.TryGet(1, out string? value).Should().BeTrue();
+        value.Should().Be("one");
+    }
+
+    [Test]
+    public void MemoryPressureOptionsValidateAtBuilderBoundary()
+    {
+        Action invalidInterval = () =>
+            CacheBuilder.Create<int, string>().MemoryPressureEviction(TimeSpan.Zero);
+        Action invalidThreshold = () =>
+            CacheBuilder
+                .Create<int, string>()
+                .MemoryPressureEviction(TimeSpan.FromSeconds(1), pressureThreshold: double.NaN);
+        Action invalidFraction = () =>
+            CacheBuilder
+                .Create<int, string>()
+                .MemoryPressureEviction(TimeSpan.FromSeconds(1), trimFraction: 0);
+        Action invalidCount = () =>
+            CacheBuilder
+                .Create<int, string>()
+                .MemoryPressureEviction(TimeSpan.FromSeconds(1), maximumTrimCount: 0);
+
+        invalidInterval.Should().ThrowExactly<ArgumentOutOfRangeException>();
+        invalidThreshold.Should().ThrowExactly<ArgumentOutOfRangeException>();
+        invalidFraction.Should().ThrowExactly<ArgumentOutOfRangeException>();
+        invalidCount.Should().ThrowExactly<ArgumentOutOfRangeException>();
+    }
+
+    [Test]
+    public void FailedPressureTimerConstructionDisposesAnAlreadyCreatedExpirationTimer()
+    {
+        using var timeProvider = new ThrowingSecondTimerProvider();
+
+        Action build = () =>
+            CacheBuilder
+                .Create<int, string>()
+                .MaximumSize(8)
+                .MaxConcurrentLoads(1)
+                .TimeProvider(timeProvider)
+                .ExpireAfterWrite(TimeSpan.FromMinutes(1))
+                .EnableExpirationScheduler()
+                .MemoryPressureEviction(TimeSpan.FromSeconds(1))
+                .Build();
+
+        build.Should().ThrowExactly<InvalidOperationException>();
+        timeProvider.DisposedTimerCount.Should().Be(1);
+    }
+
+    [Test]
+    public void SamplingErrorsAreObservedWithoutDamagingCacheState()
+    {
+        var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        var source = new TestMemoryPressureSource(new InvalidOperationException("sample failed"));
+        CacheEngine<int, string> engine = CacheBuilder
+            .Create<int, string>()
+            .MaximumSize(8)
+            .MaxConcurrentLoads(2)
+            .TimeProvider(clock)
+            .MemoryPressureSource(source)
+            .MemoryPressureEviction(TimeSpan.FromSeconds(1))
+            .CreateEngine();
+        using var cache = new Cache<int, string>(engine);
+
+        cache.Put(1, "one");
+        engine.SampleMemoryPressureForTesting();
+
+        MemoryPressureStatistics? diagnostics = cache.Policy.MemoryPressureStatistics;
+        diagnostics.Should().NotBeNull();
+        diagnostics!.Value.SamplingErrors.Should().Be(1);
+        diagnostics.Value.LastSamplingError.Should().BeOfType<InvalidOperationException>();
+        cache.TryGet(1, out string? value).Should().BeTrue();
+        value.Should().Be("one");
+    }
+
+    [Test]
+    public async Task ClearDuringProviderCallFencesThePressureSample()
+    {
+        var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        var entered = NewSignal();
+        var release = NewSignal();
+        var source = new TestMemoryPressureSource(() =>
+        {
+            entered.TrySetResult(true);
+            release.Task.GetAwaiter().GetResult();
+            return new MemoryPressureSample(1);
+        });
+        CacheEngine<int, string> engine = CacheBuilder
+            .Create<int, string>()
+            .MaximumSize(8)
+            .MaxConcurrentLoads(2)
+            .TimeProvider(clock)
+            .MemoryPressureSource(source)
+            .MemoryPressureEviction(TimeSpan.FromSeconds(0.01), maximumTrimCount: 8)
+            .CreateEngine();
+        using var cache = new Cache<int, string>(engine);
+
+        cache.Put(1, "old");
+        Task sample = Task.Run(engine.SampleMemoryPressureForTesting);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cache.Clear();
+        cache.Put(2, "new");
+        release.TrySetResult(true);
+        await sample.WaitAsync(TimeSpan.FromSeconds(5));
+
+        cache.TryGet(2, out string? value).Should().BeTrue();
+        value.Should().Be("new");
+        cache.Policy.MemoryPressureStatistics!.Value.EvictedEntries.Should().Be(0);
+    }
+
+    [Test]
+    public async Task SetDuringProviderCallFencesTheCapturedValueVersion()
+    {
+        var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        var entered = NewSignal();
+        var release = NewSignal();
+        var source = new TestMemoryPressureSource(() =>
+        {
+            entered.TrySetResult(true);
+            release.Task.GetAwaiter().GetResult();
+            return new MemoryPressureSample(1);
+        });
+        CacheEngine<int, string> engine = CacheBuilder
+            .Create<int, string>()
+            .MaximumSize(8)
+            .MaxConcurrentLoads(2)
+            .TimeProvider(clock)
+            .MemoryPressureSource(source)
+            .MemoryPressureEviction(TimeSpan.FromSeconds(1), maximumTrimCount: 8)
+            .CreateEngine();
+        using var cache = new Cache<int, string>(engine);
+
+        cache.Put(1, "old");
+        Task sample = Task.Run(engine.SampleMemoryPressureForTesting);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cache.Put(1, "new");
+        release.TrySetResult(true);
+        await sample.WaitAsync(TimeSpan.FromSeconds(5));
+
+        cache.TryGet(1, out string? value).Should().BeTrue();
+        value.Should().Be("new");
+        cache.Policy.MemoryPressureStatistics!.Value.EvictedEntries.Should().Be(0);
+    }
+
+    [Test]
+    public async Task RefreshPublicationFencesTheCapturedValueVersion()
+    {
+        var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        var refreshEntered = NewSignal();
+        var releaseRefresh = NewSignal();
+        int calls = 0;
+        var sourceEntered = NewSignal();
+        var releaseSource = NewSignal();
+        var source = new TestMemoryPressureSource(() =>
+        {
+            sourceEntered.TrySetResult(true);
+            releaseSource.Task.GetAwaiter().GetResult();
+            return new MemoryPressureSample(1);
+        });
+        CacheEngine<int, string> engine = CacheBuilder
+            .Create<int, string>()
+            .MaximumSize(8)
+            .MaxConcurrentLoads(2)
+            .TimeProvider(clock)
+            .MemoryPressureSource(source)
+            .MemoryPressureEviction(TimeSpan.FromSeconds(1), maximumTrimCount: 8)
+            .CreateEngine();
+        await using var cache = new AsyncLoadingCache<int, string>(
+            engine,
+            async (_, _) =>
+            {
+                if (Interlocked.Increment(ref calls) == 1)
+                {
+                    return "v1";
+                }
+
+                refreshEntered.TrySetResult(true);
+                await releaseRefresh.Task.ConfigureAwait(false);
+                return "v2";
+            }
+        );
+
+        (await cache.GetAsync(1)).Should().Be("v1");
+        Task<string> refresh = cache.RefreshAsync(1).AsTask();
+        await refreshEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Task sample = Task.Run(engine.SampleMemoryPressureForTesting);
+        await sourceEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        releaseRefresh.TrySetResult(true);
+        (await refresh.WaitAsync(TimeSpan.FromSeconds(5))).Should().Be("v2");
+        releaseSource.TrySetResult(true);
+        await sample.WaitAsync(TimeSpan.FromSeconds(5));
+
+        cache.TryGet(1, out string? value).Should().BeTrue();
+        value.Should().Be("v2");
+        cache.Policy.MemoryPressureStatistics!.Value.EvictedEntries.Should().Be(0);
+    }
+
+    [Test]
+    public async Task ProviderRunsOutsideCacheGateAndMayReenter()
+    {
+        var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        Cache<int, string>? cache = null;
+        var source = new TestMemoryPressureSource(() =>
+        {
+            cache!.Put(2, "reentrant");
+            return new MemoryPressureSample(0);
+        });
+        CacheEngine<int, string> engine = CacheBuilder
+            .Create<int, string>()
+            .MaximumSize(8)
+            .MaxConcurrentLoads(2)
+            .TimeProvider(clock)
+            .MemoryPressureSource(source)
+            .MemoryPressureEviction(TimeSpan.FromSeconds(1))
+            .CreateEngine();
+        using (var typedCache = new Cache<int, string>(engine))
+        {
+            cache = typedCache;
+            await Task.Run(engine.SampleMemoryPressureForTesting)
+                .WaitAsync(TimeSpan.FromSeconds(5));
+            typedCache.TryGet(2, out string? value).Should().BeTrue();
+            value.Should().Be("reentrant");
+        }
+    }
+
+    [Test]
+    public async Task OverlappingSamplesDoNotOverlapProviderCalls()
+    {
+        var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        var entered = NewSignal();
+        var release = NewSignal();
+        var source = new TestMemoryPressureSource(() =>
+        {
+            entered.TrySetResult(true);
+            release.Task.GetAwaiter().GetResult();
+            return new MemoryPressureSample(0);
+        });
+        CacheEngine<int, string> engine = CacheBuilder
+            .Create<int, string>()
+            .MaximumSize(8)
+            .MaxConcurrentLoads(1)
+            .TimeProvider(clock)
+            .MemoryPressureSource(source)
+            .MemoryPressureEviction(TimeSpan.FromSeconds(1))
+            .CreateEngine();
+        using var cache = new Cache<int, string>(engine);
+        cache.Put(1, "one");
+
+        Task first = Task.Run(engine.SampleMemoryPressureForTesting);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Task second = Task.Run(engine.SampleMemoryPressureForTesting);
+        await second.WaitAsync(TimeSpan.FromSeconds(5));
+
+        source.Calls.Should().Be(1);
+        release.TrySetResult(true);
+        await first.WaitAsync(TimeSpan.FromSeconds(5));
+        cache.Policy.MemoryPressureStatistics!.Value.Samples.Should().Be(1);
+    }
+
+    [Test]
+    public async Task SamplingTimerDoesNotFlowExecutionContext()
+    {
+        var context = new AsyncLocal<string?>();
+        var observed = NewSignal();
+        string? observedValue = null;
+        var source = new TestMemoryPressureSource(() =>
+        {
+            observedValue = context.Value;
+            observed.TrySetResult(true);
+            return new MemoryPressureSample(0);
+        });
+        using var timeProvider = new ContextCapturingTimeProvider();
+        context.Value = "builder-context";
+        using ICache<int, string> cache = CacheBuilder
+            .Create<int, string>()
+            .MaximumSize(8)
+            .MaxConcurrentLoads(1)
+            .TimeProvider(timeProvider)
+            .MemoryPressureSource(source)
+            .MemoryPressureEviction(TimeSpan.FromSeconds(1))
+            .Build();
+
+        cache.Put(1, "one");
+        context.Value = "caller-context";
+        await timeProvider.FireTimerAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        await observed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        observedValue.Should().BeNull();
+    }
+
+    [Test]
+    public async Task PendingLoadIsNotEvictedOrCountedAsResidentTrim()
+    {
+        var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        var entered = NewSignal();
+        var release = NewSignal();
+        var source = new TestMemoryPressureSource(1);
+        CacheEngine<int, string> engine = CacheBuilder
+            .Create<int, string>()
+            .MaximumSize(8)
+            .MaxConcurrentLoads(2)
+            .TimeProvider(clock)
+            .MemoryPressureSource(source)
+            .MemoryPressureEviction(TimeSpan.FromSeconds(1))
+            .CreateEngine();
+        await using var cache = new AsyncLoadingCache<int, string>(
+            engine,
+            async (_, _) =>
+            {
+                entered.TrySetResult(true);
+                await release.Task.ConfigureAwait(false);
+                return "loaded";
+            }
+        );
+
+        Task<string> load = cache.GetAsync(1).AsTask();
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        clock.Advance(TimeSpan.FromSeconds(1));
+
+        cache.Statistics.InFlightLoads.Should().Be(1);
+        cache.EstimatedCount.Should().Be(0);
+        release.TrySetResult(true);
+        (await load.WaitAsync(TimeSpan.FromSeconds(5))).Should().Be("loaded");
+    }
+
+    [Test]
+    public void WeightedZeroEntriesRemainSubjectToPressureTrim()
+    {
+        var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        CacheEngine<int, string> engine = CacheBuilder
+            .Create<int, string>()
+            .MaximumWeight(8)
+            .MaximumResidentCount(8)
+            .MaxConcurrentLoads(1)
+            .TimeProvider(clock)
+            .Weigher((_, _) => 0)
+            .MemoryPressureSource(new TestMemoryPressureSource(1))
+            .MemoryPressureEviction(TimeSpan.FromSeconds(1), trimFraction: 0.5)
+            .CreateEngine();
+        using var cache = new Cache<int, string>(engine);
+
+        cache.Put(1, "one");
+        cache.Put(2, "two");
+        engine.SampleMemoryPressureForTesting();
+
+        cache.EstimatedCount.Should().Be(1);
+        cache.Policy.Eviction!.WeightedSize.Should().Be(0);
+    }
+
+    [Test]
+    public void DisposingCacheStopsFutureSamples()
+    {
+        var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        var source = new TestMemoryPressureSource(1);
+        ICache<int, string> cache = CacheBuilder
+            .Create<int, string>()
+            .MaximumSize(8)
+            .MaxConcurrentLoads(2)
+            .TimeProvider(clock)
+            .MemoryPressureSource(source)
+            .MemoryPressureEviction(TimeSpan.FromSeconds(1))
+            .Build();
+
+        cache.Put(1, "one");
+        clock.Advance(TimeSpan.FromSeconds(1));
+        source.Calls.Should().Be(1);
+
+        cache.Dispose();
+        clock.Advance(TimeSpan.FromSeconds(3));
+
+        source.Calls.Should().Be(1);
+    }
+
+    private static TaskCompletionSource<bool> NewSignal() =>
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private sealed class TestMemoryPressureSource : IMemoryPressureSource
+    {
+        private readonly Func<MemoryPressureSample> _sample;
+        private int _calls;
+
+        internal TestMemoryPressureSource(double loadRatio)
+            : this(() => new MemoryPressureSample(loadRatio)) { }
+
+        internal TestMemoryPressureSource(Exception exception)
+            : this(() => throw exception) { }
+
+        internal TestMemoryPressureSource(Func<MemoryPressureSample> sample)
+        {
+            _sample = sample;
+        }
+
+        internal int Calls => Volatile.Read(ref _calls);
+
+        public MemoryPressureSample GetSample()
+        {
+            Interlocked.Increment(ref _calls);
+            return _sample();
+        }
+    }
+
+    private sealed class ContextCapturingTimeProvider : TimeProvider, IDisposable
+    {
+        private readonly TimeProvider _system = TimeProvider.System;
+        private ContextCapturingTimer? _timer;
+
+        public override DateTimeOffset GetUtcNow() => _system.GetUtcNow();
+
+        public override TimeZoneInfo LocalTimeZone => _system.LocalTimeZone;
+
+        public override long TimestampFrequency => _system.TimestampFrequency;
+
+        public override long GetTimestamp() => _system.GetTimestamp();
+
+        public override ITimer CreateTimer(
+            TimerCallback callback,
+            object? state,
+            TimeSpan dueTime,
+            TimeSpan period
+        )
+        {
+            _timer = new ContextCapturingTimer(callback, state);
+            return _timer;
+        }
+
+        internal Task<bool> FireTimerAsync() =>
+            _timer?.FireAsync()
+            ?? Task.FromException<bool>(new InvalidOperationException("Timer was not created."));
+
+        public void Dispose() => _timer?.Dispose();
+
+        private sealed class ContextCapturingTimer : ITimer
+        {
+            private readonly TimerCallback _callback;
+            private readonly object? _state;
+            private readonly ExecutionContext? _context;
+
+            internal ContextCapturingTimer(TimerCallback callback, object? state)
+            {
+                _callback = callback;
+                _state = state;
+                _context = ExecutionContext.Capture();
+            }
+
+            public bool Change(TimeSpan dueTime, TimeSpan period) => true;
+
+            public void Dispose() { }
+
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+            internal Task<bool> FireAsync()
+            {
+                var completion = NewSignal();
+                var invocation = new Invocation(this, completion);
+                ThreadPool.UnsafeQueueUserWorkItem(
+                    static value => value.Run(),
+                    invocation,
+                    preferLocal: false
+                );
+                return completion.Task;
+            }
+
+            private sealed class Invocation
+            {
+                private readonly ContextCapturingTimer _timer;
+                private readonly TaskCompletionSource<bool> _completion;
+
+                internal Invocation(
+                    ContextCapturingTimer timer,
+                    TaskCompletionSource<bool> completion
+                )
+                {
+                    _timer = timer;
+                    _completion = completion;
+                }
+
+                internal void Run()
+                {
+                    try
+                    {
+                        if (_timer._context is null)
+                        {
+                            _timer._callback(_timer._state);
+                        }
+                        else
+                        {
+                            ExecutionContext.Run(
+                                _timer._context,
+                                static state =>
+                                {
+                                    var invocation = (Invocation)state!;
+                                    invocation._timer._callback(invocation._timer._state);
+                                },
+                                this
+                            );
+                        }
+
+                        _completion.TrySetResult(true);
+                    }
+                    catch (Exception exception)
+                    {
+                        _completion.TrySetException(exception);
+                    }
+                }
+            }
+        }
+    }
+
+    private sealed class ThrowingSecondTimerProvider : TimeProvider, IDisposable
+    {
+        private readonly TimeProvider _system = TimeProvider.System;
+        private int _createCount;
+        private int _disposedTimerCount;
+
+        internal int DisposedTimerCount => Volatile.Read(ref _disposedTimerCount);
+
+        public override DateTimeOffset GetUtcNow() => _system.GetUtcNow();
+
+        public override TimeZoneInfo LocalTimeZone => _system.LocalTimeZone;
+
+        public override long TimestampFrequency => _system.TimestampFrequency;
+
+        public override long GetTimestamp() => _system.GetTimestamp();
+
+        public override ITimer CreateTimer(
+            TimerCallback callback,
+            object? state,
+            TimeSpan dueTime,
+            TimeSpan period
+        )
+        {
+            if (Interlocked.Increment(ref _createCount) == 2)
+            {
+                throw new InvalidOperationException("The second timer is rejected.");
+            }
+
+            return new TrackingTimer(() => Interlocked.Increment(ref _disposedTimerCount));
+        }
+
+        public void Dispose() { }
+
+        private sealed class TrackingTimer(Action onDispose) : ITimer
+        {
+            public bool Change(TimeSpan dueTime, TimeSpan period) => true;
+
+            public void Dispose() => onDispose();
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+                return ValueTask.CompletedTask;
+            }
+        }
+    }
+}

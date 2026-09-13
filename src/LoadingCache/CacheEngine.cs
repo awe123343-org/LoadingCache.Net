@@ -18,6 +18,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     private readonly ConcurrentDictionary<TKey, Entry> _entries;
     private readonly object _gate = new();
     private readonly Func<TKey, TValue, long>? _weigher;
+    private readonly Action<TValue>? _onValueRetired;
     private readonly int _maxConcurrentLoads;
     private long _expireAfterWriteTicks;
     private long _expireAfterAccessTicks;
@@ -29,6 +30,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     private readonly bool _recordStatistics;
     private readonly bool _enableExpirationScheduler;
     private readonly ITimer? _expirationTimer;
+    private readonly MemoryPressureController<TKey, TValue>? _memoryPressureController;
     private readonly object _expirationTimerGate = new();
     private TimerWheel<Entry>? _expirationWheel;
     private readonly Dictionary<Entry, IdentityTimerNode<Entry>>? _expirationNodes;
@@ -145,6 +147,16 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         }
 
         ArgumentNullException.ThrowIfNull(options.TimeProvider);
+        if (options.MemoryPressureSamplingInterval is TimeSpan pressureInterval)
+        {
+            ArgumentNullException.ThrowIfNull(options.MemoryPressureSource);
+            MemoryPressureController<TKey, TValue>.ValidateOptions(
+                pressureInterval,
+                options.MemoryPressureThreshold,
+                options.MemoryPressureTrimFraction,
+                options.MemoryPressureMaximumTrimCount
+            );
+        }
         ValidateDuration(options.ExpireAfterWrite, nameof(options.ExpireAfterWrite));
         ValidateDuration(options.ExpireAfterAccess, nameof(options.ExpireAfterAccess));
         ValidateDuration(options.RefreshAfterWrite, nameof(options.RefreshAfterWrite));
@@ -162,6 +174,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         }
 
         _weigher = options.Weigher;
+        _onValueRetired = options.OnValueRetired;
         _maxConcurrentLoads = options.MaxConcurrentLoads;
         _expireAfterWriteTicks = options.ExpireAfterWrite?.Ticks ?? -1;
         _expireAfterAccessTicks = options.ExpireAfterAccess?.Ticks ?? -1;
@@ -191,7 +204,9 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             options.MaintenanceMaxPasses
         );
         Policy = new CachePolicyView<TKey, TValue>(
-            _policy,
+            new EngineEvictionView(this, options.MaximumWeight.HasValue),
+            QuietLookup,
+            GetPublicMemoryPressureStatistics,
             GetExpireAfterAccess,
             SetExpireAfterAccess,
             key => GetExpiresAfter(key, ExpirationKind.Access),
@@ -216,21 +231,43 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         _epoch = _nextEpoch = 1;
 
         if (
-            options.Expiry is null
-            && !options.ExpireAfterWrite.HasValue
-            && !options.ExpireAfterAccess.HasValue
+            options.Expiry is not null
+            || options.ExpireAfterWrite.HasValue
+            || options.ExpireAfterAccess.HasValue
         )
         {
-            return;
+            _expirationOriginTimestamp = _timeProvider.GetTimestamp();
+            _expirationClockInitialized = true;
+            _expirationWheel = new TimerWheel<Entry>();
+            _expirationNodes = new Dictionary<Entry, IdentityTimerNode<Entry>>();
+            if (_enableExpirationScheduler)
+            {
+                _expirationTimer = CreateExpirationTimer();
+            }
         }
 
-        _expirationOriginTimestamp = _timeProvider.GetTimestamp();
-        _expirationClockInitialized = true;
-        _expirationWheel = new TimerWheel<Entry>();
-        _expirationNodes = new Dictionary<Entry, IdentityTimerNode<Entry>>();
-        if (_enableExpirationScheduler)
+        if (options.MemoryPressureSamplingInterval is TimeSpan samplingInterval)
         {
-            _expirationTimer = CreateExpirationTimer();
+            try
+            {
+                _memoryPressureController = new MemoryPressureController<TKey, TValue>(
+                    this,
+                    _timeProvider,
+                    samplingInterval,
+                    options.MemoryPressureThreshold,
+                    options.MemoryPressureTrimFraction,
+                    options.MemoryPressureMaximumTrimCount,
+                    options.MemoryPressureSource
+                );
+            }
+            catch
+            {
+                _expirationTimer?.Dispose();
+                _maintenanceCoordinator.Dispose();
+                _policy.Dispose();
+                _shutdownCts.Dispose();
+                throw;
+            }
         }
     }
 
@@ -818,6 +855,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         {
             ThrowIfDisposedLocked();
             _epoch = ++_nextEpoch;
+            RetireOwnedValuesLocked();
             _entries.Clear();
             _policy.Clear();
             ResetExpirationStateLocked();
@@ -883,6 +921,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         lock (_gate)
         {
             _epoch = ++_nextEpoch;
+            RetireOwnedValuesLocked();
             _entries.Clear();
             _policy.Clear();
             ResetExpirationStateLocked();
@@ -892,6 +931,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
 
         _maintenanceCoordinator.Dispose();
         _policy.Dispose();
+        _memoryPressureController?.Dispose();
         StopExpirationTimer();
 
         foreach (Flight flight in flights)
@@ -922,6 +962,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         lock (_gate)
         {
             _epoch = ++_nextEpoch;
+            RetireOwnedValuesLocked();
             _entries.Clear();
             _policy.Clear();
             ResetExpirationStateLocked();
@@ -931,6 +972,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
 
         _maintenanceCoordinator.Dispose();
         _policy.Dispose();
+        _memoryPressureController?.Dispose();
         StopExpirationTimer();
 
         foreach (Flight flight in flights)
@@ -1690,6 +1732,10 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         {
             return;
         }
+
+        // Trusted ownership bookkeeping only. It may enqueue bounded work but
+        // must never invoke a user disposer on this thread or throw.
+        _onValueRetired?.Invoke(entry.Value);
 
         if (entry.PolicyDetached)
         {

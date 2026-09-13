@@ -13,6 +13,13 @@ internal interface ICacheEnginePolicy
 
     long WeightedSize { get; }
 
+    int ResidentCount { get; }
+
+    void SetMaximum(long maximum, bool weighted);
+
+    // Returns exact authoritative entry identities in approximate policy order.
+    IReadOnlyList<object> Snapshot(bool hottest, int limit);
+
     void OnAccess(object? entryToken);
 
     void OnPublish(object? entryToken, long weight);

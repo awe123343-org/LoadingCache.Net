@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using JetBrains.Annotations;
 
 namespace LoadingCache;
@@ -10,6 +11,12 @@ public interface ICachePolicy<TKey, TValue>
     where TKey : notnull
     where TValue : notnull
 {
+    /// <summary>Reads a fresh resident value without access, statistics, expiry callbacks, or refresh.</summary>
+    bool TryGetQuietly(TKey key, [MaybeNullWhen(false)] out TValue value);
+
+    /// <summary>Gets monitor statistics when memory-pressure eviction is enabled; otherwise null.</summary>
+    MemoryPressureStatistics? MemoryPressureStatistics { get; }
+
     /// <summary>Gets the eviction policy view, when eviction is enabled.</summary>
     IEvictionPolicy<TKey, TValue>? Eviction { get; }
 
@@ -37,6 +44,18 @@ public interface IEvictionPolicy<TKey, TValue>
 
     /// <summary>Gets the current policy weighted size.</summary>
     long WeightedSize { get; }
+
+    /// <summary>Changes the positive maximum and evicts excess residents before returning.</summary>
+    /// <remarks>Size limits must fit in an Int32. A weighted cache retains its separate resident count limit.</remarks>
+    void SetMaximum(long maximum);
+
+    /// <summary>Copies up to the requested number of residents in approximate coldest-first policy order.</summary>
+    /// <remarks>Order follows policy segments and their recency, not a globally sorted frequency ranking.</remarks>
+    IReadOnlyList<KeyValuePair<TKey, TValue>> Coldest(int limit);
+
+    /// <summary>Copies up to the requested number of residents in approximate hottest-first policy order.</summary>
+    /// <remarks>Copying costs O(limit) time and space; concurrent reads and lossy access records make order approximate.</remarks>
+    IReadOnlyList<KeyValuePair<TKey, TValue>> Hottest(int limit);
 }
 
 /// <summary>Describes a fixed expiration policy.</summary>

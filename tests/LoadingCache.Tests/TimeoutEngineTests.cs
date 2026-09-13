@@ -385,9 +385,15 @@ public sealed class TimeoutEngineTests
     {
         private int _throwNext;
 
-        public long Maximum => 4;
+        public long Maximum { get; private set; } = 4;
 
         public long WeightedSize => 0;
+
+        public int ResidentCount => 0;
+
+        public void SetMaximum(long maximum, bool weighted) => Maximum = maximum;
+
+        public IReadOnlyList<object> Snapshot(bool hottest, int limit) => [];
 
         internal void ThrowNextPublish() => Volatile.Write(ref _throwNext, 1);
 

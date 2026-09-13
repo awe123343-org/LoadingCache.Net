@@ -10,6 +10,10 @@ internal sealed class CacheEngineOptions<TKey, TValue>
     internal long? MaximumWeight { get; init; }
     internal int? MaximumResidentCount { get; init; }
     internal Func<TKey, TValue, long>? Weigher { get; init; }
+
+    // Used exclusively by the manual lease-owning facade. This callback only
+    // retires its internal ownership token; it never executes user code.
+    internal Action<TValue>? OnValueRetired { get; init; }
     internal int MaxConcurrentLoads { get; init; }
     internal TimeSpan? ExpireAfterWrite { get; init; }
     internal TimeSpan? ExpireAfterAccess { get; init; }
@@ -20,6 +24,12 @@ internal sealed class CacheEngineOptions<TKey, TValue>
     internal TimeProvider TimeProvider { get; init; } = TimeProvider.System;
     internal bool RecordStatistics { get; init; }
     internal bool EnableExpirationScheduler { get; init; }
+    internal TimeSpan? MemoryPressureSamplingInterval { get; init; }
+    internal double MemoryPressureThreshold { get; init; } = 0.9;
+    internal double MemoryPressureTrimFraction { get; init; } = 0.1;
+    internal int MemoryPressureMaximumTrimCount { get; init; } = 256;
+    internal IMemoryPressureSource MemoryPressureSource { get; init; } =
+        GcMemoryPressureSource.Instance;
     internal IEqualityComparer<TKey>? Comparer { get; init; }
     internal LoadingCacheTestHooks? TestHooks { get; init; }
     internal ICacheEnginePolicy? Policy { get; init; }

@@ -11,7 +11,7 @@ namespace LoadingCache;
 /// </summary>
 internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposable
 {
-    private readonly int? _maximumResidentCount;
+    private int? _maximumResidentCount;
     private readonly uint _policySeed = CreatePolicySeed();
     private WindowTinyLfuPolicy<object> _policy;
     private readonly Action<object> _evicted;
@@ -48,7 +48,51 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
         );
     }
 
-    public long Maximum { get; }
+    public long Maximum { get; private set; }
+
+    public int ResidentCount
+    {
+        get
+        {
+            lock (_policyGate)
+            {
+                return _policy.ResidentCount;
+            }
+        }
+    }
+
+    public void SetMaximum(long maximum, bool weighted)
+    {
+        lock (_policyGate)
+        {
+            DrainAccessesLocked(MaximumReadDrainPerPass);
+            if (!weighted)
+            {
+                _maximumResidentCount = checked((int)maximum);
+                Process(_policy.SetMaximumCount(_maximumResidentCount));
+            }
+
+            Process(_policy.SetMaximum(maximum));
+            Maximum = maximum;
+        }
+    }
+
+    public IReadOnlyList<object> Snapshot(bool hottest, int limit)
+    {
+        lock (_policyGate)
+        {
+            var nodes = _policy.Snapshot(hottest, limit);
+            var entries = new List<object>(nodes.Count);
+            foreach (var node in nodes)
+            {
+                if (node.Value is EngineEntryToken token)
+                {
+                    entries.Add(token.Entry);
+                }
+            }
+            return entries;
+        }
+    }
 
     public long WeightedSize
     {

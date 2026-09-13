@@ -31,6 +31,11 @@ public sealed class CacheBuilder<TKey, TValue>
     private TimeProvider _timeProvider = System.TimeProvider.System;
     private bool _recordStatistics;
     private bool _enableExpirationScheduler;
+    private TimeSpan? _memoryPressureSamplingInterval;
+    private double _memoryPressureThreshold = 0.9;
+    private double _memoryPressureTrimFraction = 0.1;
+    private int _memoryPressureMaximumTrimCount = 256;
+    private IMemoryPressureSource _memoryPressureSource = GcMemoryPressureSource.Instance;
     private IEqualityComparer<TKey> _comparer = EqualityComparer<TKey>.Default;
 
     /// <summary>Sets the maximum resident entry count.</summary>
@@ -134,6 +139,49 @@ public sealed class CacheBuilder<TKey, TValue>
         return this;
     }
 
+    /// <summary>
+    /// Enables opt-in memory-pressure eviction driven by a cache-owned timer.
+    /// The trim is a bounded count-based eviction in approximate cold policy
+    /// order; it is not a JVM <c>SoftReference</c> view.
+    /// </summary>
+    /// <param name="samplingInterval">The positive interval between samples.</param>
+    /// <param name="pressureThreshold">
+    /// The normalized load ratio at which trimming starts, from greater than
+    /// zero through one.
+    /// </param>
+    /// <param name="trimFraction">The resident fraction to trim per sample.</param>
+    /// <param name="maximumTrimCount">The maximum entries removed by one sample.</param>
+    public CacheBuilder<TKey, TValue> MemoryPressureEviction(
+        TimeSpan samplingInterval,
+        double pressureThreshold = 0.9,
+        double trimFraction = 0.1,
+        int maximumTrimCount = 256
+    )
+    {
+        ValidateMemoryPressureOptions(
+            samplingInterval,
+            pressureThreshold,
+            trimFraction,
+            maximumTrimCount
+        );
+        _memoryPressureSamplingInterval = samplingInterval;
+        _memoryPressureThreshold = pressureThreshold;
+        _memoryPressureTrimFraction = trimFraction;
+        _memoryPressureMaximumTrimCount = maximumTrimCount;
+        return this;
+    }
+
+    /// <summary>Sets the source used by the memory-pressure policy.</summary>
+    /// <remarks>
+    /// The source is called outside cache locks and must not force a collection.
+    /// </remarks>
+    public CacheBuilder<TKey, TValue> MemoryPressureSource(IMemoryPressureSource source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        _memoryPressureSource = source;
+        return this;
+    }
+
     /// <summary>Sets the time provider used by expiration checks.</summary>
     public CacheBuilder<TKey, TValue> TimeProvider(TimeProvider timeProvider)
     {
@@ -226,6 +274,11 @@ public sealed class CacheBuilder<TKey, TValue>
                 TimeProvider = _timeProvider,
                 RecordStatistics = _recordStatistics,
                 EnableExpirationScheduler = _enableExpirationScheduler,
+                MemoryPressureSamplingInterval = _memoryPressureSamplingInterval,
+                MemoryPressureThreshold = _memoryPressureThreshold,
+                MemoryPressureTrimFraction = _memoryPressureTrimFraction,
+                MemoryPressureMaximumTrimCount = _memoryPressureMaximumTrimCount,
+                MemoryPressureSource = _memoryPressureSource,
                 Comparer = _comparer,
                 TestHooks = testHooks,
             }
@@ -292,5 +345,43 @@ public sealed class CacheBuilder<TKey, TValue>
                 "Expiration duration must be finite and positive."
             );
         }
+    }
+
+    private static void ValidateMemoryPressureOptions(
+        TimeSpan samplingInterval,
+        double pressureThreshold,
+        double trimFraction,
+        int maximumTrimCount
+    )
+    {
+        if (
+            samplingInterval <= TimeSpan.Zero
+            || samplingInterval == Timeout.InfiniteTimeSpan
+            || samplingInterval > TimeSpan.FromMilliseconds(uint.MaxValue - 1d)
+        )
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(samplingInterval),
+                "The memory-pressure sampling interval must be positive and timer-compatible."
+            );
+        }
+
+        if (!double.IsFinite(pressureThreshold) || pressureThreshold <= 0 || pressureThreshold > 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(pressureThreshold),
+                "The memory-pressure threshold must be finite and in the (0, 1] range."
+            );
+        }
+
+        if (!double.IsFinite(trimFraction) || trimFraction <= 0 || trimFraction > 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(trimFraction),
+                "The memory-pressure trim fraction must be finite and in the (0, 1] range."
+            );
+        }
+
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumTrimCount);
     }
 }

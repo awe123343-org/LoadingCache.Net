@@ -82,6 +82,26 @@ internal sealed class WindowTinyLfuPolicy<T>
 
     internal int Frequency(uint hash) => _sketch.Frequency(hash);
 
+    internal IReadOnlyList<PolicyNode<T>> Snapshot(bool hottest, int limit)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(limit);
+        var result = new List<PolicyNode<T>>(Math.Min(limit, ResidentCount));
+        if (hottest)
+        {
+            _protected.CopyOrdered(result, limit, newestFirst: true);
+            _window.CopyOrdered(result, limit, newestFirst: true);
+            _probation.CopyOrdered(result, limit, newestFirst: true);
+        }
+        else
+        {
+            _probation.CopyOrdered(result, limit, newestFirst: false);
+            _window.CopyOrdered(result, limit, newestFirst: false);
+            _protected.CopyOrdered(result, limit, newestFirst: false);
+        }
+
+        return result;
+    }
+
     internal IReadOnlyList<PolicyNode<T>> Add(PolicyNode<T> node)
     {
         ArgumentNullException.ThrowIfNull(node);
@@ -905,6 +925,16 @@ internal sealed class WindowTinyLfuPolicy<T>
         private PolicyNode<TValue>? EligiblePositiveHead { get; set; }
 
         private PolicyNode<TValue>? EligiblePositiveTail { get; set; }
+
+        internal void CopyOrdered(List<PolicyNode<TValue>> destination, int limit, bool newestFirst)
+        {
+            PolicyNode<TValue>? node = newestFirst ? Tail : Head;
+            while (node is not null && destination.Count < limit)
+            {
+                destination.Add(node);
+                node = newestFirst ? node.Previous : node.Next;
+            }
+        }
 
         internal void AddLast(PolicyNode<TValue> node)
         {
