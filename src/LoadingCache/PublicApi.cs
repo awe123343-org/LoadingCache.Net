@@ -308,7 +308,7 @@ public readonly struct CacheStatistics
     /// <summary>Gets the number of rejected policy maintenance schedules.</summary>
     public long MaintenanceScheduleRejections { get; }
 
-    /// <summary>Gets the number of policy maintenance drain faults.</summary>
+    /// <summary>Gets the number of policy maintenance drain and load-timer disposal faults.</summary>
     public long MaintenanceFaults { get; }
 
     /// <summary>Gets the current number of deferred, reliable policy write events.</summary>

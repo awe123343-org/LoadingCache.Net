@@ -7,6 +7,171 @@ public sealed class BulkTerminalRaceTests
 {
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
 
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task DisposeCompletesNormalWaitersWhileRetirementCleanupIsBlocked(
+        bool backendFails
+    )
+    {
+        var time = new BlockingDisposeTimeProvider();
+        var backend = Signal<int>();
+        IAsyncLoadingCache<int, int> cache = CacheBuilder
+            .Create<int, int>()
+            .MaximumSize(8)
+            .MaxConcurrentLoads(1)
+            .LoadTimeout(TimeSpan.FromSeconds(1))
+            .TimeProvider(time)
+            .BuildAsyncLoading((_, _) => backend.Task);
+
+        Task<int> pending = cache.GetAsync(1).AsTask();
+        Task<int> joined = cache.GetAsync(1).AsTask();
+        if (backendFails)
+        {
+            backend.TrySetException(new InvalidOperationException("Backend failure."));
+        }
+        else
+        {
+            backend.TrySetResult(42);
+        }
+
+        try
+        {
+            await time.DisposeEntered.Task.WaitAsync(Watchdog);
+            pending.IsCompleted.Should().BeFalse();
+            await cache.DisposeAsync().AsTask().WaitAsync(Watchdog);
+            pending
+                .IsCompleted.Should()
+                .BeTrue("retirement cleanup cannot hide an unfinished promise from shutdown");
+            joined.IsCompleted.Should().BeTrue();
+            await FluentActions
+                .Awaiting(() => pending)
+                .Should()
+                .ThrowExactlyAsync<ObjectDisposedException>();
+            await FluentActions
+                .Awaiting(() => joined)
+                .Should()
+                .ThrowExactlyAsync<ObjectDisposedException>();
+        }
+        finally
+        {
+            time.ReleaseDispose.TrySetResult(null);
+            try
+            {
+                foreach (Task waiter in new Task[] { pending, joined })
+                {
+                    try
+                    {
+                        await waiter.WaitAsync(Watchdog);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // Observe either the controlled backend failure or shutdown.
+                    }
+                }
+            }
+            finally
+            {
+                await cache.DisposeAsync();
+            }
+        }
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task DisposeCompletesTimedOutSyncWaitersAfterBackendReturns(bool useBulk)
+    {
+        var time = new BlockingDisposeTimeProvider(Watchdog * 3);
+        var backend = new BlockingTestHook(Watchdog);
+        ILoadingCache<int, int> cache = CacheBuilder
+            .Create<int, int>()
+            .MaximumSize(8)
+            .MaxConcurrentLoads(1)
+            .MaxPendingLoadKeys(2)
+            .MaximumBulkKeys(2)
+            .LoadTimeout(TimeSpan.FromSeconds(1))
+            .TimeProvider(time)
+            .RecordStatistics()
+            .BuildLoading(new GatedSyncLoader(backend));
+
+        Task owner = Task.Factory.StartNew(
+            static state =>
+            {
+                (ILoadingCache<int, int> current, bool bulk) = ((ILoadingCache<int, int>, bool))
+                    state!;
+                if (bulk)
+                {
+                    current.GetAll([1, 2]);
+                }
+                else
+                {
+                    current.Get(2);
+                }
+            },
+            (cache, useBulk),
+            CancellationToken.None,
+            TaskCreationOptions.DenyChildAttach,
+            TaskScheduler.Default
+        );
+        Task<int> joined = Task.FromResult(0);
+        Task timeout = Task.CompletedTask;
+        try
+        {
+            await backend.Entered.WaitAsync(Watchdog);
+            joined = Task.Factory.StartNew(
+                static state => ((ILoadingCache<int, int>)state!).Get(2),
+                cache,
+                CancellationToken.None,
+                TaskCreationOptions.DenyChildAttach,
+                TaskScheduler.Default
+            );
+            WaitForSyncJoiner(cache);
+
+            timeout = time.FireTimeoutAsync();
+            await time.DisposeEntered.Task.WaitAsync(Watchdog);
+            backend.Release();
+            await backend.Returned.WaitAsync(Watchdog);
+            WaitForSyncBackendCompletion(cache);
+            joined.IsCompleted.Should().BeFalse();
+
+            cache.Dispose();
+            await FluentActions
+                .Awaiting(() => joined.WaitAsync(Watchdog))
+                .Should()
+                .ThrowExactlyAsync<ObjectDisposedException>();
+            await FluentActions
+                .Awaiting(() => owner.WaitAsync(Watchdog))
+                .Should()
+                .ThrowExactlyAsync<ObjectDisposedException>();
+            timeout.IsCompleted.Should().BeFalse("the controlled timeout cleanup is blocked");
+        }
+        finally
+        {
+            backend.Release();
+            time.ReleaseDispose.TrySetResult(null);
+            try
+            {
+                await timeout.WaitAsync(Watchdog);
+                foreach (Task pending in new[] { joined, owner })
+                {
+                    try
+                    {
+                        await pending.WaitAsync(Watchdog);
+                    }
+                    catch (Exception exception)
+                        when (exception is ObjectDisposedException or TimeoutException)
+                    {
+                        // Preserve the original assertion when releasing the timeout gate.
+                    }
+                }
+            }
+            finally
+            {
+                cache.Dispose();
+                await backend.DisposeAsync();
+            }
+        }
+    }
+
     [Test]
     public async Task BulkTimeoutOwnsEveryPromiseWhenBackendFaultsDuringTimeoutCleanup()
     {
@@ -174,6 +339,30 @@ public sealed class BulkTerminalRaceTests
         }
     }
 
+    private static void WaitForSyncJoiner(ILoadingCache<int, int> cache) =>
+        SpinWait
+            .SpinUntil(() => cache.Statistics.CoalescedWaiters == 1, Watchdog)
+            .Should()
+            .BeTrue();
+
+    private static void WaitForSyncBackendCompletion(ILoadingCache<int, int> cache) =>
+        SpinWait.SpinUntil(() => cache.Statistics.InFlightLoads == 0, Watchdog).Should().BeTrue();
+
+    private sealed class GatedSyncLoader(BlockingTestHook backend) : IBulkSyncCacheLoader<int, int>
+    {
+        public int Load(int key)
+        {
+            backend.Invoke();
+            return key;
+        }
+
+        public IReadOnlyDictionary<int, int> LoadAll(IReadOnlyCollection<int> keys)
+        {
+            backend.Invoke();
+            return new Dictionary<int, int> { [1] = 1, [2] = 2 };
+        }
+    }
+
     private sealed class FaultingBulkLoader : IBulkAsyncCacheLoader<int, int>
     {
         internal TaskCompletionSource<bool> Started { get; } = Signal<bool>();
@@ -253,8 +442,10 @@ public sealed class BulkTerminalRaceTests
         }
     }
 
-    private sealed class BlockingDisposeTimeProvider : TimeProvider
+    private sealed class BlockingDisposeTimeProvider(TimeSpan? disposeWatchdog = null)
+        : TimeProvider
     {
+        private readonly TimeSpan _disposeWatchdog = disposeWatchdog ?? Watchdog;
         private long _timestamp;
         private BlockingTimer? _timer;
 
@@ -312,7 +503,7 @@ public sealed class BulkTerminalRaceTests
                 }
 
                 owner.DisposeEntered.TrySetResult(true);
-                if (!owner.ReleaseDispose.Task.Wait(Watchdog))
+                if (!owner.ReleaseDispose.Task.Wait(owner._disposeWatchdog))
                 {
                     throw new TimeoutException("The controlled timer was not released.");
                 }

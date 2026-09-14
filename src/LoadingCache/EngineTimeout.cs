@@ -98,7 +98,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
         if (dispose)
         {
-            timer.Dispose();
+            DisposeFlightTimeoutTimer(timer);
         }
     }
 
@@ -150,6 +150,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             flight.TimeoutTimer = null;
             cancellation = flight.WorkCancellation;
             flight.TimeoutCancellationStarted = 1;
+            flight.TimeoutFinalizationCompleted = 0;
             Volatile.Write(ref flight.CancellationCleanupCompleted, cancellation is null ? 1 : 0);
 
             if (ownsRefresh)
@@ -193,7 +194,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
         evictionScope.Dispatch();
 
-        timer?.Dispose();
+        DisposeFlightTimeoutTimer(timer);
 
         if (cancellation is not null)
         {
@@ -206,7 +207,19 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
         if (timedOut)
         {
-            CompleteTimeoutPromise(flight);
+            try
+            {
+                CompleteTimeoutPromise(flight);
+            }
+            finally
+            {
+                lock (_gate)
+                {
+                    flight.TimeoutFinalizationCompleted = 1;
+                }
+
+                RetireFlight(flight);
+            }
         }
     }
 
@@ -264,6 +277,21 @@ internal sealed partial class CacheEngine<TKey, TValue>
             // lifetime.  This call only finalizes the flight when the
             // underlying loader has also been observed to finish.
             RetireFlight(flight);
+        }
+    }
+
+    private void DisposeFlightTimeoutTimer(ITimer? timer)
+    {
+        try
+        {
+            timer?.Dispose();
+        }
+        catch
+        {
+            // A provider's cleanup failure must not replace the selected loader
+            // outcome or leave a timeout promise pending. This records the failed
+            // attempt; it cannot guarantee that the provider released its resource.
+            RecordCounter(CacheCounterKind.TimerDisposalFailures);
         }
     }
 

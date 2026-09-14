@@ -1909,35 +1909,31 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         try
         {
             InvokeHook(_testHooks?.BeforeCompletion);
-            switch (flight)
+            RetireFlight(flight, underlyingCompleted: true);
+            bool disposeSource;
+            lock (_gate)
             {
-                case AsyncFlight asyncFlight:
-                    // Release the execution/reservation bookkeeping before making
-                    // the shared promise observable.  A continuation may enqueue
-                    // another load immediately after completion; it must not see a
-                    // stale permit held by the old flight.  RetireFlight is still
-                    // kept after the hook so Dispose can fence this promise while a
-                    // controlled BeforeCompletion hook is paused.
-                    RetireFlight(flight, underlyingCompleted: true);
-                    completion(asyncFlight, error);
-                    break;
-                case SyncFlight syncFlight when error is Exception exception:
-                    RetireFlight(flight, underlyingCompleted: true);
-                    syncFlight.Set(exception);
-                    break;
+                switch (flight)
+                {
+                    case AsyncFlight asyncFlight:
+                        completion(asyncFlight, error);
+                        break;
+                    case SyncFlight syncFlight when error is Exception exception:
+                        syncFlight.Set(exception);
+                        break;
+                }
+
+                disposeSource = TryRetireFlightLocked(flight);
+            }
+
+            if (disposeSource)
+            {
+                _shutdownCts.Dispose();
             }
         }
         catch (Exception hookException)
         {
-            switch (flight)
-            {
-                case AsyncFlight asyncFlight:
-                    asyncFlight.TrySetException(hookException);
-                    break;
-                case SyncFlight syncFlight:
-                    syncFlight.Set(hookException);
-                    break;
-            }
+            CompletePromiseFailure(flight, hookException);
         }
         finally
         {
@@ -1954,29 +1950,35 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         try
         {
             InvokeHook(_testHooks?.BeforeCompletion);
-            switch (flight)
+            // Timer/CTS cleanup runs outside every cache lock, while the flight
+            // remains registered. Promise delivery and final reservation release
+            // then share the admission gate so an immediate next load cannot see
+            // a completed predecessor still consuming its ordinary reservation.
+            RetireFlight(flight, underlyingCompleted: true);
+            bool disposeSource;
+            lock (_gate)
             {
-                case AsyncFlight asyncFlight:
-                    RetireFlight(flight, underlyingCompleted: true);
-                    completion(asyncFlight, value);
-                    break;
-                case SyncFlight syncFlight:
-                    RetireFlight(flight, underlyingCompleted: true);
-                    syncFlight.Set(value);
-                    break;
+                switch (flight)
+                {
+                    case AsyncFlight asyncFlight:
+                        completion(asyncFlight, value);
+                        break;
+                    case SyncFlight syncFlight:
+                        syncFlight.Set(value);
+                        break;
+                }
+
+                disposeSource = TryRetireFlightLocked(flight);
+            }
+
+            if (disposeSource)
+            {
+                _shutdownCts.Dispose();
             }
         }
         catch (Exception hookException)
         {
-            switch (flight)
-            {
-                case AsyncFlight asyncFlight:
-                    asyncFlight.TrySetException(hookException);
-                    break;
-                case SyncFlight syncFlight:
-                    syncFlight.Set(hookException);
-                    break;
-            }
+            CompletePromiseFailure(flight, hookException);
         }
         finally
         {
@@ -1984,10 +1986,34 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         }
     }
 
+    private void CompletePromiseFailure(Flight flight, Exception exception)
+    {
+        bool disposeSource;
+        lock (_gate)
+        {
+            switch (flight)
+            {
+                case AsyncFlight asyncFlight:
+                    asyncFlight.TrySetException(exception);
+                    break;
+                case SyncFlight syncFlight:
+                    syncFlight.Set(exception);
+                    break;
+            }
+
+            disposeSource = TryRetireFlightLocked(flight);
+        }
+
+        if (disposeSource)
+        {
+            _shutdownCts.Dispose();
+        }
+    }
+
     private void RetireFlight(Flight flight, bool underlyingCompleted = false)
     {
-        bool disposeSource = false;
-        ITimer? timeoutTimer;
+        bool cleanupOwner = false;
+        ITimer? timeoutTimer = null;
         CancellationTokenSource? workCancellation = null;
         lock (_gate)
         {
@@ -2011,58 +2037,109 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 _runningLoads--;
             }
 
-            // A timeout may have completed the shared promise while its
-            // cancellation callbacks are still running.  Keep the active
-            // flight and reservation until both the user loader and the
-            // cache-owned cancellation cleanup have reached a terminal state.
+            // Keep timeout flights discoverable by disposal until their owner
+            // has notified the shared promises, even if the backend and its
+            // cancellation callbacks finish first. Reservation retirement also
+            // waits for every cache-owned cleanup; actual execution is accounted
+            // for independently above.
             if (
                 Volatile.Read(ref flight.UnderlyingCompleted) == 0
                 || (
                     Volatile.Read(ref flight.TimeoutCancellationStarted) != 0
-                    && Volatile.Read(ref flight.CancellationCleanupCompleted) == 0
+                    && (
+                        Volatile.Read(ref flight.CancellationCleanupCompleted) == 0
+                        || flight.TimeoutFinalizationCompleted == 0
+                    )
                 )
             )
             {
                 return;
             }
 
-            flight.Retired = 1;
-            RetireBulkFlight(flight);
-            _activeFlights.Remove(flight);
-
-            if (flight.ResourcesReleased == 0)
+            if (flight.RetirementCleanupStarted == 0)
             {
-                flight.ResourcesReleased = 1;
+                flight.RetirementCleanupStarted = 1;
+                cleanupOwner = true;
+                timeoutTimer = flight.TimeoutTimer;
+                flight.TimeoutTimer = null;
+                if (Volatile.Read(ref flight.TimeoutCancellationStarted) == 0)
+                {
+                    workCancellation = flight.WorkCancellation;
+                    flight.WorkCancellation = null;
+                }
             }
-
-            _reservedLoads--;
-            timeoutTimer = flight.TimeoutTimer;
-            flight.TimeoutTimer = null;
-            if (Volatile.Read(ref flight.TimeoutCancellationStarted) == 0)
+            else if (flight.RetirementCleanupCompleted == 0)
             {
-                workCancellation = flight.WorkCancellation;
-                flight.WorkCancellation = null;
-            }
-            flight.RefreshEntry = null;
-            if (
-                _disposed != 0
-                && _shutdownCancellationCompleted != 0
-                && _activeFlights.Count == 0
-                && _shutdownSourceDisposed == 0
-            )
-            {
-                _shutdownSourceDisposed = 1;
-                disposeSource = true;
+                return;
             }
         }
 
-        if (disposeSource)
+        try
         {
-            _shutdownCts.Dispose();
+            if (cleanupOwner)
+            {
+                try
+                {
+                    DisposeFlightTimeoutTimer(timeoutTimer);
+                }
+                finally
+                {
+                    workCancellation?.Dispose();
+                }
+            }
+        }
+        finally
+        {
+            bool disposeSource;
+            lock (_gate)
+            {
+                if (cleanupOwner)
+                {
+                    flight.RetirementCleanupCompleted = 1;
+                }
+
+                disposeSource = TryRetireFlightLocked(flight);
+            }
+
+            if (disposeSource)
+            {
+                _shutdownCts.Dispose();
+            }
+        }
+    }
+
+    // Bookkeeping only: the caller owns _gate. All potentially blocking cleanup
+    // has already completed; no group completion gate or user callback is entered.
+    private bool TryRetireFlightLocked(Flight flight)
+    {
+        bool promiseCompleted = flight switch
+        {
+            AsyncFlight asyncFlight => asyncFlight.Completion.Task.IsCompleted,
+            SyncFlight syncFlight => syncFlight.Completion.Task.IsCompleted,
+            _ => false,
+        };
+        if (flight.Retired != 0 || flight.RetirementCleanupCompleted == 0 || !promiseCompleted)
+        {
+            return false;
         }
 
-        timeoutTimer?.Dispose();
-        workCancellation?.Dispose();
+        flight.Retired = 1;
+        RetireBulkFlight(flight);
+        _activeFlights.Remove(flight);
+        _reservedLoads--;
+        flight.RefreshEntry = null;
+        if (
+            _disposed != 0
+            && _shutdownCancellationCompleted != 0
+            && _activeFlights.Count == 0
+            && _shutdownSourceDisposed == 0
+        )
+        {
+            _shutdownSourceDisposed = 1;
+            return true;
+        }
+
+        return false;
     }
 
     private void ReplaceCurrentLocked(TKey key, Entry replacement)
@@ -2610,11 +2687,11 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         return [.. timers];
     }
 
-    private static void DisposeFlightTimeoutTimers(ITimer[] timers)
+    private void DisposeFlightTimeoutTimers(ITimer[] timers)
     {
         foreach (ITimer timer in timers)
         {
-            timer.Dispose();
+            DisposeFlightTimeoutTimer(timer);
         }
     }
 

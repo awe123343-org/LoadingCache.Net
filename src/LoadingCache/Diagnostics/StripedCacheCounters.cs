@@ -33,6 +33,7 @@ internal enum CacheCounterKind : byte
     Collected,
     ListenerDrops,
     ListenerFailures,
+    TimerDisposalFailures,
     Count,
 }
 

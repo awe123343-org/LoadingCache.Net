@@ -125,7 +125,12 @@ internal sealed partial class CacheEngine<TKey, TValue>
             SaturatingAdd(readBuffer.Queued, writeBuffer.Queued),
             exposeCounters ? readBuffer.Dropped : 0,
             exposeCounters ? maintenance.ScheduleRejections : 0,
-            exposeCounters ? maintenance.DrainFaults : 0,
+            exposeCounters
+                ? SaturatingAdd(
+                    maintenance.DrainFaults,
+                    counters[CacheCounterKind.TimerDisposalFailures]
+                )
+                : 0,
             writeBuffer.Queued,
             exposeCounters ? writeBuffer.Full : 0
         );

@@ -25,7 +25,9 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
         internal int ExecutionResourcesReleased;
 
-        internal int ResourcesReleased;
+        internal int RetirementCleanupStarted;
+
+        internal int RetirementCleanupCompleted;
 
         internal int UnderlyingCompleted;
 
@@ -52,6 +54,10 @@ internal sealed partial class CacheEngine<TKey, TValue>
         internal int TimeoutCancellationStarted;
 
         internal int CancellationCleanupCompleted = 1;
+
+        // Cancellation callbacks can finish before the timeout owner has
+        // disposed its timer and notified the shared promises.
+        internal int TimeoutFinalizationCompleted = 1;
 
         internal long LoadStartTimestamp;
 
