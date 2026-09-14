@@ -34,18 +34,31 @@ explicit node ownership and due-node return batches. Local continuation handling
 and its regression tests differ from the upstream callback-coupled implementation.
 See ADR-0003 for the exact source and modification record.
 
+`src/LoadingCache/Maintenance/StripedReadBuffer.cs` adapts the bounded CAS ring,
+lazy dynamic striping and bounded-retry strategy in Caffeine v3.2.4
+`BoundedBuffer.java`, `StripedBuffer.java` and `Buffer.java` at the stable commit
+above. Copyright 2015 Ben Manes. All Rights Reserved. The upstream striping
+design additionally credits Doug Lea with assistance from members of JCP
+JSR-166 Expert Group, released to the public domain as described at
+<https://creativecommons.org/publicdomain/zero/1.0/>. These attributions are
+preserved alongside the Apache-2.0 notice; they do not relicense the whole file
+as public domain. Local modifications use CLR publication primitives, explicit
+shutdown ownership, local counters, configurable capacity and budgeted batch
+draining. The cold-start bypass in the policy adapter is also informed by
+`BoundedLocalCache.java`; see ADR-0014 and the upstream map for scope and tests.
+
 ## Development dependencies
 
 Direct test dependencies and formatting tool, verified from their published NuGet package metadata
 on 2026-09-12:
 
-| Package | Version | License | Package metadata |
-|---|---|---|---|
-| NUnit | 4.6.1 | MIT | [NuGet](https://www.nuget.org/packages/NUnit/4.6.1) |
-| NUnit3TestAdapter | 6.3.0 | MIT | [NuGet](https://www.nuget.org/packages/NUnit3TestAdapter/6.3.0) |
-| FluentAssertions | 7.2.0 | Apache-2.0 | [NuGet](https://www.nuget.org/packages/FluentAssertions/7.2.0) |
-| CSharpier | 1.3.0 | MIT | [NuGet](https://www.nuget.org/packages/CSharpier/1.3.0) |
-| Microsoft.NET.Test.Sdk | 18.0.1 | MIT | [NuGet](https://www.nuget.org/packages/Microsoft.NET.Test.Sdk/18.0.1) |
+| Package                | Version | License    | Package metadata                                                      |
+| ---------------------- | ------- | ---------- | --------------------------------------------------------------------- |
+| NUnit                  | 4.6.1   | MIT        | [NuGet](https://www.nuget.org/packages/NUnit/4.6.1)                   |
+| NUnit3TestAdapter      | 6.3.0   | MIT        | [NuGet](https://www.nuget.org/packages/NUnit3TestAdapter/6.3.0)       |
+| FluentAssertions       | 7.2.0   | Apache-2.0 | [NuGet](https://www.nuget.org/packages/FluentAssertions/7.2.0)        |
+| CSharpier              | 1.3.0   | MIT        | [NuGet](https://www.nuget.org/packages/CSharpier/1.3.0)               |
+| Microsoft.NET.Test.Sdk | 18.0.1  | MIT        | [NuGet](https://www.nuget.org/packages/Microsoft.NET.Test.Sdk/18.0.1) |
 
 These are development dependencies, not production package dependencies. The
 exact metadata response is recorded in `docs/dependency-evidence.json`. A complete
@@ -59,12 +72,12 @@ substitute for notices required by the applicable license.
 Additional benchmark/test dependencies verified from published NuGet metadata on
 2026-09-12 (`docs/full-scope-dependency-evidence.json`):
 
-| Package | Version | License | Use |
-|---|---|---|---|
-| BenchmarkDotNet | 0.15.8 | MIT | Benchmark executable |
-| Microsoft.Extensions.Caching.Memory | 10.0.12 | MIT | Lookup baseline |
-| BitFaster.Caching | 2.6.1 | MIT, package LICENSE | Lookup/policy baseline |
-| Microsoft.Extensions.TimeProvider.Testing | 10.10.0 | MIT | Fake time and scheduler tests |
+| Package                                   | Version | License              | Use                           |
+| ----------------------------------------- | ------- | -------------------- | ----------------------------- |
+| BenchmarkDotNet                           | 0.15.8  | MIT                  | Benchmark executable          |
+| Microsoft.Extensions.Caching.Memory       | 10.0.12 | MIT                  | Lookup baseline               |
+| BitFaster.Caching                         | 2.6.1   | MIT, package LICENSE | Lookup/policy baseline        |
+| Microsoft.Extensions.TimeProvider.Testing | 10.10.0 | MIT                  | Fake time and scheduler tests |
 
 ## Optional DI integration and host samples
 

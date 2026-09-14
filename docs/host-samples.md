@@ -2,11 +2,11 @@
 
 The repository contains three net10.0 host samples. Each uses the DI extension to register one singleton typed async loading cache. The cache key includes the tenant identifier, so tenant data is isolated by type and key. Every loader creates its own scope for the scoped repository; no sample captures `HttpContext`, `ServerCallContext`, or a request token as the shared loader lifetime.
 
-| Sample | Host boundary | Smoke command |
-| --- | --- | --- |
-| `samples/LoadingCache.AspNetCore` | Real ASP.NET Core HTTP endpoint on an ephemeral loopback port | `DOTNET_USE_POLLING_FILE_WATCHER=1 dotnet run --project samples/LoadingCache.AspNetCore -- --smoke` |
-| `samples/LoadingCache.Grpc` | Real generated gRPC service and `Grpc.Net.Client` over loopback HTTP/2 | `DOTNET_USE_POLLING_FILE_WATCHER=1 dotnet run --project samples/LoadingCache.Grpc -- --smoke` |
-| `samples/LoadingCache.Worker` | `BackgroundService` hosted by `Microsoft.AspNetCore.App` | `DOTNET_USE_POLLING_FILE_WATCHER=1 dotnet run --project samples/LoadingCache.Worker -- --smoke` |
+| Sample                            | Host boundary                                                          | Smoke command                                                                                       |
+| --------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `samples/LoadingCache.AspNetCore` | Real ASP.NET Core HTTP endpoint on an ephemeral loopback port          | `DOTNET_USE_POLLING_FILE_WATCHER=1 dotnet run --project samples/LoadingCache.AspNetCore -- --smoke` |
+| `samples/LoadingCache.Grpc`       | Real generated gRPC service and `Grpc.Net.Client` over loopback HTTP/2 | `DOTNET_USE_POLLING_FILE_WATCHER=1 dotnet run --project samples/LoadingCache.Grpc -- --smoke`       |
+| `samples/LoadingCache.Worker`     | `BackgroundService` hosted by `Microsoft.AspNetCore.App`               | `DOTNET_USE_POLLING_FILE_WATCHER=1 dotnet run --project samples/LoadingCache.Worker -- --smoke`     |
 
 The smoke paths are finite, perform real cache reads, and exit 0 only after validating the result. They have no external RPC or database dependency. A startup, transport, cache, or assertion failure is unhandled and exits non-zero. Normal runs omit `--smoke` and keep the host alive.
 
