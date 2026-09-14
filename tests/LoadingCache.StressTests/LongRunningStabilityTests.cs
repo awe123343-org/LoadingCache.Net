@@ -459,21 +459,29 @@ public sealed class LongRunningStabilityTests
             var watchdog = Stopwatch.StartNew();
             while (true)
             {
-                Cache.CleanUp();
-                CacheStatistics statistics = Cache.GetStatistics();
-                if (
-                    Volatile.Read(ref _active) == 0
-                    && statistics.InFlightLoads == 0
-                    && statistics.MaintenanceBacklog == 0
-                    && statistics.WriteBufferBacklog == 0
-                )
+                // All batch producers have completed, but an automatic refresh may only be
+                // reserved on the thread pool. The executing gauge alone cannot rule out a
+                // future publication between the independent weight and value snapshots.
+                if (!_engine.HasActiveFlights)
                 {
-                    break;
+                    Cache.CleanUp();
+                    CacheStatistics statistics = Cache.GetStatistics();
+                    if (
+                        Volatile.Read(ref _active) == 0
+                        && statistics.InFlightLoads == 0
+                        && statistics.MaintenanceBacklog == 0
+                        && statistics.WriteBufferBacklog == 0
+                        && !_engine.HasActiveFlights
+                    )
+                    {
+                        break;
+                    }
                 }
                 if (watchdog.Elapsed > Watchdog)
                 {
                     throw new TimeoutException(
-                        $"Mode {Mode} did not quiesce: {JsonSerializer.Serialize(statistics)}"
+                        $"Mode {Mode} did not quiesce: activeFlights={_engine.HasActiveFlights}; "
+                            + JsonSerializer.Serialize(Cache.GetStatistics())
                     );
                 }
                 await Task.Yield();

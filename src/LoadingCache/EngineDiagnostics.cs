@@ -63,6 +63,20 @@ internal sealed partial class CacheEngine<TKey, TValue>
         }
     }
 
+    // Unlike the executing-load gauge, this includes reserved automatic refreshes which have
+    // not started, and revoked flights from an older mapping or epoch. A caller must stop new
+    // producers before using an empty registry as a quiescence boundary.
+    internal bool HasActiveFlights
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _activeFlights.Count != 0;
+            }
+        }
+    }
+
     private CacheStatistics GetStatisticsSnapshot(bool exposeCounters)
     {
         CacheCounterSnapshot counters = _counters?.Snapshot() ?? default;
