@@ -1,0 +1,2462 @@
+[
+  {
+    "scenario": "size-churn",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 143670,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 853.2502157722558,
+    "net8_minimum_sample_seconds": 0.09725675,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 889.7806918632979,
+    "net8_round2_median_ns": 740.6092642862114,
+    "net10_median_ns_per_operation": 694.8127688452705,
+    "net10_minimum_sample_seconds": 0.091228917,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 721.2002018514652,
+    "net10_round2_median_ns": 689.4071483260249,
+    "caffeine_median_ns_per_operation": 87.86280712744484,
+    "caffeine_minimum_sample_seconds": 0.009571292,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 83.71209020672374,
+    "caffeine_round2_median_ns": 112.02234286907496,
+    "net8_over_caffeine": 9.711164981726773,
+    "net10_over_caffeine": 7.907928184418759
+  },
+  {
+    "scenario": "size-churn",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 143670,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 794.2554987123269,
+    "net8_minimum_sample_seconds": 0.105551333,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 791.4761258439479,
+    "net8_round2_median_ns": 868.262622676968,
+    "net10_median_ns_per_operation": 728.1553769054083,
+    "net10_minimum_sample_seconds": 0.093665084,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 728.4059511380246,
+    "net10_round2_median_ns": 722.8237210273544,
+    "caffeine_median_ns_per_operation": 91.9743753045173,
+    "caffeine_minimum_sample_seconds": 0.01144675,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 89.46776640913204,
+    "caffeine_round2_median_ns": 92.31021786037446,
+    "net8_over_caffeine": 8.635617214932227,
+    "net10_over_caffeine": 7.916937456705347
+  },
+  {
+    "scenario": "weight-churn",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 170173,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 1251.9219412010132,
+    "net8_minimum_sample_seconds": 0.144547875,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 1431.7589041739877,
+    "net8_round2_median_ns": 983.9472184189032,
+    "net10_median_ns_per_operation": 736.1938292208517,
+    "net10_minimum_sample_seconds": 0.1093175,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 805.4421089126947,
+    "net10_round2_median_ns": 697.4725720296404,
+    "caffeine_median_ns_per_operation": 139.9066450024387,
+    "caffeine_minimum_sample_seconds": 0.017557375,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 136.6582360303926,
+    "caffeine_round2_median_ns": 143.1550539744848,
+    "net8_over_caffeine": 8.94826647568592,
+    "net10_over_caffeine": 5.2620361899752455
+  },
+  {
+    "scenario": "weight-churn",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 170173,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 821.4898720713627,
+    "net8_minimum_sample_seconds": 0.126412334,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 934.2769299477591,
+    "net8_round2_median_ns": 765.5454566823174,
+    "net10_median_ns_per_operation": 708.4921168457981,
+    "net10_minimum_sample_seconds": 0.105399333,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 746.1781539962274,
+    "net10_round2_median_ns": 673.19090572535,
+    "caffeine_median_ns_per_operation": 104.5370005817609,
+    "caffeine_minimum_sample_seconds": 0.015217666,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 100.31164168228803,
+    "caffeine_round2_median_ns": 108.7623594812338,
+    "net8_over_caffeine": 7.858364669922356,
+    "net10_over_caffeine": 6.777429167691389
+  },
+  {
+    "scenario": "weight-replace",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 155353,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 579.694106325594,
+    "net8_minimum_sample_seconds": 0.149805041,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 539.7854660032314,
+    "net8_round2_median_ns": 634.2826240883664,
+    "net10_median_ns_per_operation": 538.1029413657927,
+    "net10_minimum_sample_seconds": 0.138495125,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 504.12072505841536,
+    "net10_round2_median_ns": 581.1835239744324,
+    "caffeine_median_ns_per_operation": 64.77150586084593,
+    "caffeine_minimum_sample_seconds": 0.016671584,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 62.74406673833141,
+    "caffeine_round2_median_ns": 90.77351258102514,
+    "net8_over_caffeine": 8.949832161861414,
+    "net10_over_caffeine": 8.307710840038897
+  },
+  {
+    "scenario": "weight-replace",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 155353,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 582.899374328143,
+    "net8_minimum_sample_seconds": 0.14867925,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 594.0016446415583,
+    "net8_round2_median_ns": 525.8404794242789,
+    "net10_median_ns_per_operation": 544.256134416458,
+    "net10_minimum_sample_seconds": 0.152853875,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 521.4504773000843,
+    "net10_round2_median_ns": 563.4408701473419,
+    "caffeine_median_ns_per_operation": 63.61164895431694,
+    "caffeine_minimum_sample_seconds": 0.0170815,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 60.801719310216086,
+    "caffeine_round2_median_ns": 67.25690846008767,
+    "net8_over_caffeine": 9.163406135671085,
+    "net10_over_caffeine": 8.555919290935512
+  },
+  {
+    "scenario": "mixed",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 410346,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 285.3377600853913,
+    "net8_minimum_sample_seconds": 0.09487025,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 307.01651776793244,
+    "net8_round2_median_ns": 263.65900240285026,
+    "net10_median_ns_per_operation": 446.39473030077056,
+    "net10_minimum_sample_seconds": 0.100039083,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 522.8343885404025,
+    "net10_round2_median_ns": 369.95507206113865,
+    "caffeine_median_ns_per_operation": 64.12835144000428,
+    "caffeine_minimum_sample_seconds": 0.023737292,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 63.362686610811366,
+    "caffeine_round2_median_ns": 64.89401626919721,
+    "net8_over_caffeine": 4.449479109911955,
+    "net10_over_caffeine": 6.960957521547988
+  },
+  {
+    "scenario": "mixed",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 410346,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 251.5692025753876,
+    "net8_minimum_sample_seconds": 0.0793305,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 245.29401042047442,
+    "net8_round2_median_ns": 266.434708757975,
+    "net10_median_ns_per_operation": 403.26126122832926,
+    "net10_minimum_sample_seconds": 0.067567125,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 322.6875392961062,
+    "net10_round2_median_ns": 483.8349831605523,
+    "caffeine_median_ns_per_operation": 65.39674201771189,
+    "caffeine_minimum_sample_seconds": 0.025113209,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 65.57626490815068,
+    "caffeine_round2_median_ns": 64.70200270016035,
+    "net8_over_caffeine": 3.846815526486828,
+    "net10_over_caffeine": 6.166381516668078
+  },
+  {
+    "scenario": "ttl",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 164734,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 489.87268869814363,
+    "net8_minimum_sample_seconds": 0.306557125,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 489.55342400475917,
+    "net8_round2_median_ns": 490.19195339152816,
+    "net10_median_ns_per_operation": 465.07387136231745,
+    "net10_minimum_sample_seconds": 0.288875167,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 476.238525441014,
+    "net10_round2_median_ns": 447.19504777398714,
+    "caffeine_median_ns_per_operation": 39.764767746791804,
+    "caffeine_minimum_sample_seconds": 0.017716375,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 44.865257020408656,
+    "caffeine_round2_median_ns": 38.29197069214613,
+    "net8_over_caffeine": 12.319264425671548,
+    "net10_over_caffeine": 11.69562649840547
+  },
+  {
+    "scenario": "ttl",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 164734,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 517.7239640875594,
+    "net8_minimum_sample_seconds": 0.322629,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 522.8401665715638,
+    "net8_round2_median_ns": 495.6775650442532,
+    "net10_median_ns_per_operation": 429.4130355603579,
+    "net10_minimum_sample_seconds": 0.269654625,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 430.04574799373535,
+    "net10_round2_median_ns": 428.7803231269805,
+    "caffeine_median_ns_per_operation": 48.052750191217356,
+    "caffeine_minimum_sample_seconds": 0.02711425,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 43.022956705962336,
+    "caffeine_round2_median_ns": 50.031286801753126,
+    "net8_over_caffeine": 10.774075615388695,
+    "net10_over_caffeine": 8.936284267842845
+  },
+  {
+    "scenario": "tti",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 154975,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 583.3763171479271,
+    "net8_minimum_sample_seconds": 0.345518208,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 565.9133860300049,
+    "net8_round2_median_ns": 588.2212179383772,
+    "net10_median_ns_per_operation": 482.88897322148733,
+    "net10_minimum_sample_seconds": 0.277872709,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 490.602516534925,
+    "net10_round2_median_ns": 482.0739893531215,
+    "caffeine_median_ns_per_operation": 40.03844652363284,
+    "caffeine_minimum_sample_seconds": 0.021238417,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 39.74639619293434,
+    "caffeine_round2_median_ns": 40.330496854331344,
+    "net8_over_caffeine": 14.570403394736783,
+    "net10_over_caffeine": 12.060632096114427
+  },
+  {
+    "scenario": "tti",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 154975,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 598.3383747378609,
+    "net8_minimum_sample_seconds": 0.346242292,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 613.588415873528,
+    "net8_round2_median_ns": 587.0696225197612,
+    "net10_median_ns_per_operation": 521.1038409420873,
+    "net10_minimum_sample_seconds": 0.303760333,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 515.2788756251008,
+    "net10_round2_median_ns": 526.996020325859,
+    "caffeine_median_ns_per_operation": 53.588548959509595,
+    "caffeine_minimum_sample_seconds": 0.025186541,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 54.29309727375383,
+    "caffeine_round2_median_ns": 52.88400064526536,
+    "net8_over_caffeine": 11.165414745414232,
+    "net10_over_caffeine": 9.724164043624743
+  },
+  {
+    "scenario": "variable",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 152065,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 729.1991368822543,
+    "net8_minimum_sample_seconds": 0.392177917,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 707.3748610791438,
+    "net8_round2_median_ns": 741.4162249695854,
+    "net10_median_ns_per_operation": 506.8107182783678,
+    "net10_minimum_sample_seconds": 0.291658417,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 548.592296057607,
+    "net10_round2_median_ns": 488.8937970604676,
+    "caffeine_median_ns_per_operation": 54.45451040673396,
+    "caffeine_minimum_sample_seconds": 0.028841166,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 53.09886726071089,
+    "caffeine_round2_median_ns": 54.46101831453654,
+    "net8_over_caffeine": 13.390977743362098,
+    "net10_over_caffeine": 9.307047561218997
+  },
+  {
+    "scenario": "variable",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 152065,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 746.1949865189229,
+    "net8_minimum_sample_seconds": 0.423177542,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 757.2477920626048,
+    "net8_round2_median_ns": 735.1421809752409,
+    "net10_median_ns_per_operation": 539.9085440436655,
+    "net10_minimum_sample_seconds": 0.289392375,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 544.5658517739125,
+    "net10_round2_median_ns": 526.2713855916878,
+    "caffeine_median_ns_per_operation": 60.93344129155295,
+    "caffeine_minimum_sample_seconds": 0.033914209,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 58.04576332489396,
+    "caffeine_round2_median_ns": 64.05888600269621,
+    "net8_over_caffeine": 12.246066703315606,
+    "net10_over_caffeine": 8.860627803053553
+  },
+  {
+    "scenario": "variable-update",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 145529,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 778.3179520920229,
+    "net8_minimum_sample_seconds": 0.388731,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 775.6449453373555,
+    "net8_round2_median_ns": 792.7387616901099,
+    "net10_median_ns_per_operation": 681.4804738230869,
+    "net10_minimum_sample_seconds": 0.367151208,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 696.7300469322265,
+    "net10_round2_median_ns": 656.351211785967,
+    "caffeine_median_ns_per_operation": 53.59942605941084,
+    "caffeine_minimum_sample_seconds": 0.028061041,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 52.28754578125322,
+    "caffeine_round2_median_ns": 56.40041331968198,
+    "net8_over_caffeine": 14.52101280393035,
+    "net10_over_caffeine": 12.714324087495232
+  },
+  {
+    "scenario": "variable-update",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 145529,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 807.093789725759,
+    "net8_minimum_sample_seconds": 0.436060125,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 823.6440417373857,
+    "net8_round2_median_ns": 799.9146647747184,
+    "net10_median_ns_per_operation": 703.110684983749,
+    "net10_minimum_sample_seconds": 0.384397625,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 677.957228456184,
+    "net10_round2_median_ns": 717.6639484226512,
+    "caffeine_median_ns_per_operation": 63.69810828082375,
+    "caffeine_minimum_sample_seconds": 0.03297575,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 62.44975228305012,
+    "caffeine_round2_median_ns": 63.923614880882845,
+    "net8_over_caffeine": 12.67060846089104,
+    "net10_over_caffeine": 11.038172152365469
+  },
+  {
+    "scenario": "ttl-cleanup",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 30290,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 827.8394510472837,
+    "net8_minimum_sample_seconds": 0.409086291,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 846.2729870510987,
+    "net8_round2_median_ns": 784.0208998202561,
+    "net10_median_ns_per_operation": 768.65061259675,
+    "net10_minimum_sample_seconds": 0.369072833,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 724.1307784013793,
+    "net10_round2_median_ns": 800.7305913209346,
+    "caffeine_median_ns_per_operation": 172.8833470892484,
+    "caffeine_minimum_sample_seconds": 0.091139583,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 172.5776603939694,
+    "caffeine_round2_median_ns": 173.18903378452734,
+    "net8_over_caffeine": 4.788427948586189,
+    "net10_over_caffeine": 4.446065081097405
+  },
+  {
+    "scenario": "ttl-cleanup",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 30290,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 850.4471818715381,
+    "net8_minimum_sample_seconds": 0.44958075,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 849.9204449579986,
+    "net8_round2_median_ns": 850.9739187850776,
+    "net10_median_ns_per_operation": 792.2956173654671,
+    "net10_minimum_sample_seconds": 0.400468042,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 787.9179505520707,
+    "net10_round2_median_ns": 796.6732841788636,
+    "caffeine_median_ns_per_operation": 180.3598785811232,
+    "caffeine_minimum_sample_seconds": 0.093573417,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 188.62966508932175,
+    "caffeine_round2_median_ns": 179.5673471259308,
+    "net8_over_caffeine": 4.715279188264809,
+    "net10_over_caffeine": 4.392859562771907
+  },
+  {
+    "scenario": "tti-cleanup",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 46258,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 796.1571055577174,
+    "net8_minimum_sample_seconds": 0.618633458,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 814.3113983887472,
+    "net8_round2_median_ns": 762.1780232608413,
+    "net10_median_ns_per_operation": 707.637632649728,
+    "net10_minimum_sample_seconds": 0.561123083,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 710.9831248408684,
+    "net10_round2_median_ns": 704.2921404585874,
+    "caffeine_median_ns_per_operation": 165.64216940252976,
+    "caffeine_minimum_sample_seconds": 0.134641667,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 164.3075155768852,
+    "caffeine_round2_median_ns": 167.79435028655703,
+    "net8_over_caffeine": 4.806488036406737,
+    "net10_over_caffeine": 4.2720862398879005
+  },
+  {
+    "scenario": "tti-cleanup",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 46258,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 841.9315956158935,
+    "net8_minimum_sample_seconds": 0.692620416,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 833.3102646509193,
+    "net8_round2_median_ns": 850.5530779060439,
+    "net10_median_ns_per_operation": 740.1255068192409,
+    "net10_minimum_sample_seconds": 0.600836875,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 747.0532124173116,
+    "net10_round2_median_ns": 738.7766164171002,
+    "caffeine_median_ns_per_operation": 165.35225438482712,
+    "caffeine_minimum_sample_seconds": 0.135220458,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 166.02778858671894,
+    "caffeine_round2_median_ns": 164.67672018293533,
+    "net8_over_caffeine": 5.091745490548026,
+    "net10_over_caffeine": 4.47605331764473
+  },
+  {
+    "scenario": "variable-cleanup",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 35383,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 812.389437645825,
+    "net8_minimum_sample_seconds": 0.498536291,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 795.3294943899614,
+    "net8_round2_median_ns": 819.6706720427576,
+    "net10_median_ns_per_operation": 778.9138247494874,
+    "net10_minimum_sample_seconds": 0.45206175,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 790.163603362569,
+    "net10_round2_median_ns": 767.6640461364058,
+    "caffeine_median_ns_per_operation": 173.2664046136406,
+    "caffeine_minimum_sample_seconds": 0.104118833,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 171.21746318853687,
+    "caffeine_round2_median_ns": 176.30648428152878,
+    "net8_over_caffeine": 4.688672564409343,
+    "net10_over_caffeine": 4.495469427477036
+  },
+  {
+    "scenario": "variable-cleanup",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 35383,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 861.0090854993139,
+    "net8_minimum_sample_seconds": 0.526630292,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 841.4555640342035,
+    "net8_round2_median_ns": 863.1224991913882,
+    "net10_median_ns_per_operation": 769.1524217530704,
+    "net10_minimum_sample_seconds": 0.468822208,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 798.7563472100538,
+    "net10_round2_median_ns": 758.2220652102234,
+    "caffeine_median_ns_per_operation": 174.92523638156428,
+    "caffeine_minimum_sample_seconds": 0.106535541,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 175.0284066108332,
+    "caffeine_round2_median_ns": 172.3417994203117,
+    "net8_over_caffeine": 4.922154763428162,
+    "net10_over_caffeine": 4.397035200085817
+  },
+  {
+    "scenario": "runtime-maximum",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 20714,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 525.4559292095712,
+    "net8_minimum_sample_seconds": 0.180406,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 528.010089794342,
+    "net8_round2_median_ns": 522.8395288210872,
+    "net10_median_ns_per_operation": 534.7773798908382,
+    "net10_minimum_sample_seconds": 0.157905709,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 467.1591819116369,
+    "net10_round2_median_ns": 548.9626936030761,
+    "caffeine_median_ns_per_operation": 273.02068649222747,
+    "caffeine_minimum_sample_seconds": 0.088035167,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 274.9552987749121,
+    "caffeine_round2_median_ns": 271.08607420954286,
+    "net8_over_caffeine": 1.9246011573724844,
+    "net10_over_caffeine": 1.9587430782687694
+  },
+  {
+    "scenario": "runtime-maximum",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 20714,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 560.3091557855159,
+    "net8_minimum_sample_seconds": 0.1885995,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 566.4878996302585,
+    "net8_round2_median_ns": 547.9597714532371,
+    "net10_median_ns_per_operation": 498.46467720041574,
+    "net10_minimum_sample_seconds": 0.162819125,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 520.0192594948571,
+    "net10_round2_median_ns": 476.91009490597435,
+    "caffeine_median_ns_per_operation": 266.60582214927103,
+    "caffeine_minimum_sample_seconds": 0.090186917,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 269.48040540924296,
+    "caffeine_round2_median_ns": 263.7312388892991,
+    "net8_over_caffeine": 2.1016388587035513,
+    "net10_over_caffeine": 1.869669136187612
+  },
+  {
+    "scenario": "runtime-expiry",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 134527,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 410.2952678644436,
+    "net8_minimum_sample_seconds": 0.209005166,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 411.07322507749376,
+    "net8_round2_median_ns": 409.5173106513934,
+    "net10_median_ns_per_operation": 313.13060482282367,
+    "net10_minimum_sample_seconds": 0.164246916,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 313.0983928876731,
+    "net10_round2_median_ns": 324.848357578776,
+    "caffeine_median_ns_per_operation": 48.672152244530835,
+    "caffeine_minimum_sample_seconds": 0.018879584,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 47.30749403465475,
+    "caffeine_round2_median_ns": 55.7767511354598,
+    "net8_over_caffeine": 8.429774500274895,
+    "net10_over_caffeine": 6.4334653468711025
+  },
+  {
+    "scenario": "runtime-expiry",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 134527,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 430.43825960587833,
+    "net8_minimum_sample_seconds": 0.21722525,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 435.24433385119715,
+    "net8_round2_median_ns": 426.0597630958841,
+    "net10_median_ns_per_operation": 341.6678204003657,
+    "net10_minimum_sample_seconds": 0.159110209,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 371.5876589829551,
+    "net10_round2_median_ns": 309.70842841957375,
+    "caffeine_median_ns_per_operation": 44.39907973863983,
+    "caffeine_minimum_sample_seconds": 0.018641916,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 44.72591933217867,
+    "caffeine_round2_median_ns": 44.072240145100984,
+    "net8_over_caffeine": 9.694756335935374,
+    "net10_over_caffeine": 7.695380679321097
+  },
+  {
+    "scenario": "runtime-access",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 137667,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 443.2132891324718,
+    "net8_minimum_sample_seconds": 0.223655125,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 426.63183624252724,
+    "net8_round2_median_ns": 468.7503014520546,
+    "net10_median_ns_per_operation": 314.2202969847531,
+    "net10_minimum_sample_seconds": 0.169575833,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 315.0415350083898,
+    "net10_round2_median_ns": 311.7236701606049,
+    "caffeine_median_ns_per_operation": 17.976575722576943,
+    "caffeine_minimum_sample_seconds": 0.009021,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 17.463182897862232,
+    "caffeine_round2_median_ns": 18.11678361553604,
+    "net8_over_caffeine": 24.65504531966209,
+    "net10_over_caffeine": 17.479430000126275
+  },
+  {
+    "scenario": "runtime-access",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 137667,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 427.37668976588435,
+    "net8_minimum_sample_seconds": 0.217514209,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 445.45087239498207,
+    "net8_round2_median_ns": 413.8851957985574,
+    "net10_median_ns_per_operation": 320.538380657674,
+    "net10_minimum_sample_seconds": 0.171316291,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 318.08707787632477,
+    "net10_round2_median_ns": 320.8350276391583,
+    "caffeine_median_ns_per_operation": 18.408929699928088,
+    "caffeine_minimum_sample_seconds": 0.009200916,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 19.701676872453092,
+    "caffeine_round2_median_ns": 18.245113207958333,
+    "net8_over_caffeine": 23.215727189590705,
+    "net10_over_caffeine": 17.41211389703586
+  },
+  {
+    "scenario": "runtime-refresh",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 24261,
+    "timing_comparable": false,
+    "net8_median_ns_per_operation": 2777.1509160793044,
+    "net8_minimum_sample_seconds": 0.154187041,
+    "net8_backend_calls_per_sample": [
+      24261
+    ],
+    "net8_round1_median_ns": 2771.924333292115,
+    "net8_round2_median_ns": 2782.3774988664936,
+    "net10_median_ns_per_operation": 2559.276802275257,
+    "net10_minimum_sample_seconds": 0.162213125,
+    "net10_backend_calls_per_sample": [
+      24261
+    ],
+    "net10_round1_median_ns": 2576.7559869749807,
+    "net10_round2_median_ns": 2541.797617575533,
+    "caffeine_median_ns_per_operation": 2200.8764529491773,
+    "caffeine_minimum_sample_seconds": 0.205271,
+    "caffeine_backend_calls_per_sample": [
+      24261
+    ],
+    "caffeine_round1_median_ns": 2211.0653414945796,
+    "caffeine_round2_median_ns": 2190.6875644037755,
+    "net8_over_caffeine": null,
+    "net10_over_caffeine": null
+  },
+  {
+    "scenario": "runtime-refresh",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 24261,
+    "timing_comparable": false,
+    "net8_median_ns_per_operation": 2355.636144429331,
+    "net8_minimum_sample_seconds": 0.157647583,
+    "net8_backend_calls_per_sample": [
+      24261
+    ],
+    "net8_round1_median_ns": 2508.5575409092785,
+    "net8_round2_median_ns": 2202.7147479493838,
+    "net10_median_ns_per_operation": 2777.4830231647497,
+    "net10_minimum_sample_seconds": 0.172312958,
+    "net10_backend_calls_per_sample": [
+      24261
+    ],
+    "net10_round1_median_ns": 2655.8107662503603,
+    "net10_round2_median_ns": 2899.155280079139,
+    "caffeine_median_ns_per_operation": 2230.151611640081,
+    "caffeine_minimum_sample_seconds": 0.205957666,
+    "caffeine_backend_calls_per_sample": [
+      24261
+    ],
+    "caffeine_round1_median_ns": 2214.534551337538,
+    "caffeine_round2_median_ns": 2245.7686719426238,
+    "net8_over_caffeine": null,
+    "net10_over_caffeine": null
+  },
+  {
+    "scenario": "runtime-variable",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 153016,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 471.0711526899148,
+    "net8_minimum_sample_seconds": 0.199101417,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 497.84327347031245,
+    "net8_round2_median_ns": 455.68201364563186,
+    "net10_median_ns_per_operation": 390.9110997107056,
+    "net10_minimum_sample_seconds": 0.171428583,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 397.33562721109774,
+    "net10_round2_median_ns": 383.6124806120493,
+    "caffeine_median_ns_per_operation": 64.96633576445164,
+    "caffeine_minimum_sample_seconds": 0.025208,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 66.09430604206968,
+    "caffeine_round2_median_ns": 64.4858119412349,
+    "net8_over_caffeine": 7.2510038798844505,
+    "net10_over_caffeine": 6.0171332600322645
+  },
+  {
+    "scenario": "runtime-variable",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 153016,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 485.5902411076837,
+    "net8_minimum_sample_seconds": 0.203525375,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 486.9047811993517,
+    "net8_round2_median_ns": 484.2757010160158,
+    "net10_median_ns_per_operation": 419.2961106463812,
+    "net10_minimum_sample_seconds": 0.17771925,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 406.48508870532055,
+    "net10_round2_median_ns": 423.5306917795089,
+    "caffeine_median_ns_per_operation": 74.30209803767798,
+    "caffeine_minimum_sample_seconds": 0.028659709,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 72.72496558094142,
+    "caffeine_round2_median_ns": 74.73973309980656,
+    "net8_over_caffeine": 6.535350332388258,
+    "net10_over_caffeine": 5.643126125910463
+  },
+  {
+    "scenario": "variable-put",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 182538,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 527.3797455872202,
+    "net8_minimum_sample_seconds": 0.186115917,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 528.8460484940122,
+    "net8_round2_median_ns": 526.5412790761376,
+    "net10_median_ns_per_operation": 452.4110513975172,
+    "net10_minimum_sample_seconds": 0.154968333,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 436.8609796316384,
+    "net10_round2_median_ns": 479.9572554755722,
+    "caffeine_median_ns_per_operation": 97.20652822973847,
+    "caffeine_minimum_sample_seconds": 0.029226042,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 104.56841041317425,
+    "caffeine_round2_median_ns": 86.17943113214784,
+    "net8_over_caffeine": 5.425353164972705,
+    "net10_over_caffeine": 4.654122101020688
+  },
+  {
+    "scenario": "variable-put",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 182538,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 554.2177628767708,
+    "net8_minimum_sample_seconds": 0.193550583,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 583.4191620374936,
+    "net8_round2_median_ns": 548.0851932200419,
+    "net10_median_ns_per_operation": 462.07895616255246,
+    "net10_minimum_sample_seconds": 0.156008625,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 447.60873900228995,
+    "net10_round2_median_ns": 490.96170112524516,
+    "caffeine_median_ns_per_operation": 90.74303432709902,
+    "caffeine_minimum_sample_seconds": 0.02695225,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 81.26926722107177,
+    "caffeine_round2_median_ns": 91.02567958452488,
+    "net8_over_caffeine": 6.107551582185324,
+    "net10_over_caffeine": 5.092169989565354
+  },
+  {
+    "scenario": "eviction-listener",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 124955,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 755.82175983354,
+    "net8_minimum_sample_seconds": 0.090241292,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 763.2364291144812,
+    "net8_round2_median_ns": 748.4070905525989,
+    "net10_median_ns_per_operation": 697.061774238726,
+    "net10_minimum_sample_seconds": 0.0817,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 710.973286383098,
+    "net10_round2_median_ns": 683.1502620943539,
+    "caffeine_median_ns_per_operation": 87.96333480052819,
+    "caffeine_minimum_sample_seconds": 0.008933709,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 90.92273218358609,
+    "caffeine_round2_median_ns": 85.00393741747028,
+    "net8_over_caffeine": 8.592463684414584,
+    "net10_over_caffeine": 7.9244582509227515
+  },
+  {
+    "scenario": "eviction-listener",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 124955,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 870.875015005402,
+    "net8_minimum_sample_seconds": 0.090835458,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 883.2299627866032,
+    "net8_round2_median_ns": 737.4924972990276,
+    "net10_median_ns_per_operation": 720.0598895602417,
+    "net10_minimum_sample_seconds": 0.085415042,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 710.6208234964587,
+    "net10_round2_median_ns": 729.4989556240247,
+    "caffeine_median_ns_per_operation": 109.02641350886319,
+    "caffeine_minimum_sample_seconds": 0.006264208,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 120.35299907966868,
+    "caffeine_round2_median_ns": 102.02172782201592,
+    "net8_over_caffeine": 7.9877434006815715,
+    "net10_over_caffeine": 6.604453603361952
+  },
+  {
+    "scenario": "removal-listener",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 540299,
+    "timing_comparable": false,
+    "net8_median_ns_per_operation": 394.5750408570069,
+    "net8_minimum_sample_seconds": 0.191908958,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 382.45073561120785,
+    "net8_round2_median_ns": 403.57723223622475,
+    "net10_median_ns_per_operation": 462.1712551753751,
+    "net10_minimum_sample_seconds": 0.156340416,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 485.2181384751777,
+    "net10_round2_median_ns": 398.4610058504643,
+    "caffeine_median_ns_per_operation": 381.18669755080055,
+    "caffeine_minimum_sample_seconds": 0.193543667,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 378.0949677863553,
+    "caffeine_round2_median_ns": 381.25525496067917,
+    "net8_over_caffeine": null,
+    "net10_over_caffeine": null
+  },
+  {
+    "scenario": "removal-listener",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 540299,
+    "timing_comparable": false,
+    "net8_median_ns_per_operation": 396.7879738811288,
+    "net8_minimum_sample_seconds": 0.171384333,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 379.4717517522705,
+    "net8_round2_median_ns": 409.9162371205573,
+    "net10_median_ns_per_operation": 370.803096063476,
+    "net10_minimum_sample_seconds": 0.164723125,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 391.0745105950594,
+    "net10_round2_median_ns": 358.04418849562927,
+    "caffeine_median_ns_per_operation": 380.6665762846128,
+    "caffeine_minimum_sample_seconds": 0.203175167,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 379.9946103916535,
+    "caffeine_round2_median_ns": 381.43810186581874,
+    "net8_over_caffeine": null,
+    "net10_over_caffeine": null
+  },
+  {
+    "scenario": "strong-lookup",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 1000000,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 89.73612499999999,
+    "net8_minimum_sample_seconds": 0.066794708,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 78.867333,
+    "net8_round2_median_ns": 94.936709,
+    "net10_median_ns_per_operation": 66.09464600000001,
+    "net10_minimum_sample_seconds": 0.053220167,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 67.77575,
+    "net10_round2_median_ns": 60.163542,
+    "caffeine_median_ns_per_operation": 21.5083955,
+    "caffeine_minimum_sample_seconds": 0.020434833,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 21.541375,
+    "caffeine_round2_median_ns": 21.475416,
+    "net8_over_caffeine": 4.172144082063211,
+    "net10_over_caffeine": 3.072969622489972
+  },
+  {
+    "scenario": "strong-lookup",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 1000000,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 95.41035400000001,
+    "net8_minimum_sample_seconds": 0.080950792,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 94.214291,
+    "net8_round2_median_ns": 97.765084,
+    "net10_median_ns_per_operation": 96.10122899999999,
+    "net10_minimum_sample_seconds": 0.071485208,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 108.375708,
+    "net10_round2_median_ns": 76.9335,
+    "caffeine_median_ns_per_operation": 28.103271,
+    "caffeine_minimum_sample_seconds": 0.02554475,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 27.843459,
+    "caffeine_round2_median_ns": 28.363083,
+    "net8_over_caffeine": 3.394991067054081,
+    "net10_over_caffeine": 3.4195745043343884
+  },
+  {
+    "scenario": "quiet-lookup",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 1000000,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 57.833854,
+    "net8_minimum_sample_seconds": 0.056870958,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 57.780958,
+    "net8_round2_median_ns": 57.835625,
+    "net10_median_ns_per_operation": 56.163792,
+    "net10_minimum_sample_seconds": 0.05482425,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 56.352584,
+    "net10_round2_median_ns": 55.72575,
+    "caffeine_median_ns_per_operation": 11.5360415,
+    "caffeine_minimum_sample_seconds": 0.010985917,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 11.666875,
+    "caffeine_round2_median_ns": 11.463875,
+    "net8_over_caffeine": 5.013318823445633,
+    "net10_over_caffeine": 4.8685497533967785
+  },
+  {
+    "scenario": "quiet-lookup",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 1000000,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 58.678479499999995,
+    "net8_minimum_sample_seconds": 0.057383833,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 58.882958,
+    "net8_round2_median_ns": 57.800791,
+    "net10_median_ns_per_operation": 56.548854,
+    "net10_minimum_sample_seconds": 0.05520925,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 58.59825,
+    "net10_round2_median_ns": 55.835791,
+    "caffeine_median_ns_per_operation": 11.657083,
+    "caffeine_minimum_sample_seconds": 0.011336042,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 11.724083,
+    "caffeine_round2_median_ns": 11.462375,
+    "net8_over_caffeine": 5.033718941522506,
+    "net10_over_caffeine": 4.851029541438454
+  },
+  {
+    "scenario": "weak-key-lookup",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 1000000,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 119.5560205,
+    "net8_minimum_sample_seconds": 0.114197166,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 122.947625,
+    "net8_round2_median_ns": 117.470458,
+    "net10_median_ns_per_operation": 115.6835835,
+    "net10_minimum_sample_seconds": 0.105965833,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 127.35616699999999,
+    "net10_round2_median_ns": 110.646292,
+    "caffeine_median_ns_per_operation": 26.7337295,
+    "caffeine_minimum_sample_seconds": 0.025276625,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 27.829708,
+    "caffeine_round2_median_ns": 26.673708,
+    "net8_over_caffeine": 4.472104069879214,
+    "net10_over_caffeine": 4.327251964601497
+  },
+  {
+    "scenario": "weak-key-lookup",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 1000000,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 134.13131249999998,
+    "net8_minimum_sample_seconds": 0.126596959,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 133.128042,
+    "net8_round2_median_ns": 135.134583,
+    "net10_median_ns_per_operation": 124.62406250000001,
+    "net10_minimum_sample_seconds": 0.115220667,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 124.321917,
+    "net10_round2_median_ns": 128.938209,
+    "caffeine_median_ns_per_operation": 30.527542,
+    "caffeine_minimum_sample_seconds": 0.028524,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 30.510667,
+    "caffeine_round2_median_ns": 30.544417,
+    "net8_over_caffeine": 4.3937802951839355,
+    "net10_over_caffeine": 4.082348408528928
+  },
+  {
+    "scenario": "weak-value-lookup",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 1000000,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 113.98762500000001,
+    "net8_minimum_sample_seconds": 0.103607125,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 113.096459,
+    "net8_round2_median_ns": 114.878791,
+    "net10_median_ns_per_operation": 109.795354,
+    "net10_minimum_sample_seconds": 0.094230083,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 108.946333,
+    "net10_round2_median_ns": 110.644375,
+    "caffeine_median_ns_per_operation": 23.008271,
+    "caffeine_minimum_sample_seconds": 0.021076416,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 27.606083,
+    "caffeine_round2_median_ns": 22.805917,
+    "net8_over_caffeine": 4.954202121489268,
+    "net10_over_caffeine": 4.771994992583319
+  },
+  {
+    "scenario": "weak-value-lookup",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 1000000,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 120.8954375,
+    "net8_minimum_sample_seconds": 0.107838916,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 112.248875,
+    "net8_round2_median_ns": 127.21733299999998,
+    "net10_median_ns_per_operation": 122.0720005,
+    "net10_minimum_sample_seconds": 0.104377833,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 118.898459,
+    "net10_round2_median_ns": 125.24554199999999,
+    "caffeine_median_ns_per_operation": 27.964875499999998,
+    "caffeine_minimum_sample_seconds": 0.026852334,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 28.648208,
+    "caffeine_round2_median_ns": 27.233625,
+    "net8_over_caffeine": 4.323117315505303,
+    "net10_over_caffeine": 4.365190200828894
+  },
+  {
+    "scenario": "weak-key-cleanup",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 32,
+    "timing_comparable": false,
+    "net8_median_ns_per_operation": null,
+    "net8_minimum_sample_seconds": 0.000121375,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": null,
+    "net8_round2_median_ns": null,
+    "net10_median_ns_per_operation": null,
+    "net10_minimum_sample_seconds": 0.000138167,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": null,
+    "net10_round2_median_ns": null,
+    "caffeine_median_ns_per_operation": null,
+    "caffeine_minimum_sample_seconds": 0.002346625,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": null,
+    "caffeine_round2_median_ns": null,
+    "net8_over_caffeine": null,
+    "net10_over_caffeine": null
+  },
+  {
+    "scenario": "weak-key-cleanup",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 32,
+    "timing_comparable": false,
+    "net8_median_ns_per_operation": null,
+    "net8_minimum_sample_seconds": 0.000124375,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": null,
+    "net8_round2_median_ns": null,
+    "net10_median_ns_per_operation": null,
+    "net10_minimum_sample_seconds": 0.000133875,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": null,
+    "net10_round2_median_ns": null,
+    "caffeine_median_ns_per_operation": null,
+    "caffeine_minimum_sample_seconds": 0.002312,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": null,
+    "caffeine_round2_median_ns": null,
+    "net8_over_caffeine": null,
+    "net10_over_caffeine": null
+  },
+  {
+    "scenario": "weak-value-cleanup",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 32,
+    "timing_comparable": false,
+    "net8_median_ns_per_operation": null,
+    "net8_minimum_sample_seconds": 0.00011725,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": null,
+    "net8_round2_median_ns": null,
+    "net10_median_ns_per_operation": null,
+    "net10_minimum_sample_seconds": 0.00013225,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": null,
+    "net10_round2_median_ns": null,
+    "caffeine_median_ns_per_operation": null,
+    "caffeine_minimum_sample_seconds": 0.002555916,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": null,
+    "caffeine_round2_median_ns": null,
+    "net8_over_caffeine": null,
+    "net10_over_caffeine": null
+  },
+  {
+    "scenario": "weak-value-cleanup",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 32,
+    "timing_comparable": false,
+    "net8_median_ns_per_operation": null,
+    "net8_minimum_sample_seconds": 0.000119,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": null,
+    "net8_round2_median_ns": null,
+    "net10_median_ns_per_operation": null,
+    "net10_minimum_sample_seconds": 0.000134542,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": null,
+    "net10_round2_median_ns": null,
+    "caffeine_median_ns_per_operation": null,
+    "caffeine_minimum_sample_seconds": 0.002497958,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": null,
+    "caffeine_round2_median_ns": null,
+    "net8_over_caffeine": null,
+    "net10_over_caffeine": null
+  },
+  {
+    "scenario": "sync-miss",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 148456,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 883.6381520450504,
+    "net8_minimum_sample_seconds": 0.24927525,
+    "net8_backend_calls_per_sample": [
+      148456
+    ],
+    "net8_round1_median_ns": 874.0642547286739,
+    "net8_round2_median_ns": 891.6251549280596,
+    "net10_median_ns_per_operation": 720.5934182518727,
+    "net10_minimum_sample_seconds": 0.197612125,
+    "net10_backend_calls_per_sample": [
+      148456
+    ],
+    "net10_round1_median_ns": 703.8151607210217,
+    "net10_round2_median_ns": 720.8746463598642,
+    "caffeine_median_ns_per_operation": 135.53959927520611,
+    "caffeine_minimum_sample_seconds": 0.021951583,
+    "caffeine_backend_calls_per_sample": [
+      148456
+    ],
+    "caffeine_round1_median_ns": 130.54836113057067,
+    "caffeine_round2_median_ns": 140.53083741984156,
+    "net8_over_caffeine": 6.519409506670217,
+    "net10_over_caffeine": 5.316478889602921
+  },
+  {
+    "scenario": "sync-miss",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 148456,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 880.0994351861832,
+    "net8_minimum_sample_seconds": 0.248255417,
+    "net8_backend_calls_per_sample": [
+      148456
+    ],
+    "net8_round1_median_ns": 857.8332974079862,
+    "net8_round2_median_ns": 914.0056649781753,
+    "net10_median_ns_per_operation": 737.094731772377,
+    "net10_minimum_sample_seconds": 0.206479459,
+    "net10_backend_calls_per_sample": [
+      148456
+    ],
+    "net10_round1_median_ns": 751.185536455246,
+    "net10_round2_median_ns": 714.5068808266423,
+    "caffeine_median_ns_per_operation": 122.68527038314383,
+    "caffeine_minimum_sample_seconds": 0.027839958,
+    "caffeine_backend_calls_per_sample": [
+      148456
+    ],
+    "caffeine_round1_median_ns": 120.81525839305922,
+    "caffeine_round2_median_ns": 124.55528237322844,
+    "net8_over_caffeine": 7.173635697567026,
+    "net10_over_caffeine": 6.008013264106146
+  },
+  {
+    "scenario": "manual-sync-miss",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 120141,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 872.8149819795074,
+    "net8_minimum_sample_seconds": 0.196228459,
+    "net8_backend_calls_per_sample": [
+      120141
+    ],
+    "net8_round1_median_ns": 881.8171648313232,
+    "net8_round2_median_ns": 854.5115739006667,
+    "net10_median_ns_per_operation": 752.2197001856152,
+    "net10_minimum_sample_seconds": 0.166153375,
+    "net10_backend_calls_per_sample": [
+      120141
+    ],
+    "net10_round1_median_ns": 727.4041542853813,
+    "net10_round2_median_ns": 784.437485954004,
+    "caffeine_median_ns_per_operation": 96.68517824889088,
+    "caffeine_minimum_sample_seconds": 0.018081792,
+    "caffeine_backend_calls_per_sample": [
+      120141
+    ],
+    "caffeine_round1_median_ns": 97.40134924796698,
+    "caffeine_round2_median_ns": 95.9690072498148,
+    "net8_over_caffeine": 9.027391765598983,
+    "net10_over_caffeine": 7.780093224312221
+  },
+  {
+    "scenario": "manual-sync-miss",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 120141,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 940.5185885750909,
+    "net8_minimum_sample_seconds": 0.215771375,
+    "net8_backend_calls_per_sample": [
+      120141
+    ],
+    "net8_round1_median_ns": 917.906530659808,
+    "net8_round2_median_ns": 953.1635411724557,
+    "net10_median_ns_per_operation": 728.3241670204177,
+    "net10_minimum_sample_seconds": 0.158190334,
+    "net10_backend_calls_per_sample": [
+      120141
+    ],
+    "net10_round1_median_ns": 690.6440474109588,
+    "net10_round2_median_ns": 729.473772483998,
+    "caffeine_median_ns_per_operation": 127.91801300139002,
+    "caffeine_minimum_sample_seconds": 0.024258792,
+    "caffeine_backend_calls_per_sample": [
+      120141
+    ],
+    "caffeine_round1_median_ns": 138.5257738823549,
+    "caffeine_round2_median_ns": 124.30827943832664,
+    "net8_over_caffeine": 7.352510928737384,
+    "net10_over_caffeine": 5.693679489944104
+  },
+  {
+    "scenario": "sync-fanin-contract",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 32,
+    "timing_comparable": false,
+    "net8_median_ns_per_operation": null,
+    "net8_minimum_sample_seconds": 0.000677958,
+    "net8_backend_calls_per_sample": [
+      1
+    ],
+    "net8_round1_median_ns": null,
+    "net8_round2_median_ns": null,
+    "net10_median_ns_per_operation": null,
+    "net10_minimum_sample_seconds": 0.000744042,
+    "net10_backend_calls_per_sample": [
+      1
+    ],
+    "net10_round1_median_ns": null,
+    "net10_round2_median_ns": null,
+    "caffeine_median_ns_per_operation": null,
+    "caffeine_minimum_sample_seconds": 0.000695125,
+    "caffeine_backend_calls_per_sample": [
+      1
+    ],
+    "caffeine_round1_median_ns": null,
+    "caffeine_round2_median_ns": null,
+    "net8_over_caffeine": null,
+    "net10_over_caffeine": null
+  },
+  {
+    "scenario": "sync-fanin-contract",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 32,
+    "timing_comparable": false,
+    "net8_median_ns_per_operation": null,
+    "net8_minimum_sample_seconds": 0.000741875,
+    "net8_backend_calls_per_sample": [
+      1
+    ],
+    "net8_round1_median_ns": null,
+    "net8_round2_median_ns": null,
+    "net10_median_ns_per_operation": null,
+    "net10_minimum_sample_seconds": 0.000691084,
+    "net10_backend_calls_per_sample": [
+      1
+    ],
+    "net10_round1_median_ns": null,
+    "net10_round2_median_ns": null,
+    "caffeine_median_ns_per_operation": null,
+    "caffeine_minimum_sample_seconds": 0.000708666,
+    "caffeine_backend_calls_per_sample": [
+      1
+    ],
+    "caffeine_round1_median_ns": null,
+    "caffeine_round2_median_ns": null,
+    "net8_over_caffeine": null,
+    "net10_over_caffeine": null
+  },
+  {
+    "scenario": "manual-sync-fanin-contract",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 32,
+    "timing_comparable": false,
+    "net8_median_ns_per_operation": null,
+    "net8_minimum_sample_seconds": 0.000782166,
+    "net8_backend_calls_per_sample": [
+      1
+    ],
+    "net8_round1_median_ns": null,
+    "net8_round2_median_ns": null,
+    "net10_median_ns_per_operation": null,
+    "net10_minimum_sample_seconds": 0.000696708,
+    "net10_backend_calls_per_sample": [
+      1
+    ],
+    "net10_round1_median_ns": null,
+    "net10_round2_median_ns": null,
+    "caffeine_median_ns_per_operation": null,
+    "caffeine_minimum_sample_seconds": 0.000742916,
+    "caffeine_backend_calls_per_sample": [
+      1
+    ],
+    "caffeine_round1_median_ns": null,
+    "caffeine_round2_median_ns": null,
+    "net8_over_caffeine": null,
+    "net10_over_caffeine": null
+  },
+  {
+    "scenario": "manual-sync-fanin-contract",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 32,
+    "timing_comparable": false,
+    "net8_median_ns_per_operation": null,
+    "net8_minimum_sample_seconds": 0.000693167,
+    "net8_backend_calls_per_sample": [
+      1
+    ],
+    "net8_round1_median_ns": null,
+    "net8_round2_median_ns": null,
+    "net10_median_ns_per_operation": null,
+    "net10_minimum_sample_seconds": 0.000777334,
+    "net10_backend_calls_per_sample": [
+      1
+    ],
+    "net10_round1_median_ns": null,
+    "net10_round2_median_ns": null,
+    "caffeine_median_ns_per_operation": null,
+    "caffeine_minimum_sample_seconds": 0.00074475,
+    "caffeine_backend_calls_per_sample": [
+      1
+    ],
+    "caffeine_round1_median_ns": null,
+    "caffeine_round2_median_ns": null,
+    "net8_over_caffeine": null,
+    "net10_over_caffeine": null
+  },
+  {
+    "scenario": "async-completed-miss",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 73917,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 1012.172155931653,
+    "net8_minimum_sample_seconds": 0.112607083,
+    "net8_backend_calls_per_sample": [
+      73917
+    ],
+    "net8_round1_median_ns": 1034.5843987174803,
+    "net8_round2_median_ns": 989.7599131458257,
+    "net10_median_ns_per_operation": 888.9888016288539,
+    "net10_minimum_sample_seconds": 0.116877,
+    "net10_backend_calls_per_sample": [
+      73917
+    ],
+    "net10_round1_median_ns": 864.6824005303246,
+    "net10_round2_median_ns": 949.1642653246208,
+    "caffeine_median_ns_per_operation": 170.31264797002044,
+    "caffeine_minimum_sample_seconds": 0.022399125,
+    "caffeine_backend_calls_per_sample": [
+      73917
+    ],
+    "caffeine_round1_median_ns": 170.32730630301555,
+    "caffeine_round2_median_ns": 170.29798963702532,
+    "net8_over_caffeine": 5.943024009055525,
+    "net10_over_caffeine": 5.219746226864722
+  },
+  {
+    "scenario": "async-completed-miss",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 73917,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 1031.7543663839172,
+    "net8_minimum_sample_seconds": 0.145216125,
+    "net8_backend_calls_per_sample": [
+      73917
+    ],
+    "net8_round1_median_ns": 1004.4712312458569,
+    "net8_round2_median_ns": 1041.0130619478605,
+    "net10_median_ns_per_operation": 888.4403283412477,
+    "net10_minimum_sample_seconds": 0.120531875,
+    "net10_backend_calls_per_sample": [
+      73917
+    ],
+    "net10_round1_median_ns": 887.805186898819,
+    "net10_round2_median_ns": 889.0754697836763,
+    "caffeine_median_ns_per_operation": 210.3840591474221,
+    "caffeine_minimum_sample_seconds": 0.027819792,
+    "caffeine_backend_calls_per_sample": [
+      73917
+    ],
+    "caffeine_round1_median_ns": 209.09798828415654,
+    "caffeine_round2_median_ns": 215.4857813493513,
+    "net8_over_caffeine": 4.9041470659187985,
+    "net10_over_caffeine": 4.222945084060253
+  },
+  {
+    "scenario": "manual-async-completed-miss",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 58302,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 1122.1168399025764,
+    "net8_minimum_sample_seconds": 0.099293625,
+    "net8_backend_calls_per_sample": [
+      58302
+    ],
+    "net8_round1_median_ns": 1127.4970498439163,
+    "net8_round2_median_ns": 1116.7366299612363,
+    "net10_median_ns_per_operation": 1097.6113598161298,
+    "net10_minimum_sample_seconds": 0.097494584,
+    "net10_backend_calls_per_sample": [
+      58302
+    ],
+    "net10_round1_median_ns": 1071.7256697883436,
+    "net10_round2_median_ns": 1123.497049843916,
+    "caffeine_median_ns_per_operation": 163.40366539741348,
+    "caffeine_minimum_sample_seconds": 0.015630208,
+    "caffeine_backend_calls_per_sample": [
+      58302
+    ],
+    "caffeine_round1_median_ns": 162.47620150252135,
+    "caffeine_round2_median_ns": 176.09280127611402,
+    "net8_over_caffeine": 6.867146077619985,
+    "net10_over_caffeine": 6.717177103381574
+  },
+  {
+    "scenario": "manual-async-completed-miss",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 58302,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 1157.3777486192585,
+    "net8_minimum_sample_seconds": 0.120632625,
+    "net8_backend_calls_per_sample": [
+      58302
+    ],
+    "net8_round1_median_ns": 1058.6754485266372,
+    "net8_round2_median_ns": 1204.8614713045865,
+    "net10_median_ns_per_operation": 1147.8735377860107,
+    "net10_minimum_sample_seconds": 0.10201525,
+    "net10_backend_calls_per_sample": [
+      58302
+    ],
+    "net10_round1_median_ns": 1469.596163081884,
+    "net10_round2_median_ns": 1021.846025865322,
+    "caffeine_median_ns_per_operation": 231.9955061575932,
+    "caffeine_minimum_sample_seconds": 0.022468416,
+    "caffeine_backend_calls_per_sample": [
+      58302
+    ],
+    "caffeine_round1_median_ns": 235.2138434359027,
+    "caffeine_round2_median_ns": 224.5130956056396,
+    "net8_over_caffeine": 4.98879382531254,
+    "net10_over_caffeine": 4.947826605771695
+  },
+  {
+    "scenario": "async-gated-miss",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 64759,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 1212.226775428898,
+    "net8_minimum_sample_seconds": 0.133950917,
+    "net8_backend_calls_per_sample": [
+      64759
+    ],
+    "net8_round1_median_ns": 1269.089045538072,
+    "net8_round2_median_ns": 1155.364505319724,
+    "net10_median_ns_per_operation": 1185.9331367068671,
+    "net10_minimum_sample_seconds": 0.118213916,
+    "net10_backend_calls_per_sample": [
+      64759
+    ],
+    "net10_round1_median_ns": 1033.3560431754659,
+    "net10_round2_median_ns": 1231.519618894671,
+    "caffeine_median_ns_per_operation": 173.46575379483932,
+    "caffeine_minimum_sample_seconds": 0.017340041,
+    "caffeine_backend_calls_per_sample": [
+      64759
+    ],
+    "caffeine_round1_median_ns": 185.09814851989685,
+    "caffeine_round2_median_ns": 170.84594419308513,
+    "net8_over_caffeine": 6.98827721846825,
+    "net10_over_caffeine": 6.8366989492893735
+  },
+  {
+    "scenario": "async-gated-miss",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 64759,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 1195.9579633718865,
+    "net8_minimum_sample_seconds": 0.13921925,
+    "net8_backend_calls_per_sample": [
+      64759
+    ],
+    "net8_round1_median_ns": 1226.058671381584,
+    "net8_round2_median_ns": 1165.857255362189,
+    "net10_median_ns_per_operation": 1248.8285064624224,
+    "net10_minimum_sample_seconds": 0.108329333,
+    "net10_backend_calls_per_sample": [
+      64759
+    ],
+    "net10_round1_median_ns": 1115.1921586188791,
+    "net10_round2_median_ns": 1279.0139826124555,
+    "caffeine_median_ns_per_operation": 239.12394030173414,
+    "caffeine_minimum_sample_seconds": 0.026200542,
+    "caffeine_backend_calls_per_sample": [
+      64759
+    ],
+    "caffeine_round1_median_ns": 247.46817430781823,
+    "caffeine_round2_median_ns": 234.4246282370018,
+    "net8_over_caffeine": 5.001414588028237,
+    "net10_over_caffeine": 5.2225155912311045
+  },
+  {
+    "scenario": "manual-async-gated-miss",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 70117,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 1101.528958740391,
+    "net8_minimum_sample_seconds": 0.142891208,
+    "net8_backend_calls_per_sample": [
+      70117
+    ],
+    "net8_round1_median_ns": 1126.0648915384286,
+    "net8_round2_median_ns": 1099.8824536132465,
+    "net10_median_ns_per_operation": 960.8440178558694,
+    "net10_minimum_sample_seconds": 0.113832875,
+    "net10_backend_calls_per_sample": [
+      70117
+    ],
+    "net10_round1_median_ns": 922.3470485046421,
+    "net10_round2_median_ns": 976.0323245432634,
+    "caffeine_median_ns_per_operation": 180.15944064920063,
+    "caffeine_minimum_sample_seconds": 0.019782833,
+    "caffeine_backend_calls_per_sample": [
+      70117
+    ],
+    "caffeine_round1_median_ns": 203.8646120056477,
+    "caffeine_round2_median_ns": 178.28712723020095,
+    "net8_over_caffeine": 6.114189491103299,
+    "net10_over_caffeine": 5.333298185171362
+  },
+  {
+    "scenario": "manual-async-gated-miss",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 70117,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 1104.579367343155,
+    "net8_minimum_sample_seconds": 0.143398125,
+    "net8_backend_calls_per_sample": [
+      70117
+    ],
+    "net8_round1_median_ns": 1119.3772551592338,
+    "net8_round2_median_ns": 1080.4328194303807,
+    "net10_median_ns_per_operation": 1122.2265071238073,
+    "net10_minimum_sample_seconds": 0.130101333,
+    "net10_backend_calls_per_sample": [
+      70117
+    ],
+    "net10_round1_median_ns": 1158.9090947986936,
+    "net10_round2_median_ns": 1085.543919448921,
+    "caffeine_median_ns_per_operation": 247.1743657030392,
+    "caffeine_minimum_sample_seconds": 0.0308435,
+    "caffeine_backend_calls_per_sample": [
+      70117
+    ],
+    "caffeine_round1_median_ns": 262.09110486757845,
+    "caffeine_round2_median_ns": 240.5595290728354,
+    "net8_over_caffeine": 4.468826547613037,
+    "net10_over_caffeine": 4.540222057137087
+  },
+  {
+    "scenario": "async-gated-fanin",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 47072,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 209.77529916623345,
+    "net8_minimum_sample_seconds": 0.160944625,
+    "net8_backend_calls_per_sample": [
+      47072
+    ],
+    "net8_round1_median_ns": 211.70540998520414,
+    "net8_round2_median_ns": 207.78171736913663,
+    "net10_median_ns_per_operation": 166.11072899588115,
+    "net10_minimum_sample_seconds": 0.124799125,
+    "net10_backend_calls_per_sample": [
+      47072
+    ],
+    "net10_round1_median_ns": 164.12930504458754,
+    "net10_round2_median_ns": 167.91985743991683,
+    "caffeine_median_ns_per_operation": 56.701701023713355,
+    "caffeine_minimum_sample_seconds": 0.042935,
+    "caffeine_backend_calls_per_sample": [
+      47072
+    ],
+    "caffeine_round1_median_ns": 58.106646389011075,
+    "caffeine_round2_median_ns": 56.58004258807534,
+    "net8_over_caffeine": 3.699629735596518,
+    "net10_over_caffeine": 2.929554598836666
+  },
+  {
+    "scenario": "async-gated-fanin",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 47072,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 219.28279331787098,
+    "net8_minimum_sample_seconds": 0.170299625,
+    "net8_backend_calls_per_sample": [
+      47072
+    ],
+    "net8_round1_median_ns": 225.85504183828527,
+    "net8_round2_median_ns": 218.60165653616988,
+    "net10_median_ns_per_operation": 175.3622004588715,
+    "net10_minimum_sample_seconds": 0.136370792,
+    "net10_backend_calls_per_sample": [
+      47072
+    ],
+    "net10_round1_median_ns": 175.223125024993,
+    "net10_round2_median_ns": 175.50127589275002,
+    "caffeine_median_ns_per_operation": 91.30279459251409,
+    "caffeine_minimum_sample_seconds": 0.066034666,
+    "caffeine_backend_calls_per_sample": [
+      47072
+    ],
+    "caffeine_round1_median_ns": 84.99448279481746,
+    "caffeine_round2_median_ns": 96.93389975806774,
+    "net8_over_caffeine": 2.4017095456555713,
+    "net10_over_caffeine": 1.9206662976912807
+  },
+  {
+    "scenario": "manual-async-gated-fanin",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 35096,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 234.70993594041218,
+    "net8_minimum_sample_seconds": 0.124464625,
+    "net8_backend_calls_per_sample": [
+      35096
+    ],
+    "net8_round1_median_ns": 239.96603601550035,
+    "net8_round2_median_ns": 220.0713052601939,
+    "net10_median_ns_per_operation": 212.52952741388327,
+    "net10_minimum_sample_seconds": 0.083116541,
+    "net10_backend_calls_per_sample": [
+      35096
+    ],
+    "net10_round1_median_ns": 261.73071005242764,
+    "net10_round2_median_ns": 156.22974798535782,
+    "caffeine_median_ns_per_operation": 63.6020193352016,
+    "caffeine_minimum_sample_seconds": 0.033728584,
+    "caffeine_backend_calls_per_sample": [
+      35096
+    ],
+    "caffeine_round1_median_ns": 68.24523659475187,
+    "caffeine_round2_median_ns": 60.15950032851071,
+    "net8_over_caffeine": 3.6902906290352333,
+    "net10_over_caffeine": 3.341553139905658
+  },
+  {
+    "scenario": "manual-async-gated-fanin",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 35096,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 230.0719564153448,
+    "net8_minimum_sample_seconds": 0.132202625,
+    "net8_backend_calls_per_sample": [
+      35096
+    ],
+    "net8_round1_median_ns": 229.79756868555492,
+    "net8_round2_median_ns": 230.34634414513468,
+    "net10_median_ns_per_operation": 184.58830904141917,
+    "net10_minimum_sample_seconds": 0.106306916,
+    "net10_backend_calls_per_sample": [
+      35096
+    ],
+    "net10_round1_median_ns": 181.58303610936053,
+    "net10_round2_median_ns": 186.41648788532964,
+    "caffeine_median_ns_per_operation": 96.9585674251465,
+    "caffeine_minimum_sample_seconds": 0.055452875,
+    "caffeine_backend_calls_per_sample": [
+      35096
+    ],
+    "caffeine_round1_median_ns": 101.66156357687821,
+    "caffeine_round2_median_ns": 96.83642345700532,
+    "net8_over_caffeine": 2.3728893951838126,
+    "net10_over_caffeine": 1.9037854409712083
+  },
+  {
+    "scenario": "refresh-explicit",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 43282,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 2558.0767293563144,
+    "net8_minimum_sample_seconds": 0.140893,
+    "net8_backend_calls_per_sample": [
+      43282
+    ],
+    "net8_round1_median_ns": 2287.7533732267457,
+    "net8_round2_median_ns": 2828.400085485883,
+    "net10_median_ns_per_operation": 2555.485201700476,
+    "net10_minimum_sample_seconds": 0.158220667,
+    "net10_backend_calls_per_sample": [
+      43282
+    ],
+    "net10_round1_median_ns": 2516.8670925557967,
+    "net10_round2_median_ns": 2594.103310845155,
+    "caffeine_median_ns_per_operation": 3032.2102721685687,
+    "caffeine_minimum_sample_seconds": 0.238496625,
+    "caffeine_backend_calls_per_sample": [
+      43282
+    ],
+    "caffeine_round1_median_ns": 3263.776893396793,
+    "caffeine_round2_median_ns": 2859.7348089274988,
+    "net8_over_caffeine": 0.8436343458222095,
+    "net10_over_caffeine": 0.84277967961399
+  },
+  {
+    "scenario": "refresh-explicit",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 43282,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 2121.148797421561,
+    "net8_minimum_sample_seconds": 0.135640208,
+    "net8_backend_calls_per_sample": [
+      43282
+    ],
+    "net8_round1_median_ns": 1774.4871886696549,
+    "net8_round2_median_ns": 2446.67143385241,
+    "net10_median_ns_per_operation": 2253.288029665912,
+    "net10_minimum_sample_seconds": 0.129398291,
+    "net10_backend_calls_per_sample": [
+      43282
+    ],
+    "net10_round1_median_ns": 2605.006122637586,
+    "net10_round2_median_ns": 1900.251074349614,
+    "caffeine_median_ns_per_operation": 3314.18709278684,
+    "caffeine_minimum_sample_seconds": 0.261159042,
+    "caffeine_backend_calls_per_sample": [
+      43282
+    ],
+    "caffeine_round1_median_ns": 3336.6199228316623,
+    "caffeine_round2_median_ns": 3291.7542627420175,
+    "net8_over_caffeine": 0.6400208370970166,
+    "net10_over_caffeine": 0.679891619447218
+  },
+  {
+    "scenario": "refresh-auto",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 25858,
+    "timing_comparable": false,
+    "net8_median_ns_per_operation": 5388.102405445123,
+    "net8_minimum_sample_seconds": 0.188313834,
+    "net8_backend_calls_per_sample": [
+      25858
+    ],
+    "net8_round1_median_ns": 5247.623230721633,
+    "net8_round2_median_ns": 5590.764154226932,
+    "net10_median_ns_per_operation": 5013.940318276742,
+    "net10_minimum_sample_seconds": 0.168420083,
+    "net10_backend_calls_per_sample": [
+      25858
+    ],
+    "net10_round1_median_ns": 4974.079588521928,
+    "net10_round2_median_ns": 5053.801048031556,
+    "caffeine_median_ns_per_operation": 4515.862276664862,
+    "caffeine_minimum_sample_seconds": 0.218264584,
+    "caffeine_backend_calls_per_sample": [
+      25858
+    ],
+    "caffeine_round1_median_ns": 4377.043197463067,
+    "caffeine_round2_median_ns": 4555.359250522082,
+    "net8_over_caffeine": null,
+    "net10_over_caffeine": null
+  },
+  {
+    "scenario": "refresh-auto",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 25858,
+    "timing_comparable": false,
+    "net8_median_ns_per_operation": 4386.0644288034655,
+    "net8_minimum_sample_seconds": 0.176795666,
+    "net8_backend_calls_per_sample": [
+      25858
+    ],
+    "net8_round1_median_ns": 5205.378896279682,
+    "net8_round2_median_ns": 3546.623211385258,
+    "net10_median_ns_per_operation": 4555.498221053445,
+    "net10_minimum_sample_seconds": 0.188161167,
+    "net10_backend_calls_per_sample": [
+      25858
+    ],
+    "net10_round1_median_ns": 4426.3654768350225,
+    "net10_round2_median_ns": 4684.630965271869,
+    "caffeine_median_ns_per_operation": 4475.739287647923,
+    "caffeine_minimum_sample_seconds": 0.223086333,
+    "caffeine_backend_calls_per_sample": [
+      25858
+    ],
+    "caffeine_round1_median_ns": 4427.142141696961,
+    "caffeine_round2_median_ns": 4524.336433598886,
+    "net8_over_caffeine": null,
+    "net10_over_caffeine": null
+  },
+  {
+    "scenario": "bulk-sync",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 26935,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 8718.550454798587,
+    "net8_minimum_sample_seconds": 0.441229583,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 8796.553443475032,
+    "net8_round2_median_ns": 8640.547466122145,
+    "net10_median_ns_per_operation": 7147.134304807871,
+    "net10_minimum_sample_seconds": 0.359685,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 7139.511787636904,
+    "net10_round2_median_ns": 7168.076684611101,
+    "caffeine_median_ns_per_operation": 1439.0933450900316,
+    "caffeine_minimum_sample_seconds": 0.07570725,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 1438.2765546686467,
+    "caffeine_round2_median_ns": 1439.9101355114165,
+    "net8_over_caffeine": 6.058363402586052,
+    "net10_over_caffeine": 4.966414672955587
+  },
+  {
+    "scenario": "bulk-sync",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 26935,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 8578.605132726934,
+    "net8_minimum_sample_seconds": 0.448669459,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 8573.656487841099,
+    "net8_round2_median_ns": 8583.553777612771,
+    "net10_median_ns_per_operation": 7271.247150547615,
+    "net10_minimum_sample_seconds": 0.372238083,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 7368.662223872285,
+    "net10_round2_median_ns": 7173.8320772229445,
+    "caffeine_median_ns_per_operation": 1466.7764989790235,
+    "caffeine_minimum_sample_seconds": 0.075893583,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 1530.0793577130128,
+    "caffeine_round2_median_ns": 1441.9288657880081,
+    "net8_over_caffeine": 5.848610976994947,
+    "net10_over_caffeine": 4.957297281221031
+  },
+  {
+    "scenario": "bulk-async",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 26483,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 9487.91441679568,
+    "net8_minimum_sample_seconds": 0.480599125,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 9482.766472831629,
+    "net8_round2_median_ns": 9493.062360759734,
+    "net10_median_ns_per_operation": 8186.379384888419,
+    "net10_minimum_sample_seconds": 0.407084167,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 8119.516123550957,
+    "net10_round2_median_ns": 8289.080107993806,
+    "caffeine_median_ns_per_operation": 2831.0102990597743,
+    "caffeine_minimum_sample_seconds": 0.135699917,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 2897.5876033681984,
+    "caffeine_round2_median_ns": 2685.457803118982,
+    "net8_over_caffeine": 3.351423490033496,
+    "net10_over_caffeine": 2.891681244539185
+  },
+  {
+    "scenario": "bulk-async",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 26483,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 9540.809991315184,
+    "net8_minimum_sample_seconds": 0.486773833,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 9506.034531586301,
+    "net8_round2_median_ns": 9575.585451044066,
+    "net10_median_ns_per_operation": 8269.138456745837,
+    "net10_minimum_sample_seconds": 0.402797208,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 8515.882830495035,
+    "net10_round2_median_ns": 7931.201147906204,
+    "caffeine_median_ns_per_operation": 2931.0434146433563,
+    "caffeine_minimum_sample_seconds": 0.148200292,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 2966.1889891628593,
+    "caffeine_round2_median_ns": 2830.8797152890534,
+    "net8_over_caffeine": 3.255089959995045,
+    "net10_over_caffeine": 2.821226876215346
+  },
+  {
+    "scenario": "prefetch-sync",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 27715,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 5867.779932647784,
+    "net8_minimum_sample_seconds": 0.431808416,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 6230.913368212159,
+    "net8_round2_median_ns": 5540.520079379397,
+    "net10_median_ns_per_operation": 4966.594251007276,
+    "net10_minimum_sample_seconds": 0.396978584,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 5072.404137350412,
+    "net10_round2_median_ns": 4873.108725720127,
+    "caffeine_median_ns_per_operation": 981.7522581033136,
+    "caffeine_minimum_sample_seconds": 0.079443708,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 975.6529797341993,
+    "caffeine_round2_median_ns": 986.3646881953214,
+    "net8_over_caffeine": 5.976843836329934,
+    "net10_over_caffeine": 5.058907896583236
+  },
+  {
+    "scenario": "prefetch-sync",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 27715,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 6072.1475494617835,
+    "net8_minimum_sample_seconds": 0.485821209,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 6091.768392567203,
+    "net8_round2_median_ns": 6028.454302724156,
+    "net10_median_ns_per_operation": 5004.227554272657,
+    "net10_minimum_sample_seconds": 0.380969916,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 5022.447230741475,
+    "net10_round2_median_ns": 4855.745985928198,
+    "caffeine_median_ns_per_operation": 1009.3804498165855,
+    "caffeine_minimum_sample_seconds": 0.081373625,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 1008.5453124060376,
+    "caffeine_round2_median_ns": 1012.1685008118347,
+    "net8_over_caffeine": 6.015717414147613,
+    "net10_over_caffeine": 4.957721892852169
+  },
+  {
+    "scenario": "prefetch-async",
+    "statistics": "off",
+    "capacity": 1024,
+    "cycles": 22099,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 6447.114876992926,
+    "net8_minimum_sample_seconds": 0.409258792,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 6461.651733864277,
+    "net8_round2_median_ns": 6432.578020121574,
+    "net10_median_ns_per_operation": 5487.63110698825,
+    "net10_minimum_sample_seconds": 0.341546792,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 5537.022791378192,
+    "net10_round2_median_ns": 5466.812857293694,
+    "caffeine_median_ns_per_operation": 2049.4249966061816,
+    "caffeine_minimum_sample_seconds": 0.1287785,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 2058.8224203206782,
+    "caffeine_round2_median_ns": 2040.0275728916845,
+    "net8_over_caffeine": 3.145816454697906,
+    "net10_over_caffeine": 2.6776442739186304
+  },
+  {
+    "scenario": "prefetch-async",
+    "statistics": "on",
+    "capacity": 1024,
+    "cycles": 22099,
+    "timing_comparable": true,
+    "net8_median_ns_per_operation": 6678.896036019729,
+    "net8_minimum_sample_seconds": 0.415564667,
+    "net8_backend_calls_per_sample": [
+      0
+    ],
+    "net8_round1_median_ns": 7276.246164984841,
+    "net8_round2_median_ns": 6485.358191170038,
+    "net10_median_ns_per_operation": 5495.325323921143,
+    "net10_minimum_sample_seconds": 0.348673583,
+    "net10_backend_calls_per_sample": [
+      0
+    ],
+    "net10_round1_median_ns": 5564.39455782313,
+    "net10_round2_median_ns": 5426.2560900191565,
+    "caffeine_median_ns_per_operation": 2036.358485300994,
+    "caffeine_minimum_sample_seconds": 0.127661084,
+    "caffeine_backend_calls_per_sample": [
+      0
+    ],
+    "caffeine_round1_median_ns": 2018.7401692384274,
+    "caffeine_round2_median_ns": 2053.9768013635608,
+    "net8_over_caffeine": 3.2798233141315105,
+    "net10_over_caffeine": 2.698604083508842
+  }
+]

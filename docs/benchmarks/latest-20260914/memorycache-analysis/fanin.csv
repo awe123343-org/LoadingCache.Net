@@ -1,0 +1,13 @@
+capacity,case,kind,loadingcacheAllocationBytesPerOperation,loadingcache_max,loadingcache_median,loadingcache_min,memorycacheAllocationBytesPerOperation,memorycache_max,memorycache_median,memorycache_min,metric,runtime,statistics,workers
+256,029-fanin,fanin,2040.0,1,1,1,1016.0,1,1,1,backendCalls,8,off,1
+256,029-fanin,fanin,1760.0,1,1,1,984.0,1,1,1,backendCalls,10,off,1
+256,030-fanin,fanin,327.2,1,1,1,372.0,10,10,10,backendCalls,8,off,10
+256,030-fanin,fanin,324.0,1,1,1,368.8,10,10,10,backendCalls,10,off,10
+256,031-fanin,fanin,169.36,1,1,1,309.28,100,100,100,backendCalls,8,off,100
+256,031-fanin,fanin,168.72,1,1,1,309.6,100,100,100,backendCalls,10,off,100
+256,061-fanin,fanin,2040.0,1,1,1,1184.0,1,1,1,backendCalls,8,on,1
+256,061-fanin,fanin,1760.0,1,1,1,1152.0,1,1,1,backendCalls,10,on,1
+256,062-fanin,fanin,327.2,1,1,1,388.8,10,10,10,backendCalls,8,on,10
+256,062-fanin,fanin,324.0,1,1,1,388.8,10,10,10,backendCalls,10,on,10
+256,063-fanin,fanin,166.56,1,1,1,295.12,100,100,100,backendCalls,8,on,100
+256,063-fanin,fanin,166.24,1,1,1,311.92,100,100,100,backendCalls,10,on,100

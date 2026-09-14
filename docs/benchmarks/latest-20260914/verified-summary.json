@@ -1,0 +1,179 @@
+{
+  "sourceCommit": "fbb2f7f6d8d68662faa18513a71d6a929e0b5f6a",
+  "coreSourceFiles": 52,
+  "sameCoreSourceAcrossComparisons": true,
+  "caffeine": {
+    "net8": {
+      "readCostRatio": {
+        "min": 1.2815812923714647,
+        "median": 2.0997633822545567,
+        "max": 4.076031885984711
+      },
+      "readLowerCostCases": 0,
+      "readRoundDirectionDisagreements": 0,
+      "writeCostRatio": {
+        "min": 1.5961643838229715,
+        "median": 6.132747179403379,
+        "max": 15.532268654020074
+      },
+      "writeLowerCostCases": 0,
+      "policyHitRateDifferencePp": {
+        "min": -1.326999999999999,
+        "median": 0.0,
+        "max": 0.44399999999999995
+      }
+    },
+    "net10": {
+      "readCostRatio": {
+        "min": 1.195914195119845,
+        "median": 1.9017282682330552,
+        "max": 3.0042202305204073
+      },
+      "readLowerCostCases": 0,
+      "readRoundDirectionDisagreements": 0,
+      "writeCostRatio": {
+        "min": 1.4551696520845159,
+        "median": 4.869215837576137,
+        "max": 9.801664825653209
+      },
+      "writeLowerCostCases": 0,
+      "policyHitRateDifferencePp": {
+        "min": -2.6679999999999997,
+        "median": 0.0,
+        "max": 0.49899999999999944
+      }
+    }
+  },
+  "memorycache": {
+    "processes": 584,
+    "pairedCases": 152,
+    "measuredSamples": 2920,
+    "verified": true,
+    "sourceCommit": "fbb2f7f6d8d68662faa18513a71d6a929e0b5f6a",
+    "traceEndResidency": {
+      "loadingcache": {
+        "median": 1.0,
+        "min": 1.0,
+        "max": 1.91796875
+      },
+      "memorycache": {
+        "median": 1.0,
+        "min": 0.9501953125,
+        "max": 1.0
+      }
+    },
+    "categories": {
+      "8": {
+        "read": {
+          "cases": 34,
+          "costRatio": {
+            "median": 0.8436065507297422,
+            "min": 0.08279228807290483,
+            "max": 3.143932697920907
+          },
+          "loadingcacheLowerCostCases": 19,
+          "roundDirectionDisagreements": 5
+        },
+        "replacement": {
+          "cases": 16,
+          "costRatio": {
+            "median": 1.0463124543277262,
+            "min": 0.12149236738961144,
+            "max": 2.460687703069586
+          },
+          "loadingcacheLowerCostCases": 8,
+          "roundDirectionDisagreements": 1
+        }
+      },
+      "10": {
+        "read": {
+          "cases": 34,
+          "costRatio": {
+            "median": 0.9425108984643293,
+            "min": 0.08438995251276724,
+            "max": 3.349872338144479
+          },
+          "loadingcacheLowerCostCases": 18,
+          "roundDirectionDisagreements": 8
+        },
+        "replacement": {
+          "cases": 16,
+          "costRatio": {
+            "median": 0.5537590938491963,
+            "min": 0.11740043076688216,
+            "max": 2.579363144370842
+          },
+          "loadingcacheLowerCostCases": 10,
+          "roundDirectionDisagreements": 0
+        }
+      }
+    }
+  },
+  "validation": {
+    "tests": [
+      {
+        "file": "LoadingCache.DependencyInjection.Tests-net10.trx",
+        "total": 10,
+        "passed": 10,
+        "failed": 0,
+        "notExecuted": 0
+      },
+      {
+        "file": "LoadingCache.DependencyInjection.Tests-net8.trx",
+        "total": 10,
+        "passed": 10,
+        "failed": 0,
+        "notExecuted": 0
+      },
+      {
+        "file": "LoadingCache.StressTests-net10.trx",
+        "total": 8,
+        "passed": 8,
+        "failed": 0,
+        "notExecuted": 0
+      },
+      {
+        "file": "LoadingCache.StressTests-net8.trx",
+        "total": 8,
+        "passed": 8,
+        "failed": 0,
+        "notExecuted": 0
+      },
+      {
+        "file": "LoadingCache.Tests-net10.trx",
+        "total": 536,
+        "passed": 536,
+        "failed": 0,
+        "notExecuted": 0
+      },
+      {
+        "file": "LoadingCache.Tests-net8.trx",
+        "total": 536,
+        "passed": 536,
+        "failed": 0,
+        "notExecuted": 0
+      }
+    ],
+    "passed": 1108,
+    "coreSourceUnchanged": true,
+    "coreSourceFiles": 52,
+    "consumerRuns": 2,
+    "csharpierFiles": 159,
+    "buildWarnings": 0,
+    "buildErrors": 0,
+    "excludedCommand": "First DI invocation used a nonexistent project path; corrected project run passed."
+  },
+  "firstMemoryCacheAttempt": {
+    "completedProcesses": 268,
+    "failure": {
+      "id": "0268-r0-net8-loadingcache-067-trace",
+      "case": "067-trace",
+      "round": 0,
+      "runtime": "8",
+      "backend": "loadingcache",
+      "exitCode": -6,
+      "seconds": 1.208708917023614
+    },
+    "includedInPerformanceSummary": false
+  }
+}
