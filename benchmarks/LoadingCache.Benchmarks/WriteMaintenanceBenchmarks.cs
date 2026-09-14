@@ -151,19 +151,29 @@ public class WriteMaintenanceBenchmarks : IDisposable
 public class WriteMaintenanceHitBenchmarks : IDisposable
 {
     private ICache<int, int> _cache = null!;
+    private int _residentKey;
 
-    /// <summary>Initializes a resident cache entry outside timed iterations.</summary>
+    /// <summary>Gets or sets the number of resident entries before the timed lookup.</summary>
+    [Params(1, 1024)]
+    public int ResidentEntries { get; set; }
+
+    /// <summary>Initializes resident cache entries outside timed iterations.</summary>
     [GlobalSetup]
     public void Setup()
     {
         _cache = CacheBuilder.Create<int, int>().MaximumSize(1024).MaxConcurrentLoads(1).Build();
-        _cache.Put(0, 42);
+        for (int key = 0; key < ResidentEntries; key++)
+        {
+            _cache.Put(key, 42);
+        }
+
+        _residentKey = ResidentEntries - 1;
         _cache.CleanUp();
     }
 
     /// <summary>Measures one resident lookup without writes or cleanup.</summary>
     [Benchmark]
-    public int ResidentHit() => _cache.TryGet(0, out int value) ? value : -1;
+    public int ResidentHit() => _cache.TryGet(_residentKey, out int value) ? value : -1;
 
     /// <summary>Releases the cache after the benchmark case.</summary>
     [GlobalCleanup]

@@ -28,6 +28,14 @@ internal static class Program
     {
         ProbeOptions options = ProbeOptions.Parse(args);
         List<WorkloadSpec> workloads = CreateWorkloads(options).ToList();
+        if (workloads.Count == 0)
+        {
+            throw new ArgumentException(
+                "No workloads matched the selected caffeine filters. "
+                    + "Check --capacity, --workers, --writes-per-worker, --statistics, and --value-mode."
+            );
+        }
+
         List<ProbeSample> samples = [];
 
         foreach (WorkloadSpec workload in workloads)
@@ -150,6 +158,19 @@ internal static class Program
                         {
                             foreach (string valueMode in new[] { "same", "changed" })
                             {
+                                if (
+                                    !options.MatchesCaffeine(
+                                        capacity,
+                                        workers,
+                                        operations,
+                                        statistics,
+                                        valueMode
+                                    )
+                                )
+                                {
+                                    continue;
+                                }
+
                                 yield return WorkloadSpec.CreateCaffeine(
                                     capacity,
                                     workers,
@@ -634,8 +655,26 @@ internal static class Program
         public required int Warmups { get; init; }
         public required int TargetOperationsPerSample { get; init; }
         public required int SteadyOperationsPerWorker { get; init; }
+        public required int? CaffeineCapacity { get; init; }
+        public required int? CaffeineWorkers { get; init; }
+        public required int? CaffeineWritesPerWorker { get; init; }
+        public required bool? CaffeineStatistics { get; init; }
+        public required string? CaffeineValueMode { get; init; }
         public required string? OutputPath { get; init; }
         public required bool NoProgress { get; init; }
+
+        public bool MatchesCaffeine(
+            int capacity,
+            int workers,
+            int writesPerWorker,
+            bool statistics,
+            string valueMode
+        ) =>
+            (CaffeineCapacity is null || CaffeineCapacity == capacity)
+            && (CaffeineWorkers is null || CaffeineWorkers == workers)
+            && (CaffeineWritesPerWorker is null || CaffeineWritesPerWorker == writesPerWorker)
+            && (CaffeineStatistics is null || CaffeineStatistics == statistics)
+            && (CaffeineValueMode is null || CaffeineValueMode == valueMode);
 
         public static ProbeOptions Parse(string[] args)
         {
@@ -645,6 +684,38 @@ internal static class Program
                 throw new ArgumentException(
                     "--suite must be repro, original, steady, caffeine, or all."
                 );
+            }
+
+            int? caffeineCapacity = ReadOptionalInt(args, "--capacity", 1, 2_000_000);
+            int? caffeineWorkers = ReadOptionalInt(args, "--workers", 1, 100);
+            int? caffeineWritesPerWorker = ReadOptionalInt(
+                args,
+                "--writes-per-worker",
+                1,
+                2_000_000
+            );
+            bool? caffeineStatistics = ReadOptionalStatistics(args);
+            string? caffeineValueMode = ReadOptionalString(args, "--value-mode");
+            if (caffeineValueMode is not (null or "same" or "changed"))
+            {
+                throw new ArgumentException("--value-mode must be same or changed.");
+            }
+
+            if (
+                caffeineCapacity is not null
+                || caffeineWorkers is not null
+                || caffeineWritesPerWorker is not null
+                || caffeineStatistics is not null
+                || caffeineValueMode is not null
+            )
+            {
+                if (suite != "caffeine")
+                {
+                    throw new ArgumentException(
+                        "--capacity, --workers, --writes-per-worker, --statistics, and "
+                            + "--value-mode require --suite caffeine."
+                    );
+                }
             }
 
             return new ProbeOptions
@@ -668,6 +739,11 @@ internal static class Program
                     1,
                     2_000_000
                 ),
+                CaffeineCapacity = caffeineCapacity,
+                CaffeineWorkers = caffeineWorkers,
+                CaffeineWritesPerWorker = caffeineWritesPerWorker,
+                CaffeineStatistics = caffeineStatistics,
+                CaffeineValueMode = caffeineValueMode,
                 OutputPath = ReadOptionalString(args, "--output"),
                 NoProgress = args.Contains("--no-progress", StringComparer.Ordinal),
             };
@@ -931,6 +1007,17 @@ internal static class Program
     private static int ReadInt(string[] args, string option, int fallback, int minimum, int maximum)
     {
         string raw = ReadString(args, option, fallback.ToString(CultureInfo.InvariantCulture));
+        return ParseInt(option, raw, minimum, maximum);
+    }
+
+    private static int? ReadOptionalInt(string[] args, string option, int minimum, int maximum)
+    {
+        string? raw = ReadOptionalString(args, option);
+        return raw is null ? null : ParseInt(option, raw, minimum, maximum);
+    }
+
+    private static int ParseInt(string option, string raw, int minimum, int maximum)
+    {
         if (
             !int.TryParse(raw, CultureInfo.InvariantCulture, out int value)
             || value < minimum
@@ -944,5 +1031,17 @@ internal static class Program
         }
 
         return value;
+    }
+
+    private static bool? ReadOptionalStatistics(string[] args)
+    {
+        string? raw = ReadOptionalString(args, "--statistics");
+        return raw switch
+        {
+            null => null,
+            "on" or "true" => true,
+            "off" or "false" => false,
+            _ => throw new ArgumentException("--statistics must be on or off."),
+        };
     }
 }
