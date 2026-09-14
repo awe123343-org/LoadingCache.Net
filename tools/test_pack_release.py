@@ -1,10 +1,9 @@
 import importlib.util
-from pathlib import Path
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 import zipfile
-
+from pathlib import Path
 
 MODULE_PATH = Path(__file__).with_name("pack-release.py")
 SPEC = importlib.util.spec_from_file_location("pack_release", MODULE_PATH)

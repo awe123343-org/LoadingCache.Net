@@ -19,7 +19,6 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import platform
 import re
 import shlex
@@ -27,8 +26,8 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
-
 
 ROOT = Path(__file__).resolve().parent.parent
 RID = "osx-arm64"
@@ -127,7 +126,9 @@ def run_logged(
         log.write(f"WorkingDirectory: {ROOT}\n")
         log.write(f"Command: {command_text(command)}\n")
         if environment_overrides:
-            log.write(f"EnvironmentOverrides: {json.dumps(environment_overrides, sort_keys=True)}\n")
+            log.write(
+                f"EnvironmentOverrides: {json.dumps(environment_overrides, sort_keys=True)}\n"
+            )
         log.write("\n")
         try:
             completed = subprocess.run(
@@ -229,17 +230,14 @@ def parse_capture_manifest(
                 }
             )
     captured_paths = {
-        Path(item["path"]).resolve()
-        for item in files
-        if isinstance(item.get("path"), str)
+        Path(item["path"]).resolve() for item in files if isinstance(item.get("path"), str)
     }
     reference_names = sorted(set(expected_reference_names))
     complete_pairs = {
         name
         for name in reference_names
         if any(
-            path.name == f"{name}.dll"
-            and path.with_suffix(".pdb") in captured_paths
+            path.name == f"{name}.dll" and path.with_suffix(".pdb") in captured_paths
             for path in captured_paths
         )
     }
@@ -257,12 +255,10 @@ def parse_capture_manifest(
             {
                 "assemblyName": name,
                 "dllCaptured": any(
-                    captured_path.name == f"{name}.dll"
-                    for captured_path in captured_paths
+                    captured_path.name == f"{name}.dll" for captured_path in captured_paths
                 ),
                 "pdbCaptured": any(
-                    captured_path.name == f"{name}.pdb"
-                    for captured_path in captured_paths
+                    captured_path.name == f"{name}.pdb" for captured_path in captured_paths
                 ),
             }
             for name in reference_names
@@ -301,12 +297,9 @@ def collect_pack_evidence(
         if not isinstance(name, str) or not isinstance(version, str) or not version:
             return
         lowered = name.lower()
-        is_runtime = (
-            RID in lowered
-            and (
-                "microsoft.netcore.app.runtime" in lowered
-                or ("runtime." in lowered and "microsoft.netcore.app" in lowered)
-            )
+        is_runtime = RID in lowered and (
+            "microsoft.netcore.app.runtime" in lowered
+            or ("runtime." in lowered and "microsoft.netcore.app" in lowered)
         )
         is_compiler = "ilcompiler" in lowered or "illink" in lowered
         if is_runtime or is_compiler:
@@ -369,7 +362,9 @@ def collect_pack_evidence(
         project_frameworks = assets.get("project", {}).get("frameworks", {})
         if isinstance(project_frameworks, dict):
             for framework_name, framework in project_frameworks.items():
-                if not matching_framework(framework_name, framework) or not isinstance(framework, dict):
+                if not matching_framework(framework_name, framework) or not isinstance(
+                    framework, dict
+                ):
                     continue
                 for dependency in framework.get("downloadDependencies", []):
                     if isinstance(dependency, dict):
@@ -440,9 +435,7 @@ def verify_runtime_output(
 ) -> dict[str, object]:
     runtime_match = re.search(r"\.NET\s+(\d+\.\d+\.\d+)", text)
     dynamic_match = re.search(r"(?:dynamic code|DynamicCodeSupported):\s*(True|False)", text)
-    architecture_match = re.search(
-        r"(?:ProcessArchitecture:\s*|;\s*)(Arm64|X64|X86|Arm)\b", text
-    )
+    architecture_match = re.search(r"(?:ProcessArchitecture:\s*|;\s*)(Arm64|X64|X86|Arm)\b", text)
     observed_runtime = runtime_match.group(1) if runtime_match else None
     dynamic = dynamic_match.group(1) == "True" if dynamic_match else None
     architecture = architecture_match.group(1) if architecture_match else None
@@ -674,7 +667,9 @@ def main() -> int:
             print(f"{job['name']}: {job['status']}", flush=True)
 
         statuses = [job["status"] for job in results["jobs"]]
-        results["status"] = "passed" if statuses and all(status == "passed" for status in statuses) else "failed"
+        results["status"] = (
+            "passed" if statuses and all(status == "passed" for status in statuses) else "failed"
+        )
 
     after = source_manifest(ROOT)
     results["finishedAt"] = timestamp()

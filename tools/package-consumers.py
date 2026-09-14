@@ -9,10 +9,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import subprocess
 import time
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 from validate import source_manifest
 
@@ -54,10 +54,14 @@ def main() -> int:
                 ).returncode
             except subprocess.TimeoutExpired:
                 status = 124
-        report["commands"].append({
-            "name": name, "command": command, "exit_code": status,
-            "seconds": time.monotonic() - started,
-        })
+        report["commands"].append(
+            {
+                "name": name,
+                "command": command,
+                "exit_code": status,
+                "seconds": time.monotonic() - started,
+            }
+        )
         print(f"{name}: exit {status}", flush=True)
         if status:
             print((output / f"{name}.log").read_text()[-12000:], flush=True)
@@ -77,8 +81,11 @@ def main() -> int:
             project = ET.Element("Project", Sdk="Microsoft.NET.Sdk")
             properties = ET.SubElement(project, "PropertyGroup")
             for key, value in {
-                "OutputType": "Exe", "TargetFramework": "", "TargetFrameworks": "net8.0;net10.0",
-                "ManagePackageVersionsCentrally": "false", "IsPackable": "false",
+                "OutputType": "Exe",
+                "TargetFramework": "",
+                "TargetFrameworks": "net8.0;net10.0",
+                "ManagePackageVersionsCentrally": "false",
+                "IsPackable": "false",
                 "GenerateDocumentationFile": "true",
             }.items():
                 ET.SubElement(properties, key).text = value
@@ -89,15 +96,26 @@ def main() -> int:
             ET.SubElement(items, "PackageReference", Include=package_id, Version=args.version)
             if role == "DI":
                 ET.SubElement(
-                    items, "PackageReference", Include="Microsoft.Extensions.DependencyInjection",
+                    items,
+                    "PackageReference",
+                    Include="Microsoft.Extensions.DependencyInjection",
                     Version="10.0.12",
                 )
             path = directory / f"{role}Consumer.csproj"
             ET.ElementTree(project).write(path, encoding="unicode", xml_declaration=True)
-            run(role + "-restore", [
-                "dotnet", "restore", str(path), "--configfile", str(config_path),
-                "--packages", str(output / "packages"), "--force",
-            ])
+            run(
+                role + "-restore",
+                [
+                    "dotnet",
+                    "restore",
+                    str(path),
+                    "--configfile",
+                    str(config_path),
+                    "--packages",
+                    str(output / "packages"),
+                    "--force",
+                ],
+            )
             assets = json.loads((directory / "obj/project.assets.json").read_text())
             for dependency in [args.core_id] + ([args.di_id] if role == "DI" else []):
                 library = assets["libraries"][dependency + "/" + args.version]
@@ -112,7 +130,8 @@ def main() -> int:
                 report["archives"][archive.name] = digest
             run(role + "-build", ["dotnet", "build", str(path), "-c", "Release", "--no-restore"])
             for framework, host in [
-                ("net8.0", args.runtime8_host), ("net10.0", args.runtime10_host),
+                ("net8.0", args.runtime8_host),
+                ("net10.0", args.runtime10_host),
             ]:
                 binary = directory / "bin/Release" / framework / f"{role}Consumer.dll"
                 run(role + "-" + framework, [host, str(binary)])

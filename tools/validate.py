@@ -11,12 +11,12 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import platform
 import subprocess
 import sys
 import time
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 
 def inspect_test_results(path: Path) -> dict[str, int]:
@@ -25,7 +25,10 @@ def inspect_test_results(path: Path) -> dict[str, int]:
     counters = report.find(".//{*}ResultSummary/{*}Counters")
     if counters is None:
         raise ValueError(f"Missing test counters: {path}")
-    counts = {name: int(counters.get(name, "0")) for name in ("total", "executed", "passed", "failed", "notExecuted")}
+    counts = {
+        name: int(counters.get(name, "0"))
+        for name in ("total", "executed", "passed", "failed", "notExecuted")
+    }
     results = report.findall(".//{*}Results/{*}UnitTestResult")
     if (
         counts["total"] <= 0
@@ -41,10 +44,14 @@ def inspect_test_results(path: Path) -> dict[str, int]:
 
 
 def source_manifest(root: Path) -> dict[str, str]:
-    names = subprocess.check_output(
-        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-        cwd=root,
-    ).decode().split("\0")
+    names = (
+        subprocess.check_output(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+            cwd=root,
+        )
+        .decode()
+        .split("\0")
+    )
     suffixes = {".cs", ".csproj", ".props", ".targets", ".slnx", ".json", ".py", ".yml"}
     return {
         name: hashlib.sha256((root / name).read_bytes()).hexdigest()
@@ -59,9 +66,20 @@ def source_manifest(root: Path) -> dict[str, str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True)
-    parser.add_argument("--host-smokes", action="store_true", help="Run the three local host samples after correctness tests.")
-    parser.add_argument("--polling-watcher", action="store_true", help="Use an explicit process-only polling watcher for host smokes; never changes sample or global settings.")
-    parser.add_argument("--runtime10-host", help="Use an existing local .NET 10 host for tests and the source consumer; host samples still use the system ASP.NET runtime.")
+    parser.add_argument(
+        "--host-smokes",
+        action="store_true",
+        help="Run the three local host samples after correctness tests.",
+    )
+    parser.add_argument(
+        "--polling-watcher",
+        action="store_true",
+        help="Use an explicit process-only polling watcher for host smokes; never changes sample or global settings.",
+    )
+    parser.add_argument(
+        "--runtime10-host",
+        help="Use an existing local .NET 10 host for tests and the source consumer; host samples still use the system ASP.NET runtime.",
+    )
     arguments = parser.parse_args()
     if arguments.polling_watcher and not arguments.host_smokes:
         parser.error("--polling-watcher requires --host-smokes")
@@ -77,7 +95,11 @@ def main() -> int:
         parser.error(f"Expected an existing .NET 10 host at {runtime10}")
     output.mkdir(parents=True)
 
-    test_projects = ("LoadingCache.Tests", "LoadingCache.DependencyInjection.Tests", "LoadingCache.StressTests")
+    test_projects = (
+        "LoadingCache.Tests",
+        "LoadingCache.DependencyInjection.Tests",
+        "LoadingCache.StressTests",
+    )
     consumer = "tests/LoadingCache.ConsumerSmoke/LoadingCache.ConsumerSmoke.csproj"
     commands = [
         ("environment", ["dotnet", "--info"]),
@@ -91,22 +113,66 @@ def main() -> int:
     for project in test_projects:
         for framework in ("net8.0", "net10.0"):
             command = [
-                "dotnet", "test", f"tests/{project}/{project}.csproj", "-c", "Release", "--no-build", "--no-restore",
-                "-f", framework, "--logger", f"trx;LogFileName={project}-{framework}.trx",
-                "--results-directory", str(output),
+                "dotnet",
+                "test",
+                f"tests/{project}/{project}.csproj",
+                "-c",
+                "Release",
+                "--no-build",
+                "--no-restore",
+                "-f",
+                framework,
+                "--logger",
+                f"trx;LogFileName={project}-{framework}.trx",
+                "--results-directory",
+                str(output),
             ]
             if framework == "net8.0":
                 command += ["--", f"RunConfiguration.DotNetHostPath={runtime8}"]
             elif runtime10 is not None:
                 command += ["--", f"RunConfiguration.DotNetHostPath={runtime10}"]
             commands.append((f"{project}-{framework}", command))
-    commands.extend([
-        ("consumer-net8", [str(runtime8), str(root / Path(consumer).parent / "bin/Release/net8.0/LoadingCache.ConsumerSmoke.dll")]),
-        ("consumer-net10", [str(runtime10) if runtime10 else "dotnet", str(root / Path(consumer).parent / "bin/Release/net10.0/LoadingCache.ConsumerSmoke.dll")]),
-    ])
+    commands.extend(
+        [
+            (
+                "consumer-net8",
+                [
+                    str(runtime8),
+                    str(
+                        root
+                        / Path(consumer).parent
+                        / "bin/Release/net8.0/LoadingCache.ConsumerSmoke.dll"
+                    ),
+                ],
+            ),
+            (
+                "consumer-net10",
+                [
+                    str(runtime10) if runtime10 else "dotnet",
+                    str(
+                        root
+                        / Path(consumer).parent
+                        / "bin/Release/net10.0/LoadingCache.ConsumerSmoke.dll"
+                    ),
+                ],
+            ),
+        ]
+    )
     if arguments.host_smokes:
         for sample in ("AspNetCore", "Grpc", "Worker"):
-            commands.append((f"host-{sample}", ["dotnet", str(root / f"samples/LoadingCache.{sample}/bin/Release/net10.0/LoadingCache.{sample}.dll"), "--smoke"]))
+            commands.append(
+                (
+                    f"host-{sample}",
+                    [
+                        "dotnet",
+                        str(
+                            root
+                            / f"samples/LoadingCache.{sample}/bin/Release/net10.0/LoadingCache.{sample}.dll"
+                        ),
+                        "--smoke",
+                    ],
+                )
+            )
 
     before = source_manifest(root)
     (output / "source-manifest.json").write_text(json.dumps(before, indent=2) + "\n")
@@ -124,12 +190,23 @@ def main() -> int:
     for name, command in commands:
         print(f"Running {name}", flush=True)
         started = time.monotonic()
-        environment_overrides = {"DOTNET_USE_POLLING_FILE_WATCHER": "1"} if name.startswith("host-") and arguments.polling_watcher else {}
+        environment_overrides = (
+            {"DOTNET_USE_POLLING_FILE_WATCHER": "1"}
+            if name.startswith("host-") and arguments.polling_watcher
+            else {}
+        )
         environment = os.environ.copy()
         environment.update(environment_overrides)
         with (output / f"{name}.log").open("w") as log:
             try:
-                completed = subprocess.run(command, cwd=root, env=environment, stdout=log, stderr=subprocess.STDOUT, timeout=30 if name.startswith("host-") else 600)
+                completed = subprocess.run(
+                    command,
+                    cwd=root,
+                    env=environment,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    timeout=30 if name.startswith("host-") else 600,
+                )
                 status = completed.returncode
             except subprocess.TimeoutExpired:
                 status = 124
@@ -142,15 +219,17 @@ def main() -> int:
                 status = 3
                 with (output / f"{name}.log").open("a") as log:
                     log.write(f"\nTRX acceptance failed: {error}\n")
-        results["commands"].append({
-            "name": name,
-            "command": command,
-            "exit_code": status,
-            "elapsed_seconds": time.monotonic() - started,
-            "log": f"{name}.log",
-            "environment_overrides": environment_overrides,
-            "test_counts": test_counts,
-        })
+        results["commands"].append(
+            {
+                "name": name,
+                "command": command,
+                "exit_code": status,
+                "elapsed_seconds": time.monotonic() - started,
+                "log": f"{name}.log",
+                "environment_overrides": environment_overrides,
+                "test_counts": test_counts,
+            }
+        )
         print(f"{name}: exit {status}", flush=True)
         if status:
             print((output / f"{name}.log").read_text()[-12_000:], flush=True)
@@ -163,7 +242,7 @@ def main() -> int:
         (output / "source-manifest-after.json").write_text(json.dumps(after, indent=2) + "\n")
         print("Source changed during validation; do not treat this as a fixed-revision result.")
         exit_code = exit_code or 2
-    results["unrun_commands"] = [name for name, _ in commands[len(results["commands"]):]]
+    results["unrun_commands"] = [name for name, _ in commands[len(results["commands"]) :]]
     (output / "results.json").write_text(json.dumps(results, indent=2) + "\n")
     return exit_code
 

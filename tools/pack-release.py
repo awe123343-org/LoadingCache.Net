@@ -10,13 +10,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import re
 import subprocess
 import time
-from urllib.parse import urlparse
 import xml.etree.ElementTree as ET
 import zipfile
+from pathlib import Path
+from urllib.parse import urlparse
 
 try:
     from validate import source_manifest
@@ -36,7 +36,9 @@ DI_ASSEMBLY = "LoadingCache.Extensions.DependencyInjection"
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", required=True, help="Fresh output directory for logs and packages")
+    parser.add_argument(
+        "--output", required=True, help="Fresh output directory for logs and packages"
+    )
     parser.add_argument("--version", help="SemVer 2.0 prerelease version")
     parser.add_argument("--core-id", help="NuGet ID for the core package")
     parser.add_argument("--di-id", help="NuGet ID for the DI integration package")
@@ -61,7 +63,9 @@ def validate_package_id(value: str, name: str) -> str:
     if len(value) > 100:
         raise fail(f"{name} must be at most 100 characters")
     if not value or not PACKAGE_ID_PATTERN.fullmatch(value):
-        raise fail(f"{name} must be a NuGet package ID containing only letters, digits, '.', '-' or '_'")
+        raise fail(
+            f"{name} must be a NuGet package ID containing only letters, digits, '.', '-' or '_'"
+        )
     return value
 
 
@@ -102,8 +106,13 @@ def resolve_metadata(args: argparse.Namespace) -> dict[str, str | None]:
         "repository_commit": args.repository_commit,
     }
     if args.local_validation:
-        if any(supplied[name] is not None for name in ("core_id", "di_id", "repository_url", "repository_commit")):
-            raise fail("--local-validation cannot be combined with package or repository identity arguments")
+        if any(
+            supplied[name] is not None
+            for name in ("core_id", "di_id", "repository_url", "repository_commit")
+        ):
+            raise fail(
+                "--local-validation cannot be combined with package or repository identity arguments"
+            )
         metadata = {
             "core_id": "LoadingCache.LocalValidation",
             "di_id": "LoadingCache.Extensions.DependencyInjection.LocalValidation",
@@ -172,7 +181,9 @@ def write_nuget_config(path: Path, feed: Path, core_package_id: str) -> None:
     ET.ElementTree(configuration).write(path, encoding="utf-8", xml_declaration=True)
 
 
-def verify_source_identity(root: Path, metadata: dict[str, str | None], local_validation: bool) -> None:
+def verify_source_identity(
+    root: Path, metadata: dict[str, str | None], local_validation: bool
+) -> None:
     if local_validation:
         return
     result = subprocess.run(
@@ -181,7 +192,9 @@ def verify_source_identity(root: Path, metadata: dict[str, str | None], local_va
     actual = result.stdout.strip().lower()
     expected = str(metadata["repository_commit"]).lower()
     if result.returncode != 0 or actual != expected:
-        raise fail(f"checked-out git HEAD {actual or '<unavailable>'} does not match repository-commit {expected}")
+        raise fail(
+            f"checked-out git HEAD {actual or '<unavailable>'} does not match repository-commit {expected}"
+        )
 
 
 def run_command(
@@ -195,12 +208,19 @@ def run_command(
     log_path = output / f"{name}.log"
     with log_path.open("w", encoding="utf-8") as log:
         try:
-            result = subprocess.run(command, cwd=root, stdout=log, stderr=subprocess.STDOUT, timeout=900)
+            result = subprocess.run(
+                command, cwd=root, stdout=log, stderr=subprocess.STDOUT, timeout=900
+            )
             exit_code = result.returncode
         except subprocess.TimeoutExpired:
             exit_code = 124
     report.setdefault("commands", []).append(
-        {"name": name, "command": command, "exit_code": exit_code, "seconds": time.monotonic() - started}
+        {
+            "name": name,
+            "command": command,
+            "exit_code": exit_code,
+            "seconds": time.monotonic() - started,
+        }
     )
     if exit_code:
         tail = log_path.read_text(encoding="utf-8", errors="replace")[-12000:]
@@ -244,7 +264,10 @@ def inspect_package(
         metadata_node = nuspec.find("{*}metadata")
         if metadata_node is None:
             raise fail(f"{archive.name} has no nuspec metadata")
-        read = lambda name: metadata_node.findtext(f"{{*}}{name}")
+
+        def read(name: str) -> str | None:
+            return metadata_node.findtext(f"{{*}}{name}")
+
         if read("id") != package_id or read("version") != version:
             raise fail(f"{archive.name} has unexpected nuspec identity")
         # NuGet serializes the MSBuild semicolon list as a comma-separated
@@ -262,7 +285,9 @@ def inspect_package(
         if require_core_dependency is not None:
             matching = [item for item in dependencies if item[0] == require_core_dependency]
             if matching != [(require_core_dependency, version)]:
-                raise fail(f"DI package must depend on {require_core_dependency} {version}: {dependencies}")
+                raise fail(
+                    f"DI package must depend on {require_core_dependency} {version}: {dependencies}"
+                )
         repository = metadata_node.find("{*}repository")
         if metadata["repository_url"] is not None:
             if repository is None or repository.attrib.get("url") != metadata["repository_url"]:
@@ -348,7 +373,17 @@ def main() -> int:
             root,
             output,
             "core-pack",
-            [args.dotnet, "pack", core, "-c", args.configuration, "-o", str(packages), "--no-restore", *common],
+            [
+                args.dotnet,
+                "pack",
+                core,
+                "-c",
+                args.configuration,
+                "-o",
+                str(packages),
+                "--no-restore",
+                *common,
+            ],
             report,
         )
         run_command(
@@ -372,7 +407,17 @@ def main() -> int:
             root,
             output,
             "di-pack",
-            [args.dotnet, "pack", di, "-c", args.configuration, "-o", str(packages), "--no-restore", *common],
+            [
+                args.dotnet,
+                "pack",
+                di,
+                "-c",
+                args.configuration,
+                "-o",
+                str(packages),
+                "--no-restore",
+                *common,
+            ],
             report,
         )
         expected_archives = {
@@ -387,9 +432,15 @@ def main() -> int:
             if path.is_file() and path.suffix in {".nupkg", ".snupkg"}
         }
         if actual_archives != expected_archives:
-            raise fail(f"package directory archives do not match expected set: {sorted(actual_archives)}")
-        core_archive, core_symbols = package_paths(packages, str(metadata["core_id"]), str(metadata["version"]))
-        di_archive, di_symbols = package_paths(packages, str(metadata["di_id"]), str(metadata["version"]))
+            raise fail(
+                f"package directory archives do not match expected set: {sorted(actual_archives)}"
+            )
+        core_archive, core_symbols = package_paths(
+            packages, str(metadata["core_id"]), str(metadata["version"])
+        )
+        di_archive, di_symbols = package_paths(
+            packages, str(metadata["di_id"]), str(metadata["version"])
+        )
         report["package_manifests"] = [
             inspect_package(
                 core_archive,
