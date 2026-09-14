@@ -10,7 +10,7 @@ namespace LoadingCache.WriteProbe;
 
 internal static class Program
 {
-    private const int MaxDrainPasses = 256;
+    private static readonly TimeSpan DrainWatchdog = TimeSpan.FromSeconds(30);
     private const int DefaultTargetOperationsPerSample = 131_072;
     private const int CaffeineTraceWindows = 4;
     private const int CaffeineTraceBatches = CaffeineTraceWindows * 2;
@@ -451,7 +451,8 @@ internal static class Program
         long previousCount = -1;
         long previousWeightedSize = -1;
 
-        for (int pass = 0; pass < MaxDrainPasses; pass++)
+        var wait = new SpinWait();
+        for (int pass = 0; ; pass++)
         {
             cache.CleanUp();
             CacheSnapshot snapshot = Snapshot(cache);
@@ -476,11 +477,14 @@ internal static class Program
                     snapshot.Statistics.MaintenanceBacklog
                 );
             }
+            if (Stopwatch.GetElapsedTime(started) >= DrainWatchdog)
+                break;
+            wait.SpinOnce();
         }
 
         CacheSnapshot last = Snapshot(cache);
         throw new InvalidOperationException(
-            $"Drain did not quiesce after {MaxDrainPasses} passes: "
+            $"Drain did not quiesce within {DrainWatchdog}: "
                 + $"backlog={last.Statistics.MaintenanceBacklog}, "
                 + $"count={last.EstimatedCount}, weighted={last.WeightedSize}."
         );

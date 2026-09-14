@@ -15,6 +15,10 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <Compile
+            Include="../../tools/LoadingCache.MemoryCacheProbe/ProbeCleanup.cs"
+            Link="ProbeCleanup.cs"
+        />
         <ProjectReference Include="../../src/LoadingCache/LoadingCache.csproj" />
         <PackageReference Include="Microsoft.NET.Test.Sdk" PrivateAssets="all" />
         <PackageReference Include="NUnit" PrivateAssets="all" />

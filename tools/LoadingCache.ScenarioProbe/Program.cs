@@ -961,7 +961,9 @@ internal static class Program
 
     private static int Drain(CacheApi.ICache<Key, Value> cache)
     {
-        for (int pass = 1; pass <= 256; pass++)
+        long started = Stopwatch.GetTimestamp();
+        var wait = new SpinWait();
+        for (int pass = 1; ; pass++)
         {
             cache.CleanUp();
             if (
@@ -969,8 +971,12 @@ internal static class Program
                 && cache.Policy.Eviction!.WeightedSize <= cache.Policy.Eviction.Maximum
             )
                 return pass;
+            if (Stopwatch.GetElapsedTime(started) >= TimeSpan.FromSeconds(30))
+                throw new InvalidOperationException(
+                    "maintenance failed to converge within 30 seconds"
+                );
+            wait.SpinOnce();
         }
-        throw new InvalidOperationException("maintenance failed to converge");
     }
 
     private static async Task UntilAsync(Func<bool> predicate)

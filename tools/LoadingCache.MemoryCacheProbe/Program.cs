@@ -421,19 +421,7 @@ internal static class Program
         return trace;
     }
 
-    private static int Drain(ICache<Key, Payload> cache)
-    {
-        for (int pass = 1; pass <= 256; pass++)
-        {
-            cache.CleanUp();
-            if (
-                cache.Statistics.MaintenanceBacklog == 0
-                && cache.Policy.Eviction!.WeightedSize <= cache.Policy.Eviction.Maximum
-            )
-                return pass;
-        }
-        throw new InvalidOperationException("LoadingCache cleanup did not converge");
-    }
+    private static int Drain(ICache<Key, Payload> cache) => ProbeCleanup.Drain(cache, Watchdog);
 
     private static void Signal(Barrier barrier) =>
         Check(barrier.SignalAndWait(Watchdog), "worker barrier timeout");
