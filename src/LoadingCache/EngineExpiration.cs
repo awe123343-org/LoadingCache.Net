@@ -789,9 +789,11 @@ internal sealed partial class CacheEngine<TKey, TValue>
         return duration;
     }
 
-    private void TouchWithoutLock(Entry entry, long now)
+    private static void TouchWithoutLock(Entry entry, long now)
     {
-        if (_timeProvider.GetElapsedTime(entry.AccessTimestamp, now) >= TimeSpan.Zero)
+        // Compare timestamp units before TimeSpan truncation: a negative fraction of a tick
+        // must not move access time backwards. Subtraction preserves signed wraparound.
+        if (unchecked(now - entry.AccessTimestamp) >= 0)
         {
             entry.AccessTimestamp = now;
         }
