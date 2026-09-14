@@ -8,6 +8,8 @@ indent_style = space
 indent_size = 4
 
 [*.cs]
+# Detect unused imports in the existing build; CSharpier owns whitespace.
+dotnet_diagnostic.IDE0005.severity = warning
 # Match repository-local CSharpier; keep the Rider style inspection enabled.
 resharper_csharp_trailing_comma_in_multiline_lists = true
 resharper_csharp_trailing_comma_in_singleline_lists = false

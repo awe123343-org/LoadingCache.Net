@@ -1,0 +1,12 @@
+{
+  "name": "loadingcache-repository-tools",
+  "private": true,
+  "packageManager": "pnpm@12.3.4",
+  "devDependencies": {
+    "oxfmt": "0.67.0"
+  },
+  "scripts": {
+    "fmt": "oxfmt --write .",
+    "fmt:check": "oxfmt --check ."
+  }
+}

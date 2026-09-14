@@ -1,0 +1,60 @@
+minimum_prek_version: "0.4.14"
+default_stages: [pre-commit]
+exclude: >-
+  (?x)(^|/)(artifacts|bin|obj|node_modules|\.idea|\.git|__pycache__)/|
+  ^pnpm-lock\.yaml$|^docs/research-evidence/|^docs/benchmarks/.*\.(json|csv)$|
+  ^tools/LoadingCache\.Simulator/results/
+
+repos:
+  - repo: builtin
+    hooks:
+      - id: end-of-file-fixer
+      - id: fix-byte-order-marker
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: trailing-whitespace
+        args: ["--markdown-linebreak-ext=md,markdown"]
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: Ruff lint
+        entry: uvx --from ruff==0.14.0 ruff check --fix --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+      - id: ruff-format
+        name: Ruff format
+        entry: uvx --from ruff==0.14.0 ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+      - id: oxfmt
+        name: Oxfmt
+        entry: bash run-oxfmt.sh
+        language: system
+        files: '\.(js|jsx|ts|tsx|mjs|cjs|css|json|jsonc|md|mdx|markdown|toml|yaml|yml|html)$'
+        require_serial: true
+      - id: dotnet-tool-restore
+        name: Restore repository .NET tools
+        entry: dotnet tool restore
+        language: system
+        files: '(\.(cs|csproj|props|targets|slnx|xml|config)$|^\.config/dotnet-tools\.json$)'
+        pass_filenames: false
+        stages: [pre-commit, manual]
+      - id: dotnet-format-style
+        name: Remove unused C# imports (IDE0005 only)
+        entry: bash tools/hooks/dotnet-format-style.sh
+        language: system
+        types: ["c#"]
+        require_serial: true
+        stages: [manual]
+      - id: csharpier
+        name: CSharpier
+        entry: dotnet csharpier format
+        language: system
+        files: '\.(cs|csproj|props|targets|slnx|xml|config)$'
+        require_serial: true
+        stages: [pre-commit, manual]

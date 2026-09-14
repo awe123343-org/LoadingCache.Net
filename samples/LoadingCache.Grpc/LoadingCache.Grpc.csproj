@@ -4,7 +4,9 @@
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-        <GenerateDocumentationFile>false</GenerateDocumentationFile>
+        <!-- Enable IDE0005 without requiring API docs for sample/generated code. -->
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <NoWarn>$(NoWarn);CS1591</NoWarn>
         <IsPackable>false</IsPackable>
     </PropertyGroup>
 

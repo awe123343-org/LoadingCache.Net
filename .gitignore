@@ -7,3 +7,6 @@ artifacts/
 *.user
 *.suo
 __pycache__/
+node_modules/
+.ruff_cache/
+.pnpm-store/
