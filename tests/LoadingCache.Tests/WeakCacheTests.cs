@@ -30,8 +30,10 @@ public sealed class WeakCacheTests
     }
 
     [Test]
-    public void WeakKeyResidentHitDoesNotAllocateLookupProbe()
+    public async Task WeakKeyResidentHitDoesNotAllocateLookupProbe()
     {
+        if (await AllocationTestProcess.RunIsolatedIfNeededAsync("weak-hit").ConfigureAwait(false))
+            return;
         // Keep policy transport out of this measurement: its scheduler and
         // read-buffer work are separate from the authoritative key lookup.
         // The rejecting scheduler also prevents an accidental async work item.

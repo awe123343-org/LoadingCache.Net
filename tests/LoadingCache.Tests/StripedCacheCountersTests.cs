@@ -170,8 +170,10 @@ public sealed class StripedCacheCountersTests
     }
 
     [Test]
-    public void HotCounterUpdatesDoNotAllocatePerEvent()
+    public async Task HotCounterUpdatesDoNotAllocatePerEvent()
     {
+        if (await AllocationTestProcess.RunIsolatedIfNeededAsync("counter").ConfigureAwait(false))
+            return;
         StripedCacheCounters counters = new(1);
         counters.Add(CacheCounterKind.Hits);
 

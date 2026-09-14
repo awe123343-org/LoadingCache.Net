@@ -65,8 +65,14 @@ public sealed class EstimatedCountTests
     }
 
     [Test]
-    public void EstimatedCountDoesNotAllocateAValuesSnapshotPerEntry()
+    public async Task EstimatedCountDoesNotAllocateAValuesSnapshotPerEntry()
     {
+        if (
+            await AllocationTestProcess
+                .RunIsolatedIfNeededAsync("estimated-count")
+                .ConfigureAwait(false)
+        )
+            return;
         long smallAllocation = MeasureEstimatedCountAllocation(512);
         long largeAllocation = MeasureEstimatedCountAllocation(4096);
 

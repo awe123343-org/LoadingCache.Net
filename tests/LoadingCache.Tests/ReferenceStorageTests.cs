@@ -62,8 +62,14 @@ public sealed class ReferenceStorageTests
     }
 
     [Test]
-    public void WeakKeyObjectComparerDoesNotAllocateDuringRawLookupComparison()
+    public async Task WeakKeyObjectComparerDoesNotAllocateDuringRawLookupComparison()
     {
+        if (
+            await AllocationTestProcess
+                .RunIsolatedIfNeededAsync("weak-comparer")
+                .ConfigureAwait(false)
+        )
+            return;
         Key key = new(1);
         ReferenceKey<Key> handle = ReferenceKey<Key>.CreateWeak(key);
         IEqualityComparer<object> comparer = WeakKeyObjectComparer<Key>.Instance;

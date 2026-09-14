@@ -100,8 +100,14 @@ public sealed class ResidentReplacementTests
     }
 
     [Test]
-    public void RepeatedResidentPutHasBoundedAllocation()
+    public async Task RepeatedResidentPutHasBoundedAllocation()
     {
+        if (
+            await AllocationTestProcess
+                .RunIsolatedIfNeededAsync("resident-put")
+                .ConfigureAwait(false)
+        )
+            return;
         const int iterations = 4096;
         int[] values = new int[iterations];
         for (int index = 0; index < values.Length; index++)
