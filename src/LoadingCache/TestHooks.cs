@@ -31,4 +31,8 @@ internal sealed class LoadingCacheTestHooks
     internal Action? AfterPolicyMaintenance { get; init; }
 
     internal Action? BeforeCompletion { get; init; }
+
+    // Refresh-only seam after value publication and lock release, before timer
+    // arming and promise completion. Tests can exercise claimed-failure rollback.
+    internal Action? AfterRefreshPublished { get; init; }
 }

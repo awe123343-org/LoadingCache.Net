@@ -10,6 +10,78 @@ public sealed class ReadBufferBatchTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
 
+    [Test]
+    public async Task AnUnpublishedHeadDoesNotPreventAnotherInitializedStripeFromDraining()
+    {
+        using StripedReadBuffer<int> buffer = new(2, 4);
+        await using BlockingTestHook publication = new(TestTimeout);
+        buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
+        buffer.SetForcedCasFailuresForTesting(3);
+        buffer.TryOffer(-1).Should().Be(ReadBufferOfferResult.Failed);
+        buffer.StripeCountForTesting.Should().Be(2);
+        buffer.SetForcedCasFailuresForTesting(0);
+        OfferOnStripe(buffer, 10, 1).Should().Be(ReadBufferOfferResult.Success);
+        buffer.DrainTo(static _ => { }, 4).Should().Be(2);
+
+        int publications = 0;
+        buffer.SetHooksForTesting(
+            beforeReserve: null,
+            beforePublish: () =>
+            {
+                if (Interlocked.Increment(ref publications) == 1)
+                {
+                    publication.Invoke();
+                }
+            }
+        );
+        Task<ReadBufferOfferResult> paused = Task.Run(() => OfferOnStripe(buffer, 1, 0));
+        try
+        {
+            await publication.Entered.WaitAsync(TestTimeout);
+            OfferOnStripe(buffer, 11, 1).Should().Be(ReadBufferOfferResult.Success);
+            buffer.HasPublished.Should().BeTrue();
+            buffer.GetStatistics().Queued.Should().Be(1);
+
+            List<int> observed = [];
+            buffer.DrainTo(observed.Add, 4).Should().Be(1);
+            observed.Should().Equal(11);
+            buffer.HasPublished.Should().BeFalse();
+            buffer.GetStatistics().Queued.Should().Be(0);
+
+            publication.Release();
+            (await paused.WaitAsync(TestTimeout)).Should().Be(ReadBufferOfferResult.Success);
+            buffer.DrainTo(observed.Add, 4).Should().Be(1);
+            observed.Should().Equal(11, 1);
+            buffer.GetStatistics().Enqueued.Should().Be(4);
+            buffer.GetStatistics().Dequeued.Should().Be(4);
+            buffer.GetStatistics().Queued.Should().Be(0);
+            publication.TimedOut.Should().BeFalse();
+        }
+        finally
+        {
+            publication.Release();
+            await paused.WaitAsync(TestTimeout);
+            buffer.SetHooksForTesting(null, null);
+        }
+    }
+
+    private static ReadBufferOfferResult OfferOnStripe(
+        StripedReadBuffer<int> buffer,
+        int value,
+        uint stripe
+    )
+    {
+        ulong previous = ReadBufferThreadProbe.ExchangeForTesting((1UL << 32) | stripe);
+        try
+        {
+            return buffer.TryOffer(value);
+        }
+        finally
+        {
+            ReadBufferThreadProbe.ExchangeForTesting(previous);
+        }
+    }
+
     [TestCase(long.MaxValue - 2)]
     [TestCase(-2L)]
     public void BoundedBatchReleasesTheConsumedPrefixAcrossCounterWrap(long counter)

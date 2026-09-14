@@ -572,6 +572,10 @@ internal sealed partial class CacheEngine<TKey, TValue>
             // the gate.  If arming fails, the claimed-failure path restores
             // the previous snapshot and its deadline before completing the
             // shared promise.
+            if (published)
+            {
+                InvokeHook(_testHooks?.AfterRefreshPublished);
+            }
             RequestExpirationTimer();
 
             if (published && publishedEntry is not null && previousSnapshotCaptured)
@@ -883,8 +887,6 @@ internal sealed partial class CacheEngine<TKey, TValue>
             _writeTimestamp = entry.WriteTimestamp;
             _accessTimestamp = entry.AccessTimestamp;
             _variableTimestamp = entry.VariableTimestamp;
-            _variableRevision = entry.VariableRevision;
-            _publicationRevision = entry.PublicationRevision;
             _variableDuration = entry.VariableDuration;
             _sharedTask = entry.SharedTask;
             PolicyDetached = entry.PolicyDetached;
@@ -898,8 +900,6 @@ internal sealed partial class CacheEngine<TKey, TValue>
         private readonly long _writeTimestamp;
         private readonly long _accessTimestamp;
         private readonly long _variableTimestamp;
-        private readonly long _variableRevision;
-        private readonly long _publicationRevision;
         private readonly TimeSpan _variableDuration;
         private readonly Task<TValue>? _sharedTask;
         internal readonly bool PolicyDetached;
@@ -913,8 +913,11 @@ internal sealed partial class CacheEngine<TKey, TValue>
             entry.WriteTimestamp = _writeTimestamp;
             entry.AccessTimestamp = _accessTimestamp;
             entry.VariableTimestamp = _variableTimestamp;
-            entry.VariableRevision = _variableRevision;
-            entry.PublicationRevision = _publicationRevision;
+            // Restoring the old value is a new publication. Never reuse an
+            // earlier revision: a reader may have captured the failed value
+            // before rollback and still be computing outside our locks.
+            entry.VariableRevision++;
+            entry.PublicationRevision++;
             entry.VariableDuration = _variableDuration;
             // A refresh can snapshot a cold completion while that cold flight
             // is concurrently claimed-failed.  Its task may still be pending
