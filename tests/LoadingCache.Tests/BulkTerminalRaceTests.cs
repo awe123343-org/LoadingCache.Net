@@ -56,6 +56,71 @@ public sealed class BulkTerminalRaceTests
     }
 
     [Test]
+    public async Task DisposeCompletesBulkWaitersWhileTimeoutCleanupIsBlocked()
+    {
+        var time = new BlockingDisposeTimeProvider();
+        var loader = new FaultingBulkLoader();
+        IAsyncLoadingCache<int, int> cache = CacheBuilder
+            .Create<int, int>()
+            .MaximumSize(8)
+            .MaxConcurrentLoads(1)
+            .MaxPendingLoadKeys(2)
+            .MaximumBulkKeys(2)
+            .LoadTimeout(TimeSpan.FromSeconds(1))
+            .TimeProvider(time)
+            .BuildAsyncLoading(loader);
+
+        Task<IReadOnlyDictionary<int, int>> bulk = cache.GetAllAsync([1, 2]).AsTask();
+        await loader.Started.Task.WaitAsync(Watchdog);
+        Task<int> joined = cache.GetAsync(2).AsTask();
+        Task timeout = time.FireTimeoutAsync();
+        try
+        {
+            await time.DisposeEntered.Task.WaitAsync(Watchdog);
+            joined.IsCompleted.Should().BeFalse();
+
+            await cache.DisposeAsync().AsTask().WaitAsync(Watchdog);
+            joined
+                .IsCompleted.Should()
+                .BeTrue("claiming timeout does not mean promises are terminal");
+            await FluentActions
+                .Awaiting(() => joined)
+                .Should()
+                .ThrowExactlyAsync<ObjectDisposedException>();
+            await FluentActions
+                .Awaiting(() => bulk.WaitAsync(Watchdog))
+                .Should()
+                .ThrowExactlyAsync<ObjectDisposedException>();
+            timeout.IsCompleted.Should().BeFalse("shutdown cannot wait on timeout cleanup");
+        }
+        finally
+        {
+            time.ReleaseDispose.TrySetResult(null);
+            loader.Release.TrySetException(new InvalidOperationException("Late backend failure."));
+            try
+            {
+                await timeout.WaitAsync(Watchdog);
+                await loader.Returned.Task.WaitAsync(Watchdog);
+                foreach (Task pending in new Task[] { joined, bulk })
+                {
+                    try
+                    {
+                        await pending.WaitAsync(Watchdog);
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // Preserve shutdown when timeout/backend cleanup finishes later.
+                    }
+                }
+            }
+            finally
+            {
+                await cache.DisposeAsync();
+            }
+        }
+    }
+
+    [Test]
     public async Task BulkReadyReadFailureDoesNotReleaseBackendPermitEarly()
     {
         var expiry = new BlockingReadExpiry();

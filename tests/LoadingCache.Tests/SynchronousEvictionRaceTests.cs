@@ -167,6 +167,147 @@ public sealed class SynchronousEvictionRaceTests
     }
 
     [Test]
+    public async Task DisposeCompletesBulkWaitersWhileEvictionListenerIsBlocked()
+    {
+        var callback = new BlockingTestHook(Timeout);
+        var loader = new GatedBulkLoader();
+        var cache = CacheBuilder
+            .Create<int, int>()
+            .MaximumWeight(1)
+            .MaximumResidentCount(8)
+            .MaxConcurrentLoads(1)
+            .MaxPendingLoadKeys(4)
+            .MaximumBulkKeys(4)
+            .Weigher(static (_, _) => 2)
+            .EvictionListener(_ => callback.Invoke())
+            .BuildAsyncLoading(loader);
+
+        Task<IReadOnlyDictionary<int, int>> bulk = cache.GetAllAsync([1, 2]).AsTask();
+        Task<int> leader = cache.GetAsync(1).AsTask();
+        Task<int> joined = cache.GetAsync(2).AsTask();
+        loader.Result.SetResult(
+            new Dictionary<int, int>
+            {
+                [1] = 1,
+                [2] = 2,
+                [3] = 3,
+            }
+        );
+        try
+        {
+            await callback.Entered.WaitAsync(Timeout);
+            leader.IsCompleted.Should().BeFalse();
+            joined.IsCompleted.Should().BeFalse();
+
+            await cache.DisposeAsync().AsTask().WaitAsync(Timeout);
+
+            leader.IsCompleted.Should().BeTrue("shutdown must end pending shared promises");
+            joined.IsCompleted.Should().BeTrue("a nonleader shares the same bulk outcome");
+            await FluentActions
+                .Awaiting(() => leader)
+                .Should()
+                .ThrowExactlyAsync<ObjectDisposedException>();
+            await FluentActions
+                .Awaiting(() => joined)
+                .Should()
+                .ThrowExactlyAsync<ObjectDisposedException>();
+            await FluentActions
+                .Awaiting(() => bulk.WaitAsync(Timeout))
+                .Should()
+                .ThrowExactlyAsync<ObjectDisposedException>();
+            callback
+                .Returned.IsCompleted.Should()
+                .BeFalse("shutdown cannot wait for user callbacks");
+        }
+        finally
+        {
+            callback.Release();
+            try
+            {
+                foreach (Task pending in new Task[] { leader, joined, bulk })
+                {
+                    await ObserveShutdownAsync(pending);
+                }
+            }
+            finally
+            {
+                await cache.DisposeAsync();
+                await callback.DisposeAsync();
+            }
+        }
+
+        callback.TimedOut.Should().BeFalse();
+    }
+
+    [Test]
+    public async Task DisposeCompletesSyncBulkJoinerWhileEvictionListenerIsBlocked()
+    {
+        var backend = new BlockingTestHook(Timeout);
+        var callback = new BlockingTestHook(Timeout);
+        var cache = CacheBuilder
+            .Create<int, int>()
+            .MaximumWeight(1)
+            .MaximumResidentCount(8)
+            .MaxConcurrentLoads(1)
+            .MaxPendingLoadKeys(2)
+            .MaximumBulkKeys(2)
+            .Weigher(static (_, _) => 2)
+            .EvictionListener(_ => callback.Invoke())
+            .RecordStatistics()
+            .BuildLoading(new GatedSyncBulkLoader(backend));
+
+        Task<IReadOnlyDictionary<int, int>> bulk = Task.Factory.StartNew(
+            static state => ((ILoadingCache<int, int>)state!).GetAll([1, 2]),
+            cache,
+            CancellationToken.None,
+            TaskCreationOptions.DenyChildAttach,
+            TaskScheduler.Default
+        );
+        Task<int> joined = Task.FromResult(0);
+        try
+        {
+            await backend.Entered.WaitAsync(Timeout);
+            joined = Task.Factory.StartNew(
+                static state => ((ILoadingCache<int, int>)state!).Get(2),
+                cache,
+                CancellationToken.None,
+                TaskCreationOptions.DenyChildAttach,
+                TaskScheduler.Default
+            );
+            WaitForSyncJoin(cache);
+            backend.Release();
+            await callback.Entered.WaitAsync(Timeout);
+
+            await Task.Run(cache.Dispose).WaitAsync(Timeout);
+            await FluentActions
+                .Awaiting(() => joined.WaitAsync(Timeout))
+                .Should()
+                .ThrowExactlyAsync<ObjectDisposedException>();
+            callback.Returned.IsCompleted.Should().BeFalse();
+            bulk.IsCompleted.Should().BeFalse("the owner is still executing user callback code");
+        }
+        finally
+        {
+            backend.Release();
+            callback.Release();
+            try
+            {
+                await ObserveShutdownAsync(joined);
+                await ObserveShutdownAsync(bulk);
+            }
+            finally
+            {
+                cache.Dispose();
+                await callback.DisposeAsync();
+                await backend.DisposeAsync();
+            }
+        }
+
+        backend.TimedOut.Should().BeFalse();
+        callback.TimedOut.Should().BeFalse();
+    }
+
+    [Test]
     public void RuntimeShrinkDoesNotDropEvictionsAtNotificationCapacity()
     {
         var notifications = new ConcurrentQueue<int>();
@@ -216,6 +357,34 @@ public sealed class SynchronousEvictionRaceTests
         calls.Should().Be(1);
         cache.TryGet(2, out int value).Should().BeTrue();
         value.Should().Be(2);
+    }
+
+    private static void WaitForSyncJoin(ILoadingCache<int, int> cache) =>
+        SpinWait.SpinUntil(() => cache.Statistics.CoalescedWaiters == 1, Timeout).Should().BeTrue();
+
+    private static async Task ObserveShutdownAsync(Task pending)
+    {
+        try
+        {
+            await pending.WaitAsync(Timeout);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Only shutdown is an expected failure when releasing the controlled callbacks.
+        }
+    }
+
+    private sealed class GatedSyncBulkLoader(BlockingTestHook backend)
+        : IBulkSyncCacheLoader<int, int>
+    {
+        public int Load(int key) =>
+            throw new InvalidOperationException($"Unexpected single load {key}.");
+
+        public IReadOnlyDictionary<int, int> LoadAll(IReadOnlyCollection<int> keys)
+        {
+            backend.Invoke();
+            return new Dictionary<int, int> { [1] = 1, [2] = 2 };
+        }
     }
 
     private sealed class GatedBulkLoader : IBulkAsyncCacheLoader<int, int>

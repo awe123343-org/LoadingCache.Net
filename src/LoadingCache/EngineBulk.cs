@@ -892,7 +892,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
             RequestExpirationTimer();
             evictionScope.Dispatch();
-            CompleteBulkResults(group);
+            CompleteBulkResults(group, leaderValue);
             CompletePromise(
                 group.Owner,
                 static (owner, value) => owner.Completion.TrySetResult(value),
@@ -977,34 +977,71 @@ internal sealed partial class CacheEngine<TKey, TValue>
         ScheduleExpirationNodeLocked(entry, normalizedNow);
     }
 
-    private static void CompleteBulkResults(BulkGroup group)
+    private static void CompleteBulkResults(BulkGroup group, TValue leaderValue)
     {
-        if (Interlocked.Exchange(ref group.PromiseTerminal, 1) != 0)
+        // Resolve comparer-dependent lookups before taking the completion gate.
+        // The gate protects only bounded promise completion, never user callbacks,
+        // mapping cleanup, timer disposal, or reservation retirement.
+        KeyValuePair<TaskCompletionSource<TValue>, TValue>[] results = [];
+        if (group is BulkAsyncGroup asyncGroup)
         {
-            return;
-        }
-
-        if (group is not BulkAsyncGroup asyncGroup || asyncGroup.Prepared is not { } prepared)
-        {
-            return;
-        }
-
-        foreach (KeyValuePair<TKey, TaskCompletionSource<TValue>> pair in asyncGroup.Promises)
-        {
-            if (prepared.Values.TryGetValue(pair.Key, out TValue? value))
+            BulkPrepared prepared =
+                asyncGroup.Prepared
+                ?? throw new InvalidOperationException(
+                    "The bulk loading flight completed without a prepared result."
+                );
+            results = new KeyValuePair<TaskCompletionSource<TValue>, TValue>[
+                asyncGroup.Promises.Count
+            ];
+            int index = 0;
+            foreach (KeyValuePair<TKey, TaskCompletionSource<TValue>> pair in asyncGroup.Promises)
             {
-                pair.Value.TrySetResult(value);
+                results[index++] = new KeyValuePair<TaskCompletionSource<TValue>, TValue>(
+                    pair.Value,
+                    prepared.Values[pair.Key]
+                );
             }
+        }
+
+        lock (group.CompletionGate)
+        {
+            if (group.PromisesCompleted)
+            {
+                return;
+            }
+
+            foreach (KeyValuePair<TaskCompletionSource<TValue>, TValue> result in results)
+            {
+                result.Key.TrySetResult(result.Value);
+            }
+
+            switch (group.Owner)
+            {
+                case AsyncFlight owner:
+                    owner.Completion.TrySetResult(leaderValue);
+                    break;
+                case SyncFlight owner:
+                    owner.Set(leaderValue);
+                    break;
+            }
+
+            group.PromisesCompleted = true;
         }
     }
 
     private void FailBulkGroup(BulkGroup group, Exception exception)
     {
-        if (Interlocked.Exchange(ref group.PromiseTerminal, 1) != 0)
+        lock (group.CompletionGate)
         {
-            return;
+            if (group.PromisesCompleted)
+            {
+                return;
+            }
         }
 
+        // Never nest the group completion gate with the engine gate. The backend
+        // terminal claim still excludes competing backend outcomes; disposal may
+        // independently complete the group while this exact-owner cleanup runs.
         lock (_gate)
         {
             foreach (TKey key in group.OwnedKeys)
@@ -1021,22 +1058,48 @@ internal sealed partial class CacheEngine<TKey, TValue>
             }
         }
 
-        if (group is not BulkAsyncGroup asyncGroup)
-        {
-            return;
-        }
+        CompleteBulkFailure(group, exception);
+    }
 
-        foreach (TaskCompletionSource<TValue> promise in asyncGroup.Promises.Values)
+    private static void CompleteBulkFailure(BulkGroup group, Exception exception)
+    {
+        lock (group.CompletionGate)
         {
-            if (exception is OperationCanceledException canceled)
+            if (group.PromisesCompleted)
             {
-                promise.TrySetCanceled(GetCancellationToken(canceled));
+                return;
             }
-            else
+
+            if (group is BulkAsyncGroup asyncGroup)
             {
-                promise.TrySetException(exception);
-                _ = promise.Task.Exception;
+                foreach (TaskCompletionSource<TValue> promise in asyncGroup.Promises.Values)
+                {
+                    if (exception is OperationCanceledException canceled)
+                    {
+                        promise.TrySetCanceled(GetCancellationToken(canceled));
+                    }
+                    else
+                    {
+                        promise.TrySetException(exception);
+                        _ = promise.Task.Exception;
+                    }
+                }
             }
+
+            switch (group.Owner)
+            {
+                case AsyncFlight owner when exception is OperationCanceledException canceled:
+                    owner.Completion.TrySetCanceled(GetCancellationToken(canceled));
+                    break;
+                case AsyncFlight owner:
+                    owner.TrySetException(exception);
+                    break;
+                case SyncFlight owner:
+                    owner.Set(exception);
+                    break;
+            }
+
+            group.PromisesCompleted = true;
         }
     }
 
@@ -1171,18 +1234,12 @@ internal sealed partial class CacheEngine<TKey, TValue>
             return false;
         }
 
-        // A bulk owner is the sole terminal arbiter for all per-key promises.
-        // If another path already won, let that path finish its own result;
-        // the disposal loop must not overwrite it with ObjectDisposedException.
-        if (Interlocked.CompareExchange(ref flight.TerminalClaimed, 1, 0) != 0)
-        {
-            return true;
-        }
-
-        ObjectDisposedException exception = new(nameof(LoadingCache));
+        // Backend arbitration does not mean its promises are already terminal:
+        // a successful owner can still be inside a slow eviction callback.
+        // Disposal terminates any unfinished group without waiting for that code.
+        Interlocked.CompareExchange(ref flight.TerminalClaimed, 1, 0);
         Volatile.Write(ref flight.PublishRevoked, 1);
-        FailBulkGroup(group, exception);
-        flight.SetDisposed();
+        CompleteBulkFailure(group, new ObjectDisposedException(nameof(LoadingCache)));
         return true;
     }
 
@@ -1255,7 +1312,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
         internal long MutationSequence { get; } = mutationSequence;
         internal object MutationLedgerToken { get; } = mutationLedgerToken;
         internal BulkPrepared? Prepared;
-        internal int PromiseTerminal;
+        internal readonly object CompletionGate = new();
+        internal bool PromisesCompleted;
         internal int KeyReservationReleased;
         internal Flight Owner { get; set; } = null!;
 
