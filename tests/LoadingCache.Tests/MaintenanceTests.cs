@@ -875,27 +875,166 @@ public sealed class MaintenanceTests
     }
 
     [Test]
-    public async Task DefaultSchedulerDoesNotFlowTriggeringExecutionContext()
+    [Parallelizable]
+    public async Task DefaultSchedulerRearmsWithoutFlowingContextOrOverlappingDrains()
     {
-        TaskCompletionSource<string?> observed = NewCompletionSource<string?>();
-        using MaintenanceCoordinator coordinator = new(() =>
-        {
-            observed.TrySetResult(Context.Value);
-            return false;
-        });
+        TaskCompletionSource<bool>[] entered =
+        [
+            NewCompletionSource<bool>(),
+            NewCompletionSource<bool>(),
+        ];
+        TaskCompletionSource<bool>[] release =
+        [
+            NewCompletionSource<bool>(),
+            NewCompletionSource<bool>(),
+        ];
+        string?[] observedContexts = new string?[4];
+        int passes = 0;
+        int activeDrains = 0;
+        int overlappingDrains = 0;
+        using MaintenanceCoordinator coordinator = new(
+            () =>
+            {
+                if (Interlocked.Increment(ref activeDrains) != 1)
+                {
+                    Interlocked.Increment(ref overlappingDrains);
+                }
 
-        Context.Value = "request-context";
+                try
+                {
+                    int pass = Interlocked.Increment(ref passes) - 1;
+                    observedContexts[pass] = Context.Value;
+                    Context.Value = "drain-context";
+                    if (pass % 2 == 0)
+                    {
+                        entered[pass / 2].TrySetResult(true);
+                        release[pass / 2]
+                            .Task.WaitAsync(TestTimeout, CancellationToken.None)
+                            .GetAwaiter()
+                            .GetResult();
+                        return true;
+                    }
+
+                    return false;
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref activeDrains);
+                }
+            },
+            maxPassesPerInvocation: 1
+        );
+
         try
         {
-            coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
+            for (int round = 0; round < entered.Length; round++)
+            {
+                Context.Value = "request-context";
+                try
+                {
+                    coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
+                }
+                finally
+                {
+                    Context.Value = null;
+                }
+
+                await entered[round].Task.WaitAsync(TestTimeout);
+                coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
+                coordinator.CleanUp().Performed.Should().BeFalse();
+                Volatile.Read(ref activeDrains).Should().Be(1);
+                release[round].TrySetResult(true);
+                await WaitForCompletedDrainAsync(coordinator, (round + 1) * 2);
+                coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
+            }
+
+            passes.Should().Be(4);
+            overlappingDrains.Should().Be(0);
+            observedContexts.Should().OnlyContain(context => context == null);
+            MaintenanceStatistics statistics = coordinator.GetStatistics();
+            statistics.DrainPasses.Should().Be(4);
+            statistics.BudgetExhaustions.Should().Be(2);
+            statistics.SynchronousCleanUps.Should().Be(0);
+            statistics.ScheduleRejections.Should().Be(0);
+            statistics.DrainFaults.Should().Be(0);
         }
         finally
         {
-            Context.Value = null;
+            coordinator.Dispose();
+            foreach (TaskCompletionSource<bool> gate in release)
+            {
+                gate.TrySetResult(true);
+            }
+        }
+    }
+
+    [Test]
+    [Parallelizable]
+    public async Task DefaultSchedulerDoesNotRearmDisposedRunningDrain()
+    {
+        TaskCompletionSource<bool> entered = NewCompletionSource<bool>();
+        TaskCompletionSource<bool> release = NewCompletionSource<bool>();
+        int passes = 0;
+        using MaintenanceCoordinator coordinator = new(
+            () =>
+            {
+                Interlocked.Increment(ref passes);
+                entered.TrySetResult(true);
+                release
+                    .Task.WaitAsync(TestTimeout, CancellationToken.None)
+                    .GetAwaiter()
+                    .GetResult();
+                return true;
+            },
+            maxPassesPerInvocation: 1
+        );
+
+        try
+        {
+            coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
+            await entered.Task.WaitAsync(TestTimeout);
+            coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
+            coordinator.Dispose();
+            coordinator.Request().Should().Be(MaintenanceRequestResult.Disposed);
+            coordinator.CleanUp().Performed.Should().BeFalse();
+        }
+        finally
+        {
+            coordinator.Dispose();
+            release.TrySetResult(true);
         }
 
-        (await observed.Task.WaitAsync(TestTimeout)).Should().BeNull();
-        coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
+        await WaitForCompletedDrainAsync(coordinator, 1);
+        passes.Should().Be(1);
+        MaintenanceStatistics statistics = coordinator.GetStatistics();
+        statistics.State.Should().Be(MaintenanceCoordinatorState.Disposed);
+        statistics.DrainPasses.Should().Be(1);
+        statistics.BudgetExhaustions.Should().Be(0);
+        statistics.DrainFaults.Should().Be(0);
+    }
+
+    private static async Task WaitForCompletedDrainAsync(
+        MaintenanceCoordinator coordinator,
+        long expectedPasses
+    )
+    {
+        using CancellationTokenSource timeout = new(TestTimeout);
+        while (true)
+        {
+            MaintenanceStatistics statistics = coordinator.GetStatistics();
+            if (
+                statistics.DrainPasses >= expectedPasses
+                && statistics.State
+                    is MaintenanceCoordinatorState.Idle
+                        or MaintenanceCoordinatorState.Disposed
+            )
+            {
+                return;
+            }
+
+            timeout.Token.ThrowIfCancellationRequested();
+            await Task.Yield();
+        }
     }
 
     private static TaskCompletionSource<T> NewCompletionSource<T>() =>

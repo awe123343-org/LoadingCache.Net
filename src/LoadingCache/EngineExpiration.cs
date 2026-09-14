@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using LoadingCache.Expiration;
 
 namespace LoadingCache;
@@ -245,8 +247,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         long writeTicks = Volatile.Read(ref _expireAfterWriteTicks);
         if (
             writeTicks >= 0
-            && _timeProvider.GetElapsedTime(entry.WriteTimestamp, now)
-                >= TimeSpan.FromTicks(writeTicks)
+            && GetElapsedTime(entry.WriteTimestamp, now) >= TimeSpan.FromTicks(writeTicks)
         )
         {
             return true;
@@ -255,8 +256,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         long accessTicks = Volatile.Read(ref _expireAfterAccessTicks);
         if (
             accessTicks >= 0
-            && _timeProvider.GetElapsedTime(entry.AccessTimestamp, now)
-                >= TimeSpan.FromTicks(accessTicks)
+            && GetElapsedTime(entry.AccessTimestamp, now) >= TimeSpan.FromTicks(accessTicks)
         )
         {
             return true;
@@ -264,7 +264,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
         return _expiry is not null
             && entry.VariableDuration != TimeSpan.MaxValue
-            && _timeProvider.GetElapsedTime(entry.VariableTimestamp, now) >= entry.VariableDuration;
+            && GetElapsedTime(entry.VariableTimestamp, now) >= entry.VariableDuration;
     }
 
     private TimeSpan GetRemainingDuration(Entry entry, long now, ExpirationKind kind)
@@ -798,6 +798,12 @@ internal sealed partial class CacheEngine<TKey, TValue>
             entry.AccessTimestamp = now;
         }
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private TimeSpan GetElapsedTime(long start, long end) =>
+        ReferenceEquals(_timeProvider, TimeProvider.System)
+            ? Stopwatch.GetElapsedTime(start, end)
+            : _timeProvider.GetElapsedTime(start, end);
 
     private static void ValidateDuration(TimeSpan? duration, string parameterName)
     {

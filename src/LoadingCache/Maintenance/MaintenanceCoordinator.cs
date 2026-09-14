@@ -18,7 +18,7 @@ internal enum MaintenanceRequestResult
 /// It is always invoked outside the coordinator lock. The coordinator owns only scheduling state;
 /// it does not own the cache policy lock and does not call user callbacks.
 /// </remarks>
-internal sealed class MaintenanceCoordinator : IDisposable
+internal sealed class MaintenanceCoordinator : IDisposable, IThreadPoolWorkItem
 {
     private const int DefaultMaxPassesPerInvocation = 32;
 
@@ -224,6 +224,13 @@ internal sealed class MaintenanceCoordinator : IDisposable
     {
         try
         {
+            if (ReferenceEquals(_scheduler, ThreadPoolMaintenanceScheduler.Instance))
+            {
+                // Reuse the coordinator as the work item. Worker still claims the scheduled
+                // state, so stale callbacks and concurrent re-arms obey the same ownership gate.
+                return ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: true);
+            }
+
             if (ExecutionContext.IsFlowSuppressed())
             {
                 return _scheduler.TrySchedule(_workerCallback);
@@ -239,6 +246,8 @@ internal sealed class MaintenanceCoordinator : IDisposable
             return false;
         }
     }
+
+    void IThreadPoolWorkItem.Execute() => Worker();
 
     private void Worker()
     {

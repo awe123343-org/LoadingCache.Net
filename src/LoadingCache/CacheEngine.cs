@@ -948,7 +948,10 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         }
 
         evictionScope.Dispatch();
-        RequestExpirationTimer();
+        if (_expirationTimer is not null)
+        {
+            RequestExpirationTimer();
+        }
     }
 
     internal void PutTask(TKey key, Task<TValue> valueTask)
@@ -1112,9 +1115,9 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     {
         if (
             Volatile.Read(ref _disposed) != 0
+            || !_policy.HasPendingWrites
             || Monitor.IsEntered(_gate)
             || Monitor.IsEntered(_expirationTimerGate)
-            || !_policy.HasPendingWrites
         )
         {
             return;
