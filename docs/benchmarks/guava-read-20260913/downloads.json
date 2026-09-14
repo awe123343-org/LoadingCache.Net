@@ -1,0 +1,48 @@
+{
+  "retrievedUtc": "2026-09-14T01:21:27.842704+00:00",
+  "files": [
+    {
+      "url": "https://repo.maven.apache.org/maven2/com/google/guava/guava/33.7.1-jre/guava-33.7.1-jre.jar",
+      "path": "/private/tmp/loadingcache-guava-read-20260913/guava-33.7.1-jre.jar",
+      "sha256": "796d8e28ac64e83a47c4c5935a8fecc4682650a04bbdead738ef0f5a3a0e6c46",
+      "bytes": 3057607
+    },
+    {
+      "url": "https://repo.maven.apache.org/maven2/com/google/guava/failureaccess/1.0.3/failureaccess-1.0.3.jar",
+      "path": "/private/tmp/loadingcache-guava-read-20260913/failureaccess-1.0.3.jar",
+      "sha256": "cbfc3906b19b8f55dd7cfd6dfe0aa4532e834250d7f080bd8d211a3e246b59cb",
+      "bytes": 10763
+    },
+    {
+      "url": "https://api.github.com/repos/google/guava/git/ref/tags/v33.7.1",
+      "path": "/private/tmp/loadingcache-guava-read-20260913/guava-release.json",
+      "sha256": "aab7ec780163a3aea0831280b4576fa5bc82c5ba5912c68e9306cf9d06bba0ba",
+      "bytes": 335
+    },
+    {
+      "url": "https://raw.githubusercontent.com/google/guava/v33.7.1/guava/src/com/google/common/cache/CacheBuilder.java",
+      "path": "/private/tmp/loadingcache-guava-read-20260913/CacheBuilder.java",
+      "sha256": "e55ba8031d55462bae417661bc8ade714f78f85d5b31fa0b252adc190c573609",
+      "bytes": 52875
+    },
+    {
+      "url": "https://raw.githubusercontent.com/google/guava/v33.7.1/guava/src/com/google/common/cache/LocalCache.java",
+      "path": "/private/tmp/loadingcache-guava-read-20260913/LocalCache.java",
+      "sha256": "8206fa06325a6ddb4fbb8bc7b5531bcb3babd00bc28cdc86274daa5cb3b06be4",
+      "bytes": 153153
+    },
+    {
+      "url": "https://raw.githubusercontent.com/google/guava/v33.7.1/LICENSE",
+      "path": "/private/tmp/loadingcache-guava-read-20260913/LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "bytes": 11358
+    },
+    {
+      "url": "https://repo.maven.apache.org/maven2/com/google/errorprone/error_prone_annotations/2.50.0/error_prone_annotations-2.50.0.jar",
+      "path": "/private/tmp/loadingcache-guava-read-20260913/error_prone_annotations-2.50.0.jar",
+      "sha256": "4667724877f1d37a689202da191e23efa7657c62eef93ccdac406eccfe5cdd0a",
+      "bytes": 20252,
+      "use": "compile-only annotations, version from Guava v33.7.1 parent POM"
+    }
+  ]
+}

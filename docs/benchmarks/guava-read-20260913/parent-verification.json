@@ -1,0 +1,68 @@
+{
+  "status": "passed",
+  "verificationProcessExitCode": 0,
+  "verifiedUtc": "2026-09-14T01:47:32.604692+00:00",
+  "verificationMode": "Independent read-only data and hash replay; no build or timing workload executed. Only this evidence JSON is written.",
+  "command": [
+    "uv",
+    "run",
+    "--no-project",
+    "/Users/awe123343/.local/share/uv/python/cpython-3.14.0-macos-aarch64-none/bin/python3.14",
+    "-c",
+    "import collections, datetime, hashlib, json, math, sys\nfrom pathlib import Path\nrepo=Path.cwd(); base=repo/'docs/benchmarks/guava-read-20260913'; raw=base/'raw'\ndef read(p): return json.loads(Path(p).read_text())\ndef sha(p): return hashlib.sha256(Path(p).read_bytes()).hexdigest()\ndef require(v,message):\n    if not v: raise ValueError(message)\nrequire(sys.flags.optimize==0,'Python optimization must be disabled')\nm=read(raw/'commands.json'); summary=read(raw/'summary.json')\nrequire(m['status']==summary['status']=='passed','statuses')\nsnapshot=read(m['options']['snapshot']); frozen=Path(snapshot['root'])\nfor p,h in m['inputHashes'].items(): require(sha(p)==h,p)\nfor p,h in snapshot['files'].items():\n    require(sha(frozen/p)==h.lower(),p); require(sha(repo/p)==h.lower(),'current '+p)\nfor p,h in snapshot['binaries'].items(): require(sha(frozen/p)==h.lower(),p)\ndownloads=read(base/'downloads.json')['files']; probe=read(base/'probe-validation-final/manifest.json')\nfor item in downloads+probe['files']: require(sha(item['path'])==item['sha256'],item['path'])\nrequire(probe['compileWarnings']==0 and all(x['exitCode']==0 for x in probe['commands']),'compile/smoke')\nrequire((base/'probe-validation-final/compile.stderr.log').stat().st_size==0,'compile stderr')\nfields=('capacity','residents','pattern','workers','statistics')\ncases=[('default4',(1024,512,p,w,s)) for p in ('hot','cycle') for w in (1,4,10,20) for s in ('off','on')]\nfor w in (1,10): cases.extend([('default4',(1024,1,'hot',w,'off')),('default4',(16384,8192,'cycle',w,'off'))])\nfor residents,pattern,workers,stats in ((1,'hot',10,'off'),(1024,'hot',1,'off'),(1024,'hot',10,'off'),(1024,'cycle',10,'off'),(1024,'hot',10,'on'),(1024,'cycle',10,'on')):\n    cases.append(('single1',(1024,residents,pattern,workers,stats)))\nexpected={(profile,c,r,round_) for profile,c in cases for r in ('net8','net10','caffeine','guava') for round_ in (1,2)}\nidentities=set(); observed=collections.defaultdict(set); groups=collections.defaultdict(list)\ntotal=measured=misses=0; orders={1:[],2:[]}; previous_end=None\nfor e in m['commands']:\n    c=e['case']; rt=e['runtime']; profile=e['profile']; identity=(profile,tuple(c[k] for k in fields),rt,e['round'])\n    require(identity not in identities and identity in expected,'case identity'); identities.add(identity)\n    require(e['exitCode']==0 and e['validated'],'exit')\n    started=datetime.datetime.fromisoformat(e['startedUtc']).timestamp()\n    if previous_end is not None: require(started>=previous_end-.003,'timing overlap')\n    previous_end=started+e['elapsedSeconds']; orders[e['round']].append(identity[:-1])\n    raw_path=raw/Path(e['raw']).name; require(sha(raw_path)==e['rawSha256'],'raw SHA'); require(sha(raw/Path(e['log']).name)==e['logSha256'],'log SHA')\n    r=read(raw_path); observed[rt].add(r['runtime'])\n    require(r['runtime']=={'net8':'.NET 8.0.31','net10':'.NET 10.0.12','guava':'25.0.4.1+1-LTS','caffeine':'25.0.4.1+1-LTS'}[rt],'runtime')\n    for k in fields[:4]: require(r[k]==c[k],k)\n    require(r['statistics']==c['statistics'] or r['statistics'] is (c['statistics']=='on'),'statistics')\n    require(r['warmups']==3 and r['runs']==5 and r.get('durationMillis',r.get('durationMilliseconds'))==500 and len(r['samples'])==8,'protocol')\n    if rt.startswith('net'):\n        binary=Path(e['argv'][1]); require(binary.parent.name==rt+'.0','TFM')\n        require(sha(binary)==r['harnessAssemblySha256'].lower(),'harness SHA'); require(sha(binary.with_name('LoadingCache.dll'))==r['cacheAssemblySha256'].lower(),'core SHA')\n    else:\n        require(r['failure'] is None and r[rt+'JarSha256']==sha(m['options'][rt+'_jar']),'Java failure/JAR')\n        require(r[rt+'Version']=={'guava':'33.7.1-jre','caffeine':'3.2.4'}[rt],'version')\n        if rt=='guava': require(r['concurrencyLevel']==(4 if profile=='default4' else 1),'concurrencyLevel')\n    for i,s in enumerate(r['samples']):\n        total+=1; measured+=not s['warmup']; misses+=s['misses']\n        require(s['sampleIndex']==i and s['warmup']==(i<3),'sample index')\n        require(s['boundsPassed'] and s['residentCount']==c['residents'] and s['weightedSize']==c['residents'],'bounds')\n        require(s['misses']==s['missesDelta']==0,'misses')\n        require(len(s['workersOperations'])==c['workers'] and sum(s['workersOperations'])==s['operations'],'operation sum')\n        expected_checksum=0\n        for w,n in enumerate(s['workersOperations']):\n            require(n>0 and n%1024==0,'worker progress/chunks')\n            if c['pattern']=='hot': expected_checksum+=n\n            else:\n                cycles,left=divmod(n,c['residents']); expected_checksum+=cycles*c['residents']*(c['residents']+1)//2\n                expected_checksum+=sum(((w*17+k)&(c['residents']-1))+1 for k in range(left))\n        require(s['checksum']==expected_checksum,'checksum')\n        require(s['hitsDelta']==(s['operations'] if c['statistics']=='on' else 0),'stats delta')\n        require(s['wallSeconds']>=.5-1e-5 and s['cleanupSeconds']>=0,'clock')\n        if not s['warmup']: groups[identity[:-1]].append(s)\nrequire(identities==expected and len(expected)==208,'complete matrix')\nrequire(orders[2]==list(reversed(orders[1])),'reverse order')\nrequire(total==1664 and measured==1040,'samples')\nrequire(len(summary['rows'])==26,'summary rows')\nfor row in summary['rows']:\n    for rt in observed:\n        s=groups[(row['profile'],tuple(row[k] for k in fields),rt)]\n        cost=sum(x['wallSeconds'] for x in s)*1e9/sum(x['operations'] for x in s)\n        require(math.isclose(row[rt+'NsPerOp'],cost,rel_tol=1e-13),'summary aggregate')\ndirections={}\nmain=[x for x in summary['rows'] if x['profile']=='default4']\nfor rt in ('net8','net10'):\n    slower=[x for x in main if x[rt+'NsPerOp']>x['guavaNsPerOp']]\n    require(len(slower)==4,'four slower')\n    require({(x['capacity'],x['residents'],x['pattern'],x['workers'],x['statistics']) for x in slower}=={(1024,512,p,1,s) for p in ('hot','cycle') for s in ('off','on')},'slower identity')\n    directions[rt]={'lowerCostThanGuava':16,'higherCostThanGuava':4}\nrequire(all(x['caffeineNsPerOp']<min(x['net8NsPerOp'],x['net10NsPerOp']) for x in summary['rows']),'Caffeine lower all26')\ncurrent=next(x for x in summary['rows'] if x['profile']=='single1' and tuple(x[k] for k in fields)==(1024,1024,'hot',1,'off'))\nprior_dir=repo/'docs/benchmarks/read-followthrough-20260913/final-net10'; prior=read(prior_dir/'summary.json')\nold=next(x for x in prior['rows'] if tuple(x[k] for k in fields)==(1024,1024,'hot',1,'off'))\nold_manifest=read(prior_dir/'commands.json')\nold_entry=next(e for e in old_manifest['commands'] if e['runtime']=='dotnet' and tuple(e['case'][k] for k in fields)==(1024,1024,'hot',1,'off'))\nnew_entry=next(e for e in m['commands'] if e['runtime']=='net10' and e['profile']=='single1' and tuple(e['case'][k] for k in fields)==(1024,1024,'hot',1,'off'))\nold_raw=read(prior_dir/Path(old_entry['raw']).name); new_raw=read(raw/Path(new_entry['raw']).name)\nfor key in ('cacheAssemblySha256','harnessAssemblySha256'): require(old_raw[key]==new_raw[key],'cross-pass same binary')\nresult={'status':'passed','verifiedUtc':datetime.datetime.now(datetime.UTC).isoformat(),'verificationMode':'Independent read-only data and hash replay; no build or timing workload executed. Only this evidence JSON is written.','command':['uv','run','--no-project',*sys.orig_argv],'pythonOptimizationLevel':sys.flags.optimize,'processes':len(identities),'samplesIncludingWarmup':total,'measuredSamples':measured,'totalMisses':misses,'checks':{'completeUniqueMatrix':True,'checksumsAllSamples':True,'workerProgressAndOperationTotalsAllSamples':True,'statsAndResidentBoundsAllSamples':True,'minimumWallDurationAllSamples':True,'reverseOrder':True,'serialCommandTimestamps':True,'summaryAggregatesRecomputed':True,'currentAndFrozenSourceHashes':len(snapshot['files']),'frozenBinaryHashes':len(snapshot['binaries']),'runnerInputHashes':len(m['inputHashes']),'downloadArtifactHashes':len(downloads),'guavaBuildArtifactHashes':len(probe['files']),'guavaCompileExitCode':0,'guavaCompileWarnings':0},'observedRuntimes':{k:sorted(v) for k,v in observed.items()},'default4Directions':directions,'caffeineLowerCostThanBothDotnetRuntimes':26,'crossPassUncertainty':{'case':'capacity1024/residents1024/hot/workers1/stats-off/net10','previousNsPerOp':old['dotnetNsPerOp'],'currentNsPerOp':current['net10NsPerOp'],'harnessAndCacheBinaryHashesEqual':True,'attribution':'Unresolved; not evidence of a source regression, and no JIT, warmup, or host-noise cause has been established.'}}\noutput=base/'parent-verification.json'; require(not output.exists(),'evidence file already exists'); output.write_text(json.dumps(result,indent=2)+'\\n')\nprint(json.dumps({k:v for k,v in result.items() if k!='command'},indent=2))\n"
+  ],
+  "pythonOptimizationLevel": 0,
+  "processes": 208,
+  "samplesIncludingWarmup": 1664,
+  "measuredSamples": 1040,
+  "totalMisses": 0,
+  "checks": {
+    "completeUniqueMatrix": true,
+    "checksumsAllSamples": true,
+    "workerProgressAndOperationTotalsAllSamples": true,
+    "statsAndResidentBoundsAllSamples": true,
+    "minimumWallDurationAllSamples": true,
+    "reverseOrder": true,
+    "serialCommandTimestamps": true,
+    "summaryAggregatesRecomputed": true,
+    "currentAndFrozenSourceHashes": 72,
+    "frozenBinaryHashes": 36,
+    "runnerInputHashes": 35,
+    "downloadArtifactHashes": 7,
+    "guavaBuildArtifactHashes": 14,
+    "guavaCompileExitCode": 0,
+    "guavaCompileWarnings": 0
+  },
+  "observedRuntimes": {
+    "net8": [
+      ".NET 8.0.31"
+    ],
+    "net10": [
+      ".NET 10.0.12"
+    ],
+    "caffeine": [
+      "25.0.4.1+1-LTS"
+    ],
+    "guava": [
+      "25.0.4.1+1-LTS"
+    ]
+  },
+  "default4Directions": {
+    "net8": {
+      "lowerCostThanGuava": 16,
+      "higherCostThanGuava": 4
+    },
+    "net10": {
+      "lowerCostThanGuava": 16,
+      "higherCostThanGuava": 4
+    }
+  },
+  "caffeineLowerCostThanBothDotnetRuntimes": 26,
+  "crossPassUncertainty": {
+    "case": "capacity1024/residents1024/hot/workers1/stats-off/net10",
+    "previousNsPerOp": 29.476654011470508,
+    "currentNsPerOp": 42.23295445024735,
+    "harnessAndCacheBinaryHashesEqual": true,
+    "attribution": "Unresolved; not evidence of a source regression, and no JIT, warmup, or host-noise cause has been established."
+  }
+}

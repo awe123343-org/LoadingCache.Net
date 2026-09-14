@@ -1,0 +1,6 @@
+{
+  "archive": "evidence.tar.gz",
+  "sha256": "46385152943966da521453a5f008b995cf06b0f937a0347c747ff4757466f33b",
+  "scope": "Unmodified original tracked Guava evidence and the referenced thin-offer source/build snapshot. Historical archive, not current documentation. Compiled dependencies may need rebuilding from recorded commands.",
+  "members": 496
+}
