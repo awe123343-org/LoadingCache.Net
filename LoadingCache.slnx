@@ -13,7 +13,9 @@
         <Project Path="benchmarks/LoadingCache.Benchmarks/LoadingCache.Benchmarks.csproj" />
     </Folder>
     <Folder Name="/tools/">
+        <Project Path="tools/LoadingCache.HitProbe/LoadingCache.HitProbe.csproj" />
         <Project Path="tools/LoadingCache.LoadHarness/LoadingCache.LoadHarness.csproj" />
+        <Project Path="tools/LoadingCache.MemoryCacheProbe/LoadingCache.MemoryCacheProbe.csproj" />
         <Project Path="tools/LoadingCache.Simulator/LoadingCache.Simulator.csproj" />
     </Folder>
     <Folder Name="/tests/">

@@ -8,10 +8,5 @@
     <ItemGroup>
         <ProjectReference Include="../../src/LoadingCache/LoadingCache.csproj" />
         <PackageReference Include="Microsoft.Extensions.Caching.Memory" />
-        <PackageReference
-            Include="JetBrains.Annotations"
-            PrivateAssets="all"
-            IncludeAssets="compile"
-        />
     </ItemGroup>
 </Project>

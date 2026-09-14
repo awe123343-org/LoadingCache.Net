@@ -1,7 +1,10 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
+using JetBrains.Annotations;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace LoadingCache.HitProbe;
 
@@ -20,78 +23,17 @@ internal static class Program
         try
         {
             ProbeOptions options = ProbeOptions.Parse(args);
-            using ICache<int, int> cache = CreateCache(options);
-            int[] keys = Enumerable.Range(0, options.Residents).ToArray();
-
-            for (int key = 0; key < options.Residents; key++)
+            if (options.KeyMode == "preboxed")
             {
-                cache.Put(key, key + 1);
-            }
-
-            cache.CleanUp();
-            CacheSnapshot initial = Snapshot(cache);
-            if (
-                initial.ResidentCount != options.Residents
-                || initial.WeightedSize != options.Residents
-            )
-            {
-                throw new InvalidOperationException(
-                    $"Initial cache bounds failed: residents={initial.ResidentCount}, "
-                        + $"weightedSize={initial.WeightedSize}, expected={options.Residents}."
+                Run(
+                    options,
+                    Enumerable.Range(0, options.Residents).Select(key => (object)key).ToArray()
                 );
-            }
-
-            List<ProbeSample> samples = [];
-            using (ReaderCoordinator coordinator = new(cache, keys, options))
-            {
-                for (int sampleIndex = 0; sampleIndex < options.SampleCount; sampleIndex++)
-                {
-                    bool warmup = sampleIndex < options.Warmups;
-                    samples.Add(coordinator.RunSample(sampleIndex, warmup));
-                }
-            }
-
-            ProbeReport report = new(
-                SchemaVersion: 1,
-                Capacity: options.Capacity,
-                Residents: options.Residents,
-                Pattern: options.Pattern,
-                Workers: options.Workers,
-                Statistics: options.Statistics,
-                Warmups: options.Warmups,
-                Runs: options.Runs,
-                DurationMilliseconds: options.DurationMilliseconds,
-                Runtime: System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
-                OS: System.Runtime.InteropServices.RuntimeInformation.OSDescription,
-                Architecture: System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
-                Processors: Environment.ProcessorCount,
-                StopwatchFrequency: Stopwatch.Frequency,
-                ServerGc: System.Runtime.GCSettings.IsServerGC,
-                GcLatencyMode: System.Runtime.GCSettings.LatencyMode.ToString(),
-                RuntimeEnvironment: RuntimeEnvironmentSnapshot.Create(),
-                CacheAssemblySha256: Sha256(typeof(CacheBuilder).Assembly.Location),
-                HarnessAssemblySha256: Sha256(typeof(Program).Assembly.Location),
-                ManagedAllocationScope: "process managed allocation delta from before start release through finish barrier",
-                Samples: samples
-            );
-
-            string json = JsonSerializer.Serialize(report, JsonOptions);
-            if (options.OutputPath is null)
-            {
-                Console.WriteLine(json);
             }
             else
             {
-                string fullPath = Path.GetFullPath(options.OutputPath);
-                string? directory = Path.GetDirectoryName(fullPath);
-                if (directory is not null)
-                {
-                    Directory.CreateDirectory(directory);
-                }
-
-                File.WriteAllText(fullPath, json + Environment.NewLine);
+                Run(options, Enumerable.Range(0, options.Residents).ToArray());
             }
-
             return 0;
         }
         catch (Exception exception)
@@ -101,28 +43,203 @@ internal static class Program
         }
     }
 
-    private static ICache<int, int> CreateCache(ProbeOptions options)
+    private static void Run<TKey>(ProbeOptions options, TKey[] keys)
+        where TKey : notnull
     {
-        CacheBuilder<int, int> builder = CacheBuilder
-            .Create<int, int>()
+        if (options.Backend == "loadingcache")
+        {
+            using ICache<TKey, int> cache = CreateCache<TKey>(options);
+            Run<TKey, LoadingBackend<TKey>>(options, keys, new(cache));
+        }
+        else
+        {
+            using MemoryCache cache = new(
+                new MemoryCacheOptions
+                {
+                    SizeLimit = options.Capacity,
+                    TrackStatistics = options.Statistics,
+                }
+            );
+            Run<TKey, MemoryBackend<TKey>>(options, keys, new(cache, options));
+        }
+    }
+
+    private static void Run<TKey, TBackend>(ProbeOptions options, TKey[] keys, TBackend cache)
+        where TKey : notnull
+        where TBackend : struct, IBackend<TKey>
+    {
+        for (int key = 0; key < options.Residents; key++)
+        {
+            cache.Put(keys[key], key + 1);
+        }
+
+        cache.CleanUp();
+        CacheSnapshot initial = cache.Snapshot();
+        if (
+            initial.ResidentCount != options.Residents
+            || (initial.WeightedSize is { } initialWeight && initialWeight != options.Residents)
+        )
+        {
+            throw new InvalidOperationException(
+                $"Initial cache bounds failed: residents={initial.ResidentCount}, "
+                    + $"weightedSize={initial.WeightedSize}, expected={options.Residents}."
+            );
+        }
+
+        List<ProbeSample> samples = [];
+        using (ReaderCoordinator<TKey, TBackend> coordinator = new(cache, keys, options))
+        {
+            for (int sampleIndex = 0; sampleIndex < options.SampleCount; sampleIndex++)
+            {
+                bool warmup = sampleIndex < options.Warmups;
+                samples.Add(coordinator.RunSample(sampleIndex, warmup));
+            }
+        }
+
+        ProbeReport report = new(
+            SchemaVersion: 2,
+            Backend: options.Backend,
+            KeyMode: options.KeyMode,
+            Expiration: options.Expiration,
+            BackendAssemblySha256: Sha256(
+                options.Backend == "loadingcache"
+                    ? typeof(CacheBuilder).Assembly.Location
+                    : typeof(MemoryCache).Assembly.Location
+            ),
+            MemoryCacheVersion: typeof(MemoryCache).Assembly.GetName().Version!.ToString(),
+            MemoryCacheInformationalVersion: typeof(MemoryCache)
+                .Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!
+                .InformationalVersion,
+            Capacity: options.Capacity,
+            Residents: options.Residents,
+            Pattern: options.Pattern,
+            Workers: options.Workers,
+            Statistics: options.Statistics,
+            Warmups: options.Warmups,
+            Runs: options.Runs,
+            DurationMilliseconds: options.DurationMilliseconds,
+            Runtime: System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
+            Os: System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+            Architecture: System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
+            Processors: Environment.ProcessorCount,
+            StopwatchFrequency: Stopwatch.Frequency,
+            ServerGc: System.Runtime.GCSettings.IsServerGC,
+            GcLatencyMode: System.Runtime.GCSettings.LatencyMode.ToString(),
+            RuntimeEnvironment: RuntimeEnvironmentSnapshot.Create(),
+            CacheAssemblySha256: Sha256(typeof(CacheBuilder).Assembly.Location),
+            HarnessAssemblySha256: Sha256(typeof(Program).Assembly.Location),
+            ManagedAllocationScope: "process managed allocation delta from before start release through finish barrier",
+            Samples: samples
+        );
+
+        string json = JsonSerializer.Serialize(report, JsonOptions);
+        if (options.OutputPath is null)
+        {
+            Console.WriteLine(json);
+        }
+        else
+        {
+            string fullPath = Path.GetFullPath(options.OutputPath);
+            string? directory = Path.GetDirectoryName(fullPath);
+            if (directory is not null)
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            File.WriteAllText(fullPath, json + Environment.NewLine);
+        }
+    }
+
+    private static ICache<TKey, int> CreateCache<TKey>(ProbeOptions options)
+        where TKey : notnull
+    {
+        CacheBuilder<TKey, int> builder = CacheBuilder
+            .Create<TKey, int>()
             .MaximumSize(options.Capacity)
             .MaxConcurrentLoads(1);
         if (options.Statistics)
         {
             builder.RecordStatistics();
         }
+        if (options.Expiration is "write" or "both")
+            builder.ExpireAfterWrite(TimeSpan.FromHours(1));
+        if (options.Expiration is "access" or "both")
+            builder.ExpireAfterAccess(TimeSpan.FromHours(1));
 
         return builder.Build();
     }
 
-    private static CacheSnapshot Snapshot(ICache<int, int> cache)
+    private interface IBackend<TKey>
+        where TKey : notnull
     {
-        IEvictionPolicy<int, int> eviction =
-            cache.Policy.Eviction
-            ?? throw new InvalidOperationException(
-                "The size-bounded cache has no eviction policy."
-            );
-        return new(cache.EstimatedCount, eviction.WeightedSize);
+        bool TryGet(TKey key, out int value);
+        void Put(TKey key, int value);
+        void CleanUp();
+        CacheSnapshot Snapshot();
+        RequestStatistics Statistics { get; }
+        bool HasCleanup { get; }
+    }
+
+    private readonly struct LoadingBackend<TKey>(ICache<TKey, int> cache) : IBackend<TKey>
+        where TKey : notnull
+    {
+        public bool TryGet(TKey key, out int value) => cache.TryGet(key, out value);
+
+        public void Put(TKey key, int value) => cache.Put(key, value);
+
+        public void CleanUp() => cache.CleanUp();
+
+        public bool HasCleanup => true;
+
+        public CacheSnapshot Snapshot() =>
+            new(cache.EstimatedCount, cache.Policy.Eviction!.WeightedSize);
+
+        public RequestStatistics Statistics
+        {
+            get
+            {
+                CacheStatistics stats = cache.Statistics;
+                return new(stats.Hits, stats.Misses);
+            }
+        }
+    }
+
+    private readonly struct MemoryBackend<TKey> : IBackend<TKey>
+        where TKey : notnull
+    {
+        private readonly MemoryCache _cache;
+        private readonly MemoryCacheEntryOptions _entryOptions;
+
+        public MemoryBackend(MemoryCache cache, ProbeOptions options)
+        {
+            _cache = cache;
+            _entryOptions = new MemoryCacheEntryOptions().SetSize(1);
+            if (options.Expiration is "write" or "both")
+                _entryOptions.AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1);
+            if (options.Expiration is "access" or "both")
+                _entryOptions.SlidingExpiration = TimeSpan.FromHours(1);
+        }
+
+        public bool TryGet(TKey key, out int value) => _cache.TryGetValue(key, out value);
+
+        public void Put(TKey key, int value) => _cache.Set(key, value, _entryOptions);
+
+        // MemoryCache has no corresponding explicit maintenance API. No compaction is substituted.
+        public void CleanUp() { }
+
+        public bool HasCleanup => false;
+
+        public CacheSnapshot Snapshot() =>
+            new(_cache.Count, _cache.GetCurrentStatistics()?.CurrentEstimatedSize);
+
+        public RequestStatistics Statistics
+        {
+            get
+            {
+                MemoryCacheStatistics? stats = _cache.GetCurrentStatistics();
+                return new(stats?.TotalHits ?? 0, stats?.TotalMisses ?? 0);
+            }
+        }
     }
 
     private static long[] CollectionCounts() =>
@@ -191,10 +308,12 @@ internal static class Program
         return checked(count * (first + last) / 2 + count);
     }
 
-    private sealed class ReaderCoordinator : IDisposable
+    private sealed class ReaderCoordinator<TKey, TBackend> : IDisposable
+        where TKey : notnull
+        where TBackend : struct, IBackend<TKey>
     {
-        private readonly ICache<int, int> _cache;
-        private readonly int[] _keys;
+        private TBackend _cache;
+        private readonly TKey[] _keys;
         private readonly int _mask;
         private readonly int _workerCount;
         private readonly int _sampleCount;
@@ -203,14 +322,14 @@ internal static class Program
         private readonly Barrier _barrier;
         private readonly CountdownEvent _ready;
         private readonly ManualResetEventSlim _stop = new(false);
-        private readonly Thread[] _threads;
+        private readonly Thread?[] _threads;
         private readonly WorkerResult[] _results;
         private readonly object _failureGate = new();
         private Exception? _failure;
         private long _deadline;
         private bool _disposed;
 
-        internal ReaderCoordinator(ICache<int, int> cache, int[] keys, ProbeOptions options)
+        internal ReaderCoordinator(TBackend cache, TKey[] keys, ProbeOptions options)
         {
             _cache = cache;
             _keys = keys;
@@ -218,9 +337,7 @@ internal static class Program
             _workerCount = options.Workers;
             _sampleCount = options.SampleCount;
             _statistics = options.Statistics;
-            _durationTicks = checked(
-                (long)options.DurationMilliseconds * Stopwatch.Frequency / 1_000
-            );
+            _durationTicks = checked(options.DurationMilliseconds * Stopwatch.Frequency / 1_000);
             _barrier = new Barrier(_workerCount + 1);
             _ready = new CountdownEvent(_workerCount);
             _threads = new Thread[_workerCount];
@@ -231,12 +348,13 @@ internal static class Program
                 for (int worker = 0; worker < _workerCount; worker++)
                 {
                     int workerIndex = worker;
-                    _threads[worker] = new Thread(() => WorkerLoop(workerIndex))
+                    var thread = new Thread(() => WorkerLoop(workerIndex))
                     {
                         IsBackground = true,
                         Name = $"LoadingCache.HitProbe.reader{workerIndex}",
                     };
-                    _threads[worker].Start();
+                    _threads[worker] = thread;
+                    thread.Start();
                 }
 
                 if (!_ready.Wait(BarrierWatchdog))
@@ -262,7 +380,7 @@ internal static class Program
         {
             ThrowIfWorkerFailed();
 
-            CacheStatistics beforeStatistics = _cache.Statistics;
+            RequestStatistics beforeStatistics = _cache.Statistics;
             long allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
             long[] collectionsBefore = CollectionCounts();
             long wallStarted = Stopwatch.GetTimestamp();
@@ -286,7 +404,7 @@ internal static class Program
             long[] gcCollections = CollectionDelta(collectionsBefore);
             ThrowIfWorkerFailed();
 
-            CacheStatistics afterStatistics = _cache.Statistics;
+            RequestStatistics afterStatistics = _cache.Statistics;
             long operations = 0;
             long checksum = 0;
             long misses = 0;
@@ -346,12 +464,12 @@ internal static class Program
             long cleanupStarted = Stopwatch.GetTimestamp();
             _cache.CleanUp();
             long cleanupFinished = Stopwatch.GetTimestamp();
-            CacheSnapshot snapshot = Snapshot(_cache);
+            CacheSnapshot snapshot = _cache.Snapshot();
             bool boundsPassed =
                 snapshot.ResidentCount == _keys.Length
-                && snapshot.ResidentCount <= snapshot.WeightedSize
-                && snapshot.WeightedSize <= snapshot.ResidentCount
-                && snapshot.WeightedSize <= int.MaxValue;
+                && (
+                    snapshot.WeightedSize is null || snapshot.WeightedSize == snapshot.ResidentCount
+                );
             if (!boundsPassed)
             {
                 throw new InvalidOperationException(
@@ -361,9 +479,9 @@ internal static class Program
             }
 
             double wallSeconds = Stopwatch.GetElapsedTime(wallStarted, wallFinished).TotalSeconds;
-            double cleanupSeconds = Stopwatch
-                .GetElapsedTime(cleanupStarted, cleanupFinished)
-                .TotalSeconds;
+            double cleanupSeconds = _cache.HasCleanup
+                ? Stopwatch.GetElapsedTime(cleanupStarted, cleanupFinished).TotalSeconds
+                : 0;
 
             return new ProbeSample(
                 SampleIndex: sampleIndex,
@@ -426,7 +544,7 @@ internal static class Program
                     {
                         for (int offset = 0; offset < LookupChunkSize; offset++)
                         {
-                            int key = _keys[(int)(index & _mask)];
+                            TKey key = _keys[(int)(index & _mask)];
                             if (_cache.TryGet(key, out int value))
                             {
                                 checksum += value;
@@ -524,7 +642,7 @@ internal static class Program
 
         private void JoinThreads()
         {
-            foreach (Thread thread in _threads)
+            foreach (Thread? thread in _threads)
             {
                 if (thread is not null && thread.IsAlive && !thread.Join(BarrierWatchdog))
                 {
@@ -537,6 +655,9 @@ internal static class Program
     }
 
     private sealed record ProbeOptions(
+        string Backend,
+        string KeyMode,
+        string Expiration,
         int Capacity,
         int Residents,
         string Pattern,
@@ -577,7 +698,10 @@ internal static class Program
                 if (
                     option
                     is not (
-                        "--capacity"
+                        "--backend"
+                        or "--key-mode"
+                        or "--expiration"
+                        or "--capacity"
                         or "--residents"
                         or "--pattern"
                         or "--workers"
@@ -594,6 +718,15 @@ internal static class Program
             }
 
             int capacity = ReadInt(values, "--capacity", 1_024, 1, 1 << 26);
+            string backend = ReadString(values, "--backend", "loadingcache");
+            string keyMode = ReadString(values, "--key-mode", "native");
+            string expiration = ReadString(values, "--expiration", "none");
+            if (backend is not ("loadingcache" or "memorycache"))
+                throw new ArgumentException("--backend must be loadingcache or memorycache.");
+            if (keyMode is not ("native" or "preboxed"))
+                throw new ArgumentException("--key-mode must be native or preboxed.");
+            if (expiration is not ("none" or "write" or "access" or "both"))
+                throw new ArgumentException("--expiration must be none, write, access or both.");
             int residents = ReadInt(values, "--residents", capacity, 1, capacity);
             int workers = ReadInt(values, "--workers", 1, 1, 256);
             int warmups = ReadInt(values, "--warmups", 3, 0, 100);
@@ -618,13 +751,16 @@ internal static class Program
                 );
             }
 
-            long durationTicks = checked((long)durationMilliseconds * Stopwatch.Frequency / 1_000);
+            long durationTicks = checked(durationMilliseconds * Stopwatch.Frequency / 1_000);
             if (durationTicks <= 0)
             {
                 throw new ArgumentException("Duration must resolve to positive stopwatch ticks.");
             }
 
             return new(
+                backend,
+                keyMode,
+                expiration,
                 capacity,
                 residents,
                 pattern,
@@ -674,12 +810,21 @@ internal static class Program
         ) => values.TryGetValue(option, out string? value) ? value : fallback;
     }
 
-    private readonly record struct CacheSnapshot(long ResidentCount, long WeightedSize);
+    private readonly record struct CacheSnapshot(long ResidentCount, long? WeightedSize);
+
+    private readonly record struct RequestStatistics(long Hits, long Misses);
 
     private readonly record struct WorkerResult(long Operations, long Checksum, long Misses);
 
+    [UsedImplicitly(ImplicitUseTargetFlags.WithMembers)]
     private sealed record ProbeReport(
         int SchemaVersion,
+        string Backend,
+        string KeyMode,
+        string Expiration,
+        string BackendAssemblySha256,
+        string MemoryCacheVersion,
+        string MemoryCacheInformationalVersion,
         int Capacity,
         int Residents,
         string Pattern,
@@ -689,7 +834,7 @@ internal static class Program
         int Runs,
         int DurationMilliseconds,
         string Runtime,
-        string OS,
+        string Os,
         string Architecture,
         int Processors,
         long StopwatchFrequency,
@@ -702,6 +847,7 @@ internal static class Program
         IReadOnlyList<ProbeSample> Samples
     );
 
+    [UsedImplicitly(ImplicitUseTargetFlags.WithMembers)]
     private sealed record ProbeSample(
         int SampleIndex,
         bool Warmup,
@@ -714,7 +860,7 @@ internal static class Program
         long HitsDelta,
         long MissesDelta,
         long ResidentCount,
-        long WeightedSize,
+        long? WeightedSize,
         bool BoundsPassed,
         double ReadOnlyOperationsPerSecond,
         double OperationsPerSecondIncludingCleanup,
@@ -722,6 +868,7 @@ internal static class Program
         long[] GcCollections
     );
 
+    [UsedImplicitly(ImplicitUseTargetFlags.WithMembers)]
     private sealed record RuntimeEnvironmentSnapshot(
         string? DotnetTieredCompilation,
         string? DotnetTieredPgo,
