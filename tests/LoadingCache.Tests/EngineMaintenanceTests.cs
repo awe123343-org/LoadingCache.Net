@@ -10,6 +10,37 @@ public sealed class EngineMaintenanceTests
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
 
     [Test]
+    public void ReadMaintenanceIsDeferredUntilTheStripeIsFull()
+    {
+        ManualMaintenanceScheduler scheduler = new();
+        CacheEngine<int, string> engine = CreateEngine(
+            scheduler,
+            readStripeCount: 1,
+            readStripeCapacity: 1
+        );
+        using var cache = new Cache<int, string>(engine);
+
+        cache.Put(1, "ready");
+        scheduler.Pending.Should().Be(1);
+        scheduler.RunNext();
+        scheduler.Pending.Should().Be(0);
+
+        cache.TryGet(1, out string? first).Should().BeTrue();
+        first.Should().Be("ready");
+        engine.GetPolicyReadBufferStatistics().Queued.Should().Be(1);
+        scheduler.Pending.Should().Be(0);
+
+        cache.TryGet(1, out string? second).Should().BeTrue();
+        second.Should().Be("ready");
+        engine.GetPolicyReadBufferStatistics().DroppedFull.Should().Be(1);
+        scheduler.Pending.Should().Be(1);
+
+        scheduler.RunNext();
+        engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
+        engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
+    }
+
+    [Test]
     public async Task ReadyHitProgressesWhilePolicyMaintenanceIsPaused()
     {
         ManualMaintenanceScheduler scheduler = new();
@@ -84,11 +115,12 @@ public sealed class EngineMaintenanceTests
         CacheEngine<int, string> engine = CreateEngine(
             scheduler,
             readStripeCount: 1,
-            readStripeCapacity: 8
+            readStripeCapacity: 1
         );
         using var cache = new Cache<int, string>(engine);
 
         cache.Put(1, "ready");
+        cache.TryGet(1, out _).Should().BeTrue();
         cache.TryGet(1, out _).Should().BeTrue();
 
         ReadBufferStatistics buffer = engine.GetPolicyReadBufferStatistics();
@@ -129,9 +161,12 @@ public sealed class EngineMaintenanceTests
         {
             cache.Put(1, "ready");
 
-            // The hook keeps one event queued at every pass. The rejected
-            // re-arm must stop at the coordinator budget, leaving the signal
-            // clear while the one-slot stripe is still full.
+            // The first hit fills the one-slot stripe without scheduling. The
+            // second hit observes full backpressure and starts the rejected
+            // maintenance path. The hook then keeps one event queued at every
+            // pass; the rejected re-arm must stop at the coordinator budget,
+            // leaving the signal clear while the stripe is still full.
+            cache.TryGet(1, out _).Should().BeTrue();
             cache.TryGet(1, out _).Should().BeTrue();
             Volatile.Read(ref maintenanceCalls).Should().Be(32);
             engine.GetMaintenanceStatistics().BudgetExhaustions.Should().BeGreaterThan(0);
@@ -149,6 +184,47 @@ public sealed class EngineMaintenanceTests
             engine.GetMaintenanceStatistics().FallbackRequired.Should().BeFalse();
             engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
             engine.GetPolicyReadBufferStatistics().DroppedFull.Should().BeGreaterThan(0);
+        }
+    }
+
+    [Test]
+    public void AcceptedWorkerThatCannotRearmAllowsTheNextFullHitToRetry()
+    {
+        AcceptThenRejectMaintenanceScheduler scheduler = new();
+        RearmRetryState state = new();
+        var hooks = new LoadingCacheTestHooks
+        {
+            BeforeMaintenanceSignalClear = state.BeforeMaintenanceSignalClear,
+        };
+        CacheEngine<int, string> engine = CreateEngine(
+            scheduler,
+            hooks,
+            readStripeCount: 1,
+            readStripeCapacity: 1,
+            maintenanceMaxPasses: 1
+        );
+        Cache<int, string> cache = new(engine);
+        state.Attach(cache);
+        using (cache)
+        {
+            cache.Put(1, "ready");
+            cache.TryGet(1, out _).Should().BeTrue();
+            scheduler.Pending.Should().Be(1);
+
+            scheduler.RunNext();
+
+            state.MaintenanceCalls.Should().Be(1);
+            scheduler.ScheduleCalls.Should().Be(2);
+            engine.GetMaintenanceStatistics().FallbackRequired.Should().BeTrue();
+            engine.GetPolicyReadBufferStatistics().Queued.Should().Be(1);
+
+            state.StopFilling();
+            cache.TryGet(1, out _).Should().BeTrue();
+
+            // The first worker's rejected re-arm left the read signal set. A
+            // subsequent full stripe must claim a fresh maintenance request.
+            engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
+            engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
         }
     }
 
@@ -239,7 +315,7 @@ public sealed class EngineMaintenanceTests
 
         cache.TryGet(1, out _).Should().BeTrue();
         cache.Put(1, "after-set");
-        scheduler.RunNext();
+        cache.CleanUp();
         cache.Policy.Eviction.WeightedSize.Should().Be(1);
         cache.TryGet(1, out string? setValue).Should().BeTrue();
         setValue.Should().Be("after-set");
@@ -283,18 +359,20 @@ public sealed class EngineMaintenanceTests
     }
 
     private static CacheEngine<int, string> CreateEngine(
-        ManualMaintenanceScheduler? scheduler,
+        IMaintenanceScheduler? scheduler,
         LoadingCacheTestHooks? hooks = null,
-        int maximumSize = 8,
+        int maximumSize = 4,
         int readStripeCount = 4,
         int readStripeCapacity = 256,
         int maintenanceMaxPasses = 32
-    ) =>
-        new(
+    )
+    {
+        CacheEngine<int, string> engine = new(
             new CacheEngineOptions<int, string>
             {
                 MaximumSize = maximumSize,
                 MaxConcurrentLoads = 4,
+                RecordStatistics = true,
                 TestHooks = hooks,
                 MaintenanceScheduler = scheduler,
                 MaintenanceMaxPasses = maintenanceMaxPasses,
@@ -302,6 +380,13 @@ public sealed class EngineMaintenanceTests
                 MaintenanceReadStripeCapacity = readStripeCapacity,
             }
         );
+
+        // These tests deliberately pause write maintenance, which also delays lazy sketch
+        // initialization. A supported policy resize activates read recording before the pause;
+        // cold-start bypass and its activation boundary have separate regression coverage.
+        engine.Policy.Eviction!.SetMaximum(maximumSize);
+        return engine;
+    }
 
     private sealed class ManualMaintenanceScheduler : IMaintenanceScheduler
     {
@@ -328,6 +413,54 @@ public sealed class EngineMaintenanceTests
         internal void RunNext()
         {
             _callbacks.Dequeue()();
+        }
+    }
+
+    private sealed class AcceptThenRejectMaintenanceScheduler : IMaintenanceScheduler
+    {
+        private readonly Queue<Action> _callbacks = new();
+
+        internal int ScheduleCalls { get; private set; }
+
+        internal int Pending => _callbacks.Count;
+
+        public bool TrySchedule(Action callback)
+        {
+            ScheduleCalls++;
+            if (ScheduleCalls > 1)
+            {
+                return false;
+            }
+
+            _callbacks.Enqueue(callback);
+            return true;
+        }
+
+        internal void RunNext()
+        {
+            _callbacks.Dequeue()();
+        }
+    }
+
+    private sealed class RearmRetryState
+    {
+        private Cache<int, string>? _cache;
+        private int _keepFilling = 1;
+        private int _maintenanceCalls;
+
+        internal int MaintenanceCalls => Volatile.Read(ref _maintenanceCalls);
+
+        internal void Attach(Cache<int, string> cache) => _cache = cache;
+
+        internal void StopFilling() => Volatile.Write(ref _keepFilling, 0);
+
+        internal void BeforeMaintenanceSignalClear()
+        {
+            Interlocked.Increment(ref _maintenanceCalls);
+            if (Volatile.Read(ref _keepFilling) != 0 && !_cache!.TryGet(1, out _))
+            {
+                throw new InvalidOperationException("The maintenance fill hit was not ready.");
+            }
         }
     }
 }

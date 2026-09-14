@@ -109,7 +109,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             listenerDrops,
             exposeCounters ? counters[CacheCounterKind.ListenerFailures] : 0,
             SaturatingAdd(readBuffer.Queued, writeBuffer.Queued),
-            exposeCounters ? SaturatingAdd(readBuffer.DroppedFull, readBuffer.DroppedShutdown) : 0,
+            exposeCounters ? readBuffer.Dropped : 0,
             exposeCounters ? maintenance.ScheduleRejections : 0,
             exposeCounters ? maintenance.DrainFaults : 0,
             writeBuffer.Queued,
@@ -404,6 +404,15 @@ internal sealed partial class CacheEngine<TKey, TValue>
             return;
         }
 
+        QueueReplacementNotificationLocked(
+            flight.Key,
+            previousSnapshot.Value,
+            previousSnapshot.Weight
+        );
+    }
+
+    private void QueueReplacementNotificationLocked(TKey key, TValue value, long weight)
+    {
         RecordRemovalCounter(RemovalCause.Replaced);
         if (_listenerDispatcher is null)
         {
@@ -411,10 +420,10 @@ internal sealed partial class CacheEngine<TKey, TValue>
         }
 
         var notification = new RemovalNotification<TKey, TValue>(
-            flight.Key,
-            previousSnapshot.Value,
+            key,
+            value,
             RemovalCause.Replaced,
-            previousSnapshot.Weight
+            weight
         );
         QueueListenerEventLocked(new ListenerEvent(notification, IsEviction: false));
     }

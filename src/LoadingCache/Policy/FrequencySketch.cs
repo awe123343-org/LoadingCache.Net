@@ -29,6 +29,8 @@ internal sealed class FrequencySketch
 
     internal int Capacity => _table?.Length ?? 0;
 
+    internal bool IsInitialized => Volatile.Read(ref _table) is not null;
+
     internal long SampleSize { get; private set; }
 
     internal long SampleCount { get; private set; }
@@ -50,10 +52,11 @@ internal sealed class FrequencySketch
             return;
         }
 
-        _table = new ulong[tableLength];
+        ulong[] table = new ulong[tableLength];
         _blockMask = (tableLength >> 3) - 1;
         SampleSize = sampleSize;
         SampleCount = 0;
+        Volatile.Write(ref _table, table);
     }
 
     internal void ResetSampleCount()

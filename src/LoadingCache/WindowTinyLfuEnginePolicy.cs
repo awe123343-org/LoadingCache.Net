@@ -23,6 +23,8 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
     private readonly Func<bool> _requestMaintenance;
     private readonly Action? _beforeMaintenance;
     private readonly Action? _beforeMaintenanceSignalClear;
+    private readonly bool _coldStartEnabled;
+    private readonly Action<EngineEntryToken> _accessConsumer;
     private readonly StripedReadBuffer<EngineEntryToken> _pendingAccesses;
     private readonly BoundedWriteBuffer<PolicyWriteEvent> _pendingWrites;
     private const int MaximumReadDrainPerPass = 256;
@@ -44,25 +46,32 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
         int readStripeCount,
         int readStripeCapacity,
         int writeBufferCapacity = 256,
-        object? coordinationGate = null
+        object? coordinationGate = null,
+        bool enableColdStart = false,
+        bool recordReadStatistics = true
     )
     {
         Maximum = maximum;
         _maximumResidentCount = maximumResidentCount;
         _policyGate = coordinationGate ?? new object();
-        _policy = CreatePolicy();
         _evicted = evicted;
         _requestMaintenance = requestMaintenance;
         _beforeMaintenance = beforeMaintenance;
         _beforeMaintenanceSignalClear = beforeMaintenanceSignalClear;
+        _coldStartEnabled = enableColdStart;
+        _accessConsumer = ConsumeAccess;
+        _policy = CreatePolicy();
         _pendingAccesses = new StripedReadBuffer<EngineEntryToken>(
             readStripeCount,
-            readStripeCapacity
+            readStripeCapacity,
+            recordReadStatistics
         );
         _pendingWrites = new BoundedWriteBuffer<PolicyWriteEvent>(writeBufferCapacity, _policyGate);
     }
 
     public long Maximum { get; private set; }
+
+    internal bool IsSketchInitialized => Volatile.Read(ref _policy).IsSketchInitialized;
 
     public int ResidentCount
     {
@@ -141,13 +150,23 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
             return;
         }
 
-        // A full stripe is allowed to drop this best-effort observation, but
-        // it must not suppress recovery when a rejected scheduler left the
-        // signal clear and an older event is still queued.
-        _pendingAccesses.TryEnqueue(token);
+        if (_coldStartEnabled && !Volatile.Read(ref _policy).IsSketchInitialized)
+        {
+            return;
+        }
 
-        // One signal covers the current bounded batch.  Producers do not take
-        // the policy lock or ask the coordinator on every resident hit.
+        // A resident hit only needs to publish a best-effort policy observation. Keep the common
+        // accepted path unscheduled; a later write/explicit cleanup will drain it. A full stripe
+        // is the bounded backpressure signal that asks the maintenance coordinator for a worker.
+        // This mirrors Caffeine's delayable read-buffer scheduling without dropping the signal
+        // recovery path when a previously requested worker was rejected.
+        if (_pendingAccesses.TryOffer(token) != ReadBufferOfferResult.Full)
+        {
+            return;
+        }
+
+        // One signal covers the current bounded batch. Producers do not take the policy lock or
+        // ask the coordinator on every resident hit.
         if (
             Volatile.Read(ref _maintenanceSignal) != 0
             || Interlocked.CompareExchange(ref _maintenanceSignal, 1, 0) != 0
@@ -256,7 +275,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
             }
 
             _nodes.Clear();
-            _policy = CreatePolicy();
+            Volatile.Write(ref _policy, CreatePolicy());
             _evictionPending = false;
             UpdateWriteMaintenanceSignalLocked();
             UpdateMaintenanceSignalLocked();
@@ -308,6 +327,14 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
         _pendingWrites.Queued != 0
         && Volatile.Read(ref _writeMaintenanceSignal) == 0
         && Interlocked.CompareExchange(ref _writeMaintenanceSignal, 1, 0) == 0;
+
+    public void ResetReadMaintenanceSignalAfterFallback()
+    {
+        lock (_policyGate)
+        {
+            Volatile.Write(ref _maintenanceSignal, 0);
+        }
+    }
 
     public WriteBufferStatistics GetWriteBufferStatistics() => _pendingWrites.GetStatistics();
 
@@ -406,7 +433,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
                 }
             }
 
-            _policy = CreatePolicy();
+            Volatile.Write(ref _policy, CreatePolicy());
             _nodes.Clear();
             Volatile.Write(ref _maintenanceSignal, 0);
             Volatile.Write(ref _writeMaintenanceSignal, 0);
@@ -604,22 +631,12 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
 
     private void DrainAccessesLocked(int budget)
     {
-        int drained = 0;
-        while (drained < budget && _pendingAccesses.TryRead(out EngineEntryToken token))
-        {
-            PolicyNode<object>? node = token.Node;
-            if (node is not null && node.IsAlive)
-            {
-                _policy.RecordAccess(node);
-            }
-
-            drained++;
-        }
+        _pendingAccesses.DrainTo(_accessConsumer, budget);
     }
 
     private bool UpdateMaintenanceSignalLocked()
     {
-        if (_pendingAccesses.GetStatistics().Queued != 0)
+        if (_pendingAccesses.HasPublished)
         {
             Volatile.Write(ref _maintenanceSignal, 1);
             return true;
@@ -629,7 +646,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
         // this handoff either observes the cleared signal and requests a worker
         // or is observed by this second check and keeps the worker alive.
         Volatile.Write(ref _maintenanceSignal, 0);
-        if (_pendingAccesses.GetStatistics().Queued == 0)
+        if (!_pendingAccesses.HasPublished)
         {
             return false;
         }
@@ -655,8 +672,18 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
         return new WindowTinyLfuPolicy<object>(
             Maximum,
             seed: _policySeed,
-            maximumCount: _maximumResidentCount
+            maximumCount: _maximumResidentCount,
+            lazySketch: _coldStartEnabled
         );
+    }
+
+    private void ConsumeAccess(EngineEntryToken token)
+    {
+        PolicyNode<object>? node = token.Node;
+        if (node is not null && node.IsAlive)
+        {
+            _policy.RecordAccess(node);
+        }
     }
 
     private static uint CreatePolicySeed()

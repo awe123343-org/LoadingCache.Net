@@ -22,5 +22,6 @@
         <InternalsVisibleTo Include="LoadingCache.Tests" />
         <InternalsVisibleTo Include="LoadingCache.StressTests" />
         <InternalsVisibleTo Include="LoadingCache.Simulator" />
+        <InternalsVisibleTo Include="LoadingCache.ReadProbe" />
     </ItemGroup>
 </Project>

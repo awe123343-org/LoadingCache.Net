@@ -155,8 +155,9 @@ public sealed class TimeoutEngineTests
         (await second.WaitAsync(Watchdog, CancellationToken.None)).Should().Be("shared");
     }
 
-    [Test]
-    public async Task ClaimedRefreshMaintenanceFailureRollsBackAndCanRetry()
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task ClaimedRefreshMaintenanceFailureRollsBackAndCanRetry(bool automaticRefresh)
     {
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
         var reloadEntered = NewSignal();
@@ -168,7 +169,7 @@ public sealed class TimeoutEngineTests
             {
                 MaximumSize = 4,
                 MaxConcurrentLoads = 2,
-                RefreshAfterWrite = TimeSpan.FromSeconds(1),
+                RefreshAfterWrite = automaticRefresh ? TimeSpan.FromSeconds(1) : null,
                 TimeProvider = clock,
                 Policy = policy,
             }
@@ -189,6 +190,7 @@ public sealed class TimeoutEngineTests
         );
 
         (await cache.GetAsync(1).AsTask().WaitAsync(Watchdog)).Should().Be("old");
+        cache.TryGetTask(1, out Task<string>? oldTask).Should().BeTrue();
         clock.Advance(TimeSpan.FromSeconds(1));
 
         Task<string> failedRefresh = cache.RefreshAsync(1).AsTask();
@@ -202,11 +204,17 @@ public sealed class TimeoutEngineTests
             .ThrowExactlyAsync<ControlledRefreshFailureException>();
         cache.TryGet(1, out string? oldValue).Should().BeTrue();
         oldValue.Should().Be("old");
+        cache.TryGetTask(1, out Task<string>? rolledBackTask).Should().BeTrue();
+        rolledBackTask.Should().BeSameAs(oldTask);
+        (await rolledBackTask!).Should().Be("old");
 
         Task<string> retry = cache.RefreshAsync(1).AsTask();
         (await retry.WaitAsync(Watchdog)).Should().Be("retry");
         cache.TryGet(1, out string? retriedValue).Should().BeTrue();
         retriedValue.Should().Be("retry");
+        cache.TryGetTask(1, out Task<string>? retriedTask).Should().BeTrue();
+        retriedTask.Should().NotBeSameAs(oldTask);
+        (await retriedTask!).Should().Be("retry");
         Volatile.Read(ref reloads).Should().Be(2);
     }
 

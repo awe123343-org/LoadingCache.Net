@@ -3,6 +3,10 @@ namespace LoadingCache.Maintenance;
 /// <summary>
 /// A point-in-time snapshot of a bounded striped read transport.
 /// </summary>
+/// <remarks>
+/// Cumulative counters remain zero when recording is disabled. The queued gauge and shutdown
+/// state are always available and do not depend on counter recording.
+/// </remarks>
 internal readonly struct ReadBufferStatistics
 {
     internal ReadBufferStatistics(
@@ -11,7 +15,8 @@ internal readonly struct ReadBufferStatistics
         long enqueued,
         long dequeued,
         long droppedFull,
-        long droppedShutdown
+        long droppedShutdown,
+        long droppedFailed = 0
     )
     {
         IsDisposed = isDisposed;
@@ -20,6 +25,7 @@ internal readonly struct ReadBufferStatistics
         Dequeued = dequeued;
         DroppedFull = droppedFull;
         DroppedShutdown = droppedShutdown;
+        DroppedFailed = droppedFailed;
     }
 
     internal bool IsDisposed { get; }
@@ -34,7 +40,13 @@ internal readonly struct ReadBufferStatistics
 
     internal long DroppedShutdown { get; }
 
-    internal long Dropped => SaturatingAdd(DroppedFull, DroppedShutdown);
+    /// <summary>
+    /// Gets the number of events rejected by a bounded CAS reservation failure.
+    /// </summary>
+    internal long DroppedFailed { get; }
+
+    internal long Dropped =>
+        SaturatingAdd(SaturatingAdd(DroppedFull, DroppedFailed), DroppedShutdown);
 
     private static long SaturatingAdd(long left, long right) =>
         right >= long.MaxValue - left ? long.MaxValue : left + right;

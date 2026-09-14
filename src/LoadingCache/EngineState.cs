@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using LoadingCache.ReferenceStorage;
 
@@ -219,6 +220,13 @@ internal sealed partial class CacheEngine<TKey, TValue>
         internal bool PolicyDetached;
         internal bool RemovalNotified;
         private TValue _strongValue = default!;
+
+        // Reference, Int32, and Int64 have BCL volatile primitives. Other value types retain
+        // the entry lock instead of adding a per-Put box or assuming struct copies are atomic.
+        internal static bool SupportsAtomicStrongValue =>
+            !typeof(TValue).IsValueType
+            || typeof(TValue) == typeof(int)
+            || typeof(TValue) == typeof(long);
         internal ReferenceValue<TValue>? WeakValue;
         internal long Weight;
         internal long WriteTimestamp;
@@ -266,9 +274,11 @@ internal sealed partial class CacheEngine<TKey, TValue>
             long weight,
             TimeSpan? variableDuration = null,
             bool weakKey = false,
-            bool weakValue = false
-        ) =>
-            new(key, epoch, generation, weakKey)
+            bool weakValue = false,
+            bool createSharedTask = true
+        )
+        {
+            var entry = new Entry(key, epoch, generation, weakKey)
             {
                 IsReady = true,
                 Weight = weight,
@@ -278,10 +288,11 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 VariableRevision = 1,
                 PublicationRevision = 1,
                 VariableDuration = variableDuration ?? TimeSpan.MaxValue,
-                WeakValue = weakValue ? ReferenceValue<TValue>.Weak(value) : null,
-                _strongValue = weakValue ? default! : value,
-                SharedTask = weakValue ? null : Task.FromResult(value),
+                SharedTask = !weakValue && createSharedTask ? Task.FromResult(value) : null,
             };
+            entry.SetValue(value, weakValue);
+            return entry;
+        }
 
         internal bool TryGetKey([MaybeNullWhen(false)] out TKey key)
         {
@@ -315,9 +326,72 @@ internal sealed partial class CacheEngine<TKey, TValue>
             }
             else
             {
-                _strongValue = value;
+                if (!typeof(TValue).IsValueType)
+                {
+                    Volatile.Write(ref Unsafe.As<TValue, object>(ref _strongValue), value);
+                }
+                else if (typeof(TValue) == typeof(int))
+                {
+                    Volatile.Write(
+                        ref Unsafe.As<TValue, int>(ref _strongValue),
+                        Unsafe.As<TValue, int>(ref value)
+                    );
+                }
+                else if (typeof(TValue) == typeof(long))
+                {
+                    Volatile.Write(
+                        ref Unsafe.As<TValue, long>(ref _strongValue),
+                        Unsafe.As<TValue, long>(ref value)
+                    );
+                }
+                else
+                {
+                    _strongValue = value;
+                }
                 WeakValue = null;
             }
+        }
+
+        internal TValue ReadStrongValueAtomic()
+        {
+            if (!typeof(TValue).IsValueType)
+            {
+                return (TValue)Volatile.Read(ref Unsafe.As<TValue, object>(ref _strongValue));
+            }
+
+            if (typeof(TValue) == typeof(int))
+            {
+                int value = Volatile.Read(ref Unsafe.As<TValue, int>(ref _strongValue));
+                return Unsafe.As<int, TValue>(ref value);
+            }
+
+            if (typeof(TValue) == typeof(long))
+            {
+                long value = Volatile.Read(ref Unsafe.As<TValue, long>(ref _strongValue));
+                return Unsafe.As<long, TValue>(ref value);
+            }
+
+            throw new InvalidOperationException("The value type requires a locked resident read.");
+        }
+
+        /// <summary>
+        /// Returns the stable task view for a strong resident value, creating it only when an
+        /// asynchronous consumer actually asks for one. Synchronous Put operations otherwise do
+        /// not need to allocate a completed Task for every value replacement.
+        /// </summary>
+        internal Task<TValue>? GetOrCreateSharedTaskLocked()
+        {
+            if (SharedTask is not null || WeakValue is not null)
+            {
+                return SharedTask;
+            }
+
+            if (!Volatile.Read(ref IsReady) || !TryGetValue(out TValue? value))
+            {
+                return null;
+            }
+
+            return SharedTask = Task.FromResult(value);
         }
 
         internal bool IsValueCollected => WeakValue?.IsCollected == true;

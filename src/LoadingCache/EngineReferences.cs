@@ -59,7 +59,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
                     Volatile.Read(ref entry.IsReady)
                     && !Volatile.Read(ref entry.PolicyDetached)
                     && entry.TryGetKey(out _)
-                    && entry.TryGetValue(out _)
+                    && !entry.IsValueCollected
                 )
                 {
                     count++;

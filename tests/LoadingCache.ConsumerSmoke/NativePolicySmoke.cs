@@ -4,6 +4,10 @@ internal static class NativePolicySmoke
 {
     internal static async Task RunAsync()
     {
+        ResidentPublicationSmoke(11, 22);
+        ResidentPublicationSmoke(0x12345678abcdef01L, 0x23456789abcdef12L);
+        ResidentPublicationSmoke(new ReferenceToken(1), new ReferenceToken(2));
+        ResidentPublicationSmoke((11L, 22L), (33L, 44L));
         WeakReferenceSmoke();
         await BulkLoadingSmokeAsync();
         await ListenerSmokeAsync();
@@ -61,6 +65,28 @@ internal static class NativePolicySmoke
         Require(
             await disposed.Task.WaitAsync(TimeSpan.FromSeconds(10)),
             "automatic owned-value disposal"
+        );
+    }
+
+    private static void ResidentPublicationSmoke<TValue>(TValue first, TValue second)
+        where TValue : notnull
+    {
+        using var cache = CacheBuilder
+            .Create<int, TValue>()
+            .MaximumSize(4)
+            .MaxConcurrentLoads(2)
+            .Build();
+        cache.Put(1, first);
+        Require(
+            cache.TryGet(1, out TValue? before)
+                && EqualityComparer<TValue>.Default.Equals(before, first),
+            "resident initial publication"
+        );
+        cache.Put(1, second);
+        Require(
+            cache.TryGet(1, out TValue? after)
+                && EqualityComparer<TValue>.Default.Equals(after, second),
+            "resident replacement publication"
         );
     }
 

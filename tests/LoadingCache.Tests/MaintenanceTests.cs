@@ -60,6 +60,255 @@ public sealed class MaintenanceTests
     }
 
     [Test]
+    public void ReadBufferSupportsBatchDrainAndPublishedProbe()
+    {
+        using StripedReadBuffer<int> buffer = new(1, 4);
+        buffer.HasPublished.Should().BeFalse();
+
+        buffer.TryEnqueue(1).Should().BeTrue();
+        buffer.TryEnqueue(2).Should().BeTrue();
+        buffer.TryEnqueue(3).Should().BeTrue();
+        buffer.HasPublished.Should().BeTrue();
+
+        List<int> observed = [];
+        buffer.DrainTo(observed.Add, budget: 2).Should().Be(2);
+        observed.Should().Equal(1, 2);
+        buffer.HasPublished.Should().BeTrue();
+
+        buffer.DrainTo(observed.Add, budget: 2).Should().Be(1);
+        observed.Should().Equal(1, 2, 3);
+        buffer.HasPublished.Should().BeFalse();
+    }
+
+    [Test]
+    public void ReadBufferUsesPublicationSequenceForNullValues()
+    {
+        using StripedReadBuffer<string?> buffer = new(1, 2);
+
+        buffer.TryEnqueue(null).Should().BeTrue();
+        buffer.TryRead(out string? observed).Should().BeTrue();
+        observed.Should().BeNull();
+        buffer.TryRead(out _).Should().BeFalse();
+        buffer.GetStatistics().Queued.Should().Be(0);
+    }
+
+    [Test]
+    public async Task ReadBufferStopsAtAnUnpublishedReservationAndResumesInFifoOrder()
+    {
+        StripedReadBuffer<int> buffer = new(1, 4);
+        PublishGate gate = new();
+        buffer.TryEnqueue(0).Should().BeTrue();
+        buffer.SetHooksForTesting(beforeReserve: null, beforePublish: gate.BeforePublish);
+
+        Task<bool> producer = StartEnqueue(buffer, 1);
+        Task<bool>? laterProducer = null;
+        try
+        {
+            gate.Entered.Wait(TestTimeout).Should().BeTrue();
+            buffer.TryRead(out int first).Should().BeTrue();
+            first.Should().Be(0);
+
+            laterProducer = StartEnqueue(buffer, 2);
+            (await laterProducer.WaitAsync(TestTimeout)).Should().BeTrue();
+            buffer.TryRead(out _).Should().BeFalse();
+            buffer.HasPublished.Should().BeFalse();
+
+            gate.Release.Set();
+            (await producer.WaitAsync(TestTimeout)).Should().BeTrue();
+            buffer.TryRead(out int second).Should().BeTrue();
+            second.Should().Be(1);
+            buffer.TryRead(out int third).Should().BeTrue();
+            third.Should().Be(2);
+        }
+        finally
+        {
+            gate.Release.Set();
+            try
+            {
+                await producer.WaitAsync(TestTimeout);
+                if (laterProducer is not null)
+                {
+                    await laterProducer.WaitAsync(TestTimeout);
+                }
+            }
+            finally
+            {
+                buffer.SetHooksForTesting(null, null);
+                gate.Dispose();
+                buffer.Dispose();
+            }
+        }
+    }
+
+    [Test]
+    public async Task ReadBufferRetriesAContendedCasWithoutCountingARejectedEvent()
+    {
+        StripedReadBuffer<int> buffer = new(1, 8);
+        ContendedReserveGate gate = new(2);
+        buffer.TryEnqueue(0).Should().BeTrue();
+        buffer.SetHooksForTesting(beforeReserve: gate.BeforeReserve, beforePublish: null);
+
+        Task<bool> first = StartEnqueue(buffer, 1);
+        Task<bool> second = StartEnqueue(buffer, 2);
+        try
+        {
+            (await Task.WhenAll(first, second).WaitAsync(TestTimeout)).Should().Equal(true, true);
+
+            ReadBufferStatistics statistics = buffer.GetStatistics();
+            statistics.DroppedFailed.Should().Be(0);
+            statistics.Dropped.Should().Be(0);
+        }
+        finally
+        {
+            try
+            {
+                await Task.WhenAll(first, second).WaitAsync(TestTimeout);
+            }
+            catch (Exception) when (first.IsCompleted && second.IsCompleted) { }
+            finally
+            {
+                buffer.SetHooksForTesting(null, null);
+                gate.Dispose();
+                buffer.Dispose();
+            }
+        }
+    }
+
+    [Test]
+    public void ReadBufferReportsOneFinalFailedOfferAfterBoundedRetries()
+    {
+        using StripedReadBuffer<int> buffer = new(1, 4);
+        buffer.TryEnqueue(0).Should().BeTrue();
+        buffer.SetForcedCasFailuresForTesting(3);
+
+        buffer.TryEnqueue(1).Should().BeFalse();
+
+        ReadBufferStatistics statistics = buffer.GetStatistics();
+        statistics.DroppedFailed.Should().Be(1);
+        statistics.Dropped.Should().Be(1);
+
+        buffer.SetForcedCasFailuresForTesting(0);
+        buffer.TryEnqueue(1).Should().BeTrue();
+    }
+
+    [Test]
+    public void ReadBufferExpandsOnlyToTheConfiguredStripeLimit()
+    {
+        using StripedReadBuffer<int> buffer = new(2, 4);
+        buffer.TryEnqueue(0).Should().BeTrue();
+        buffer.SetForcedCasFailuresForTesting(3);
+
+        buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Failed);
+        buffer.StripeCountForTesting.Should().Be(2);
+        buffer.SetForcedCasFailuresForTesting(0);
+        buffer.TryEnqueue(1).Should().BeTrue();
+        buffer.StripeCountForTesting.Should().BeLessOrEqualTo(2);
+    }
+
+    [Test]
+    public void ReadBufferRejectsNonPowerOfTwoCapacity()
+    {
+        Action create = () =>
+        {
+            using StripedReadBuffer<int> buffer = new(1, 3);
+            _ = buffer.GetStatistics();
+        };
+        create.Should().Throw<ArgumentException>();
+    }
+
+    [TestCase(long.MaxValue - 2)]
+    [TestCase(-2L)]
+    public void ReadBufferHandlesCounterWrapWithPowerOfTwoCapacity(long counter)
+    {
+        using StripedReadBuffer<int> buffer = new(1, 4);
+        buffer.TryEnqueue(0).Should().BeTrue();
+        buffer.SetCounterForTesting(counter);
+
+        for (int cycle = 0; cycle < 2; cycle++)
+        {
+            int firstValue = cycle * 4 + 1;
+            for (int offset = 0; offset < 4; offset++)
+            {
+                buffer.TryEnqueue(firstValue + offset).Should().BeTrue();
+            }
+
+            buffer.TryEnqueue(firstValue + 4).Should().BeFalse();
+            buffer.GetStatistics().Queued.Should().Be(4);
+
+            for (int offset = 0; offset < 4; offset++)
+            {
+                buffer.TryRead(out int observed).Should().BeTrue();
+                observed.Should().Be(firstValue + offset);
+            }
+
+            buffer.TryRead(out _).Should().BeFalse();
+            buffer.GetStatistics().Queued.Should().Be(0);
+        }
+    }
+
+    [Test]
+    public void ReadBufferContinuesAfterAConsumerCallbackThrows()
+    {
+        using StripedReadBuffer<int> buffer = new(1, 4);
+        buffer.TryEnqueue(1).Should().BeTrue();
+        buffer.TryEnqueue(2).Should().BeTrue();
+        buffer
+            .Invoking(static target =>
+                target.DrainTo(
+                    static _ => throw new InvalidOperationException("test callback failure"),
+                    budget: 4
+                )
+            )
+            .Should()
+            .Throw<InvalidOperationException>();
+
+        buffer.TryRead(out int observed).Should().BeTrue();
+        observed.Should().Be(2);
+    }
+
+    [Test]
+    public async Task ReadBufferDisposalDoesNotRetainAValuePublishedByAPausedProducer()
+    {
+        StripedReadBuffer<TrackedValue> buffer = new(1, 2);
+        PublishGate gate = new();
+        TrackedValue initial = new();
+        buffer.TryEnqueue(initial).Should().BeTrue();
+        buffer.TryRead(out _).Should().BeTrue();
+        buffer.SetHooksForTesting(beforeReserve: null, beforePublish: gate.BeforePublish);
+
+        Task<(bool Accepted, WeakReference<TrackedValue> Weak)> producer = StartTrackedEnqueue(
+            buffer
+        );
+
+        try
+        {
+            gate.Entered.Wait(TestTimeout).Should().BeTrue();
+            buffer.Dispose();
+            gate.Release.Set();
+            (bool accepted, WeakReference<TrackedValue> weak) = await producer.WaitAsync(
+                TestTimeout
+            );
+            accepted.Should().BeFalse();
+            buffer.SetHooksForTesting(null, null);
+            EventuallyCollected(weak).Should().BeTrue();
+        }
+        finally
+        {
+            gate.Release.Set();
+            try
+            {
+                await producer.WaitAsync(TestTimeout);
+            }
+            finally
+            {
+                buffer.SetHooksForTesting(null, null);
+                gate.Dispose();
+                buffer.Dispose();
+            }
+        }
+    }
+
+    [Test]
     public void ReadBufferFullTryWriteDropsNewestItemInsteadOfReportingFalseSuccess()
     {
         using StripedReadBuffer<int> buffer = new(1, 1);
@@ -168,6 +417,99 @@ public sealed class MaintenanceTests
                     catch (Exception) when (producers.All(task => task.IsCompleted)) { }
                 }
             }
+            finally
+            {
+                buffer.Dispose();
+            }
+        }
+    }
+
+    [Test]
+    public async Task ReadBufferConcurrentDisposeRejectsLateProducersAndClearsQueues()
+    {
+        const int producerCount = 8;
+        const int eventsPerProducer = 128;
+        StripedReadBuffer<int> buffer = new(8, 16);
+        using Barrier start = new(producerCount + 1);
+        List<Task> workers = [];
+        try
+        {
+            for (int producer = 0; producer < producerCount; producer++)
+            {
+                int producerId = producer;
+                workers.Add(
+                    Task.Factory.StartNew(
+                        static state =>
+                        {
+                            var (buffer, start, producerId, eventsPerProducer, timeout) = ((
+                                StripedReadBuffer<int> Buffer,
+                                Barrier Start,
+                                int ProducerId,
+                                int EventsPerProducer,
+                                TimeSpan Timeout
+                            ))
+                                state!;
+
+                            if (!start.SignalAndWait(timeout))
+                            {
+                                throw new TimeoutException("The producer did not meet its peers.");
+                            }
+
+                            for (int sequence = 0; sequence < eventsPerProducer; sequence++)
+                            {
+                                buffer.TryEnqueue(producerId * eventsPerProducer + sequence);
+                            }
+                        },
+                        (buffer, start, producerId, eventsPerProducer, TestTimeout),
+                        CancellationToken.None,
+                        TaskCreationOptions.DenyChildAttach,
+                        TaskScheduler.Default
+                    )
+                );
+            }
+
+            workers.Add(
+                Task.Factory.StartNew(
+                    static state =>
+                    {
+                        var (buffer, start, timeout) = ((
+                            StripedReadBuffer<int> Buffer,
+                            Barrier Start,
+                            TimeSpan Timeout
+                        ))
+                            state!;
+
+                        if (!start.SignalAndWait(timeout))
+                        {
+                            throw new TimeoutException("The disposer did not meet its peers.");
+                        }
+
+                        buffer.Dispose();
+                    },
+                    (buffer, start, TestTimeout),
+                    CancellationToken.None,
+                    TaskCreationOptions.DenyChildAttach,
+                    TaskScheduler.Default
+                )
+            );
+
+            await Task.WhenAll(workers).WaitAsync(TestTimeout, CancellationToken.None);
+
+            ReadBufferStatistics statistics = buffer.GetStatistics();
+            statistics.IsDisposed.Should().BeTrue();
+            statistics.Queued.Should().Be(0);
+            statistics.DroppedShutdown.Should().BeGreaterThanOrEqualTo(statistics.Enqueued);
+            buffer.TryEnqueue(-1).Should().BeFalse();
+            buffer.TryRead(out _).Should().BeFalse();
+            buffer.GetStatistics().Queued.Should().Be(0);
+        }
+        finally
+        {
+            try
+            {
+                await Task.WhenAll(workers).WaitAsync(TestTimeout, CancellationToken.None);
+            }
+            catch (Exception) when (workers.All(static worker => worker.IsCompleted)) { }
             finally
             {
                 buffer.Dispose();
@@ -559,7 +901,108 @@ public sealed class MaintenanceTests
     private static TaskCompletionSource<T> NewCompletionSource<T>() =>
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    private static Task<bool> StartEnqueue<T>(StripedReadBuffer<T> buffer, T value)
+    {
+        return Task.Factory.StartNew(
+            static state =>
+            {
+                var (buffer, value) = ((StripedReadBuffer<T> Buffer, T Value))state!;
+                return buffer.TryEnqueue(value);
+            },
+            (buffer, value),
+            CancellationToken.None,
+            TaskCreationOptions.DenyChildAttach,
+            TaskScheduler.Default
+        );
+    }
+
+    private static Task<(bool Accepted, WeakReference<TrackedValue> Weak)> StartTrackedEnqueue(
+        StripedReadBuffer<TrackedValue> buffer
+    )
+    {
+        return Task.Factory.StartNew(
+            static state =>
+            {
+                StripedReadBuffer<TrackedValue> buffer = (StripedReadBuffer<TrackedValue>)state!;
+                TrackedValue value = new();
+                WeakReference<TrackedValue> weak = new(value);
+                return (buffer.TryEnqueue(value), weak);
+            },
+            buffer,
+            CancellationToken.None,
+            TaskCreationOptions.DenyChildAttach,
+            TaskScheduler.Default
+        );
+    }
+
+    private static bool EventuallyCollected<T>(WeakReference<T> weakReference)
+        where T : class
+    {
+        for (int attempt = 0; attempt < 20; attempt++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            if (!weakReference.TryGetTarget(out _))
+            {
+                return true;
+            }
+
+            Thread.Sleep(10);
+        }
+
+        return false;
+    }
+
+    private sealed class PublishGate : IDisposable
+    {
+        internal readonly ManualResetEventSlim Entered = new();
+        internal readonly ManualResetEventSlim Release = new();
+        private int _pause;
+
+        internal void BeforePublish()
+        {
+            if (Interlocked.Exchange(ref _pause, 1) == 0)
+            {
+                Entered.Set();
+                if (!Release.Wait(TestTimeout))
+                {
+                    throw new TimeoutException("The producer did not resume.");
+                }
+            }
+        }
+
+        public void Dispose()
+        {
+            Entered.Dispose();
+            Release.Dispose();
+        }
+    }
+
+    private sealed class ContendedReserveGate : IDisposable
+    {
+        private readonly Barrier _barrier;
+        private int _hookCalls;
+
+        internal ContendedReserveGate(int participantCount)
+        {
+            _barrier = new Barrier(participantCount);
+        }
+
+        internal void BeforeReserve()
+        {
+            if (Interlocked.Increment(ref _hookCalls) <= 2 && !_barrier.SignalAndWait(TestTimeout))
+            {
+                throw new TimeoutException("The competing producers did not meet.");
+            }
+        }
+
+        public void Dispose() => _barrier.Dispose();
+    }
+
     private sealed record ReadEvent(int Producer, int Sequence);
+
+    private sealed class TrackedValue { }
 
     private sealed class ManualMaintenanceScheduler : IMaintenanceScheduler
     {

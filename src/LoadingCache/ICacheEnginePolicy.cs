@@ -40,6 +40,10 @@ internal interface ICacheEnginePolicy
     // A queued batch needs one request; the drain owner re-arms the signal.
     bool TryRequestWriteMaintenance() => HasPendingWrites;
 
+    // A rejected scheduler may leave best-effort read work queued after the bounded fallback. The
+    // next full read buffer must be allowed to request a new coordinator owner.
+    void ResetReadMaintenanceSignalAfterFallback() { }
+
     void FlushWrites() { }
 
     WriteBufferStatistics GetWriteBufferStatistics() => default;

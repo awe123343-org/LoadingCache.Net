@@ -40,8 +40,11 @@ internal sealed class CacheEngineOptions<TKey, TValue>
     internal ICacheEnginePolicy? Policy { get; init; }
     internal IMaintenanceScheduler? MaintenanceScheduler { get; init; }
     internal int MaintenanceMaxPasses { get; init; } = 32;
-    internal int MaintenanceReadStripeCount { get; init; } = 4;
-    internal int MaintenanceReadStripeCapacity { get; init; } = 256;
+
+    // Null selects the production default: a lazily allocated first stripe, up to a bounded
+    // power-of-two table derived from the processor count. Tests can set both values explicitly.
+    internal int? MaintenanceReadStripeCount { get; init; }
+    internal int? MaintenanceReadStripeCapacity { get; init; }
     internal int MaintenanceWriteBufferCapacity { get; init; } = 256;
 
     // M5 diagnostics. Public builder methods map directly to these fields;

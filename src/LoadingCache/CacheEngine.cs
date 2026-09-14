@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using LoadingCache.Diagnostics;
 using LoadingCache.Expiration;
 using LoadingCache.Maintenance;
@@ -28,6 +29,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     private readonly long _refreshFailureBackoffTicks;
     private readonly IExpiry<TKey, TValue>? _expiry;
     private readonly TimeProvider _timeProvider;
+    private readonly bool _requiresReadTime;
+    private readonly bool _useAtomicResidentReads;
     private readonly bool _recordStatistics;
     private readonly bool _enableExpirationScheduler;
     private readonly ITimer? _expirationTimer;
@@ -207,9 +210,26 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         _refreshFailureBackoffTicks = options.RefreshFailureBackoff.Ticks;
         _expiry = options.Expiry;
         _timeProvider = options.TimeProvider;
+        // The policy view exposes only features enabled at construction, so a cache without
+        // these policies cannot acquire a read-side clock dependency through policy mutation.
+        _requiresReadTime =
+            options.Expiry is not null
+            || options.ExpireAfterWrite.HasValue
+            || options.ExpireAfterAccess.HasValue
+            || options.RefreshAfterWrite.HasValue;
+        _useAtomicResidentReads =
+            !_requiresReadTime
+            && !options.WeakKeys
+            && !options.WeakValues
+            && options.OnValueRetired is null
+            && Entry.SupportsAtomicStrongValue;
         _recordStatistics = options.RecordStatistics;
         _enableExpirationScheduler = options.EnableExpirationScheduler;
         _testHooks = options.TestHooks;
+        int maintenanceReadStripeCount =
+            options.MaintenanceReadStripeCount ?? DefaultMaintenanceReadStripeCount();
+        int maintenanceReadStripeCapacity = options.MaintenanceReadStripeCapacity ?? 16;
+        bool enableColdStart = CanUseColdStartPolicy(options);
         _policy =
             options.Policy
             ?? new WindowTinyLfuEnginePolicy(
@@ -219,10 +239,12 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 RequestPolicyMaintenance,
                 options.TestHooks?.BeforePolicyMaintenance,
                 options.TestHooks?.BeforeMaintenanceSignalClear,
-                options.MaintenanceReadStripeCount,
-                options.MaintenanceReadStripeCapacity,
+                maintenanceReadStripeCount,
+                maintenanceReadStripeCapacity,
                 options.MaintenanceWriteBufferCapacity,
-                coordinationGate: _gate
+                coordinationGate: _gate,
+                enableColdStart: enableColdStart,
+                recordReadStatistics: options.RecordStatistics || options.EnableMetrics
             );
         _maintenanceCoordinator = new MaintenanceCoordinator(
             DrainPolicyMaintenance,
@@ -315,6 +337,29 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             _shutdownCts.Dispose();
             throw;
         }
+    }
+
+    private static bool CanUseColdStartPolicy(CacheEngineOptions<TKey, TValue> options) =>
+        options.Policy is null
+        && options.MaximumSize.HasValue
+        && !options.MaximumWeight.HasValue
+        && !options.WeakKeys
+        && !options.WeakValues
+        && !options.ExpireAfterWrite.HasValue
+        && !options.ExpireAfterAccess.HasValue
+        && options.Expiry is null
+        && !options.RefreshAfterWrite.HasValue;
+
+    private static int DefaultMaintenanceReadStripeCount()
+    {
+        int processorCount = Math.Max(1, Environment.ProcessorCount);
+        int powerOfTwo = 1;
+        while (powerOfTwo < processorCount && powerOfTwo <= (1 << 28))
+        {
+            powerOfTwo <<= 1;
+        }
+
+        return powerOfTwo > (int.MaxValue >> 2) ? 1 << 30 : powerOfTwo << 2;
     }
 
     internal long EstimatedCount
@@ -575,7 +620,16 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         }
         ThrowIfDisposed();
 
-        if (TryReadReady(key, out TValue value, out Task<TValue>? sharedTask))
+        if (
+            TryReadReady(
+                key,
+                out TValue value,
+                out Task<TValue>? sharedTask,
+                out _,
+                out _,
+                materializeSharedTask: true
+            )
+        )
         {
             valueTask = sharedTask ?? Task.FromResult(value!);
             return true;
@@ -845,34 +899,52 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             );
 
         using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
+        object? replacementPolicyToken;
+        bool replacedResidentValue;
         lock (_gate)
         {
             ThrowIfDisposedLocked();
             MarkDictionaryTransformMutation(key);
             RecordBulkMutationLocked(key);
-            Entry entry = Entry.Ready(
+            replacedResidentValue = TryReplaceResidentValueLocked(
                 key,
-                _epoch,
-                ++_nextGeneration,
                 value,
-                _timeProvider.GetTimestamp(),
                 weight,
                 variableDuration,
-                _weakKeys,
-                _weakValues
+                out replacementPolicyToken
             );
-            entry.PolicyToken = new WindowTinyLfuEnginePolicy.EngineEntryToken(
-                entry,
-                GetPolicyHash(key)
-            );
-            ReplaceCurrentLocked(key, entry);
-            PublishPolicyWriteLocked(entry.PolicyToken, entry.Weight);
-            if (_expirationWheel is not null)
+            if (!replacedResidentValue)
             {
-                ulong normalizedNow = GetExpirationNowLocked();
-                AdvanceExpirationLocked(normalizedNow);
-                ScheduleExpirationNodeLocked(entry, normalizedNow);
+                Entry entry = Entry.Ready(
+                    key,
+                    _epoch,
+                    ++_nextGeneration,
+                    value,
+                    _timeProvider.GetTimestamp(),
+                    weight,
+                    variableDuration,
+                    _weakKeys,
+                    _weakValues,
+                    createSharedTask: false
+                );
+                entry.PolicyToken = new WindowTinyLfuEnginePolicy.EngineEntryToken(
+                    entry,
+                    GetPolicyHash(key)
+                );
+                ReplaceCurrentLocked(key, entry);
+                PublishPolicyWriteLocked(entry.PolicyToken, entry.Weight);
+                if (_expirationWheel is not null)
+                {
+                    ulong normalizedNow = GetExpirationNowLocked();
+                    AdvanceExpirationLocked(normalizedNow);
+                    ScheduleExpirationNodeLocked(entry, normalizedNow);
+                }
             }
+        }
+
+        if (replacedResidentValue)
+        {
+            _policy.OnAccess(replacementPolicyToken);
         }
 
         evictionScope.Dispatch();
@@ -1081,6 +1153,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 _policy.FlushWrites();
             }
         }
+        _policy.ResetReadMaintenanceSignalAfterFallback();
         evictionScope.Dispatch();
     }
 
@@ -2002,6 +2075,90 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         _entries[key] = replacement;
     }
 
+    /// <summary>
+    /// Replaces a stable, strong resident value in place when no policy metadata needs to be
+    /// rebuilt. The entry and policy token remain the authoritative identity; the publication
+    /// revision fences operations which captured the previous value version.
+    /// </summary>
+    private bool TryReplaceResidentValueLocked(
+        TKey key,
+        TValue value,
+        long weight,
+        TimeSpan variableDuration,
+        out object? policyToken
+    )
+    {
+        policyToken = null;
+        if (
+            _policy is not WindowTinyLfuEnginePolicy
+            || _weakKeys
+            || _weakValues
+            || _expiry is not null
+            || Volatile.Read(ref _expireAfterWriteTicks) >= 0
+            || Volatile.Read(ref _expireAfterAccessTicks) >= 0
+            || Volatile.Read(ref _refreshAfterWriteTicks) >= 0
+        )
+        {
+            return false;
+        }
+
+        if (!_entries.TryGetValue(key, out Entry? entry) || !Volatile.Read(ref entry.IsReady))
+        {
+            return false;
+        }
+
+        if (
+            entry.Retired
+            || entry.PolicyDetached
+            || entry.Flight is not null
+            || entry.RefreshFlight is not null
+            || entry.PolicyToken is null
+            || entry.Weight != weight
+        )
+        {
+            return false;
+        }
+
+        TValue retiredValue;
+        TKey residentKey;
+        lock (entry.Sync)
+        {
+            if (
+                !Volatile.Read(ref entry.IsReady)
+                || entry.Retired
+                || entry.PolicyDetached
+                || entry.Flight is not null
+                || entry.RefreshFlight is not null
+                || entry.Weight != weight
+                || !entry.TryGetKey(out TKey? liveKey)
+                || !entry.TryGetValue(out TValue? liveValue)
+            )
+            {
+                return false;
+            }
+
+            residentKey = liveKey!;
+            retiredValue = liveValue!;
+            long timestamp = _timeProvider.GetTimestamp();
+            entry.SetValue(value, weak: false);
+            entry.Weight = weight;
+            entry.WriteTimestamp = timestamp;
+            entry.AccessTimestamp = timestamp;
+            entry.VariableTimestamp = timestamp;
+            entry.VariableDuration = variableDuration;
+            entry.VariableRevision++;
+            entry.PublicationRevision++;
+            // A synchronous Put does not need to allocate a completed Task. An async consumer
+            // creates the stable task view lazily through TryGetTask.
+            entry.SharedTask = null;
+            policyToken = entry.PolicyToken;
+        }
+
+        QueueReplacementNotificationLocked(residentKey, retiredValue, weight);
+        _onValueRetired?.Invoke(retiredValue);
+        return true;
+    }
+
     private void RemoveCurrentEntryLocked(Entry entry)
     {
         RemoveCurrentEntryLocked(entry, RemovalCause.Explicit, collected: false);
@@ -2109,15 +2266,14 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     private bool TryReadReady(TKey key, out TValue value) =>
         TryReadReady(key, out value, out _, out _, out _);
 
-    private bool TryReadReady(TKey key, out TValue value, out Task<TValue>? sharedTask) =>
-        TryReadReady(key, out value, out sharedTask, out _, out _);
-
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool TryReadReady(
         TKey key,
         out TValue value,
         out Task<TValue>? sharedTask,
         out Entry? readyEntry,
-        out bool refreshEligible
+        out bool refreshEligible,
+        bool materializeSharedTask = false
     )
     {
         sharedTask = null;
@@ -2129,6 +2285,45 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             return false;
         }
 
+        if (_useAtomicResidentReads && !materializeSharedTask)
+        {
+            // Dictionary publication, and the IsReady acquire for loading entries, make the
+            // stable entry/token identity visible. Resident replacements, explicit refresh,
+            // and rollback publish the strong value with a
+            // matching release store. No mutable timestamp or Task participates in this read.
+            // A removal overlapping this read may retire this identity; its policy event can
+            // only refer to that old token and cannot affect a replacement entry.
+            value = entry.ReadStrongValueAtomic();
+            readyEntry = entry;
+            RecordHit();
+            _policy.OnAccess(entry.PolicyToken);
+            return true;
+        }
+
+        return TryReadReadyLocked(
+            entry,
+            key,
+            out value,
+            out sharedTask,
+            out readyEntry,
+            out refreshEligible,
+            materializeSharedTask
+        );
+    }
+
+    private bool TryReadReadyLocked(
+        Entry entry,
+        TKey key,
+        out TValue value,
+        out Task<TValue>? sharedTask,
+        out Entry? readyEntry,
+        out bool refreshEligible,
+        bool materializeSharedTask
+    )
+    {
+        sharedTask = null;
+        readyEntry = null;
+        refreshEligible = false;
         object? policyToken = null;
         long variableTimestamp = 0;
         long variableRevision = 0;
@@ -2140,7 +2335,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             // Sample the monotonic clock while holding the entry snapshot lock.
             // This keeps access/write timestamps and the freshness decision from
             // observing a torn value during replacement.
-            long now = _timeProvider.GetTimestamp();
+            long now = _requiresReadTime ? _timeProvider.GetTimestamp() : 0;
             if (!Volatile.Read(ref entry.IsReady) || IsExpired(entry, now))
             {
                 value = default!;
@@ -2150,7 +2345,10 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             }
             else
             {
-                TouchWithoutLock(entry, now);
+                if (Volatile.Read(ref _expireAfterAccessTicks) >= 0)
+                {
+                    TouchWithoutLock(entry, now);
+                }
                 if (!entry.TryGetValue(out TValue? liveValue))
                 {
                     preserveForRefresh = false;
@@ -2161,7 +2359,9 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 {
                     value = liveValue!;
                     policyToken = entry.PolicyToken;
-                    sharedTask = entry.SharedTask;
+                    sharedTask = materializeSharedTask
+                        ? entry.GetOrCreateSharedTaskLocked()
+                        : entry.SharedTask;
                     variableTimestamp = entry.VariableTimestamp;
                     variableRevision = entry.VariableRevision;
                     variableDuration = _expiry is null

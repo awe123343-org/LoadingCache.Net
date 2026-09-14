@@ -25,6 +25,7 @@ internal sealed class WindowTinyLfuPolicy<T>
     private readonly PolicyDeque<T> _probation = new(PolicyQueue.Probation);
     private readonly PolicyDeque<T> _protected = new(PolicyQueue.Protected);
     private readonly FrequencySketch _sketch;
+    private readonly bool _lazySketch;
     private readonly bool _adaptive;
     private readonly Random _jitter;
     private PolicyNode<T>? _candidateHead;
@@ -44,7 +45,8 @@ internal sealed class WindowTinyLfuPolicy<T>
         long maximum,
         uint seed = 0x9E3779B9u,
         bool adaptive = true,
-        int? maximumCount = null
+        int? maximumCount = null,
+        bool lazySketch = false
     )
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximum);
@@ -62,10 +64,14 @@ internal sealed class WindowTinyLfuPolicy<T>
         ProtectedMaximum = InitialProtectedMaximum(maximum - WindowMaximum);
         _adaptive = adaptive;
         _maximumCount = maximumCount;
+        _lazySketch = lazySketch;
         _jitter = new Random(unchecked((int)(seed == 0 ? 0xA341316Cu : seed)));
         StepSize = maximum <= 512 ? StepMagnitude(maximum) : -StepMagnitude(maximum);
         _sketch = new FrequencySketch(seed);
-        _sketch.EnsureCapacity(EstimatedEntryCount(maximum, maximumCount));
+        if (!lazySketch)
+        {
+            EnsureSketchInitialized();
+        }
     }
 
     internal int ResidentCount => _window.Count + _probation.Count + _protected.Count;
@@ -114,6 +120,8 @@ internal sealed class WindowTinyLfuPolicy<T>
 
     internal long SketchSampleCount => _sketch.SampleCount;
 
+    internal bool IsSketchInitialized => _sketch.IsInitialized;
+
     internal int Frequency(uint hash) => _sketch.Frequency(hash);
 
     internal IReadOnlyList<PolicyNode<T>> Snapshot(bool hottest, int limit)
@@ -150,10 +158,10 @@ internal sealed class WindowTinyLfuPolicy<T>
     {
         ArgumentNullException.ThrowIfNull(node);
         node.Claim(_ownerId);
-        RecordMiss(node.Hash);
 
         if (node.Weight > Maximum)
         {
+            RecordMiss(node.Hash);
             node.Retire();
             return [node];
         }
@@ -163,6 +171,7 @@ internal sealed class WindowTinyLfuPolicy<T>
         {
             if (!TryEvictForOverflow(node, out evicted))
             {
+                RecordMiss(node.Hash);
                 node.Retire();
                 (evicted ??= []).Add(node);
                 return evicted;
@@ -171,6 +180,8 @@ internal sealed class WindowTinyLfuPolicy<T>
 
         _window.AddLast(node);
         WeightedSize = checked(WeightedSize + node.Weight);
+        EnsureSketchInitializedIfThresholdReached();
+        RecordMiss(node.Hash);
         if (deferEviction)
         {
             return evicted is null ? Array.Empty<PolicyNode<T>>() : evicted;
@@ -303,6 +314,7 @@ internal sealed class WindowTinyLfuPolicy<T>
     internal IReadOnlyList<PolicyNode<T>> SetMaximum(long maximum)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximum);
+        EnsureSketchInitialized();
         if (maximum == Maximum)
         {
             return [];
@@ -351,6 +363,7 @@ internal sealed class WindowTinyLfuPolicy<T>
     internal IReadOnlyList<PolicyNode<T>> Maintain(int budget = QueueTransferThreshold)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(budget);
+        EnsureSketchInitializedIfThresholdReached();
         int remainingBudget = budget;
         DemoteProtectedToMaximum(ref remainingBudget);
         bool hadPendingAdjustment = _adaptive && Adjustment != 0;
@@ -527,6 +540,24 @@ internal sealed class WindowTinyLfuPolicy<T>
     private static long EstimatedEntryCount(long maximum, int? maximumCount)
     {
         return maximumCount ?? Math.Min(maximum, 1_000_000L);
+    }
+
+    private void EnsureSketchInitializedIfThresholdReached()
+    {
+        if (
+            _lazySketch
+            && !_sketch.IsInitialized
+            && ResidentCount != 0
+            && ResidentCount >= Maximum >>> 1
+        )
+        {
+            EnsureSketchInitialized();
+        }
+    }
+
+    private void EnsureSketchInitialized()
+    {
+        _sketch.EnsureCapacity(EstimatedEntryCount(Maximum, _maximumCount));
     }
 
     private bool IsOverCapacity()
@@ -829,6 +860,14 @@ internal sealed class WindowTinyLfuPolicy<T>
 
     private void DetermineAdjustment()
     {
+        if (!_sketch.IsInitialized)
+        {
+            _previousSampleHitRate = 0;
+            _hitsInSample = 0;
+            MissesInSample = 0;
+            return;
+        }
+
         long requestCount = _hitsInSample + MissesInSample;
         if (requestCount < SampleLimit())
         {
