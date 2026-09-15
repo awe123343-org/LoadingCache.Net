@@ -28,21 +28,32 @@ public sealed class ResidentReadTests
         where TValue : notnull
     {
         await using var publicationGate = new BlockingTestHook(Watchdog);
-        var clock = new PublicationTimeProvider(publicationGate);
-        using ICache<int, TValue> cache = CacheBuilder
+        CacheEngine<int, TValue> engine = CacheBuilder
             .Create<int, TValue>()
             .MaximumSize(8)
             .MaxConcurrentLoads(2)
-            .TimeProvider(clock)
             .RecordStatistics()
-            .Build();
+            .CreateEngine(
+                new LoadingCacheTestHooks { BeforeResidentValuePublished = publicationGate.Invoke }
+            );
+        using var cache = new Cache<int, TValue>(engine);
+        await VerifyReadDuringResidentPublication(cache, publicationGate, first, second);
+    }
+
+    private static async Task VerifyReadDuringResidentPublication<TValue>(
+        Cache<int, TValue> cache,
+        BlockingTestHook publicationGate,
+        TValue first,
+        TValue second
+    )
+        where TValue : notnull
+    {
         cache.Put(1, first);
-        clock.BlockNextTimestamp();
         Task writer = Task.Run(() => cache.Put(1, second));
         Task<TValue>? reader = null;
         try
         {
-            // The replacement samples time while holding both engine and entry locks.
+            // The replacement pauses before publishing with engine and entry locks held.
             // A plain resident hit must finish before that writer is released.
             await publicationGate.Entered.WaitAsync(Watchdog);
             reader = Task.Run(() =>
@@ -55,11 +66,7 @@ public sealed class ResidentReadTests
         finally
         {
             publicationGate.Release();
-            await writer.WaitAsync(Watchdog);
-            if (reader is not null)
-            {
-                await reader.WaitAsync(Watchdog);
-            }
+            await Task.WhenAll(writer, reader ?? Task.CompletedTask).WaitAsync(Watchdog);
         }
 
         publicationGate.TimedOut.Should().BeFalse();
@@ -143,12 +150,22 @@ public sealed class ResidentReadTests
     )
         where TValue : notnull
     {
-        const int iterations = 4096;
         using ICache<int, TValue> cache = CacheBuilder
             .Create<int, TValue>()
             .MaximumSize(8)
             .MaxConcurrentLoads(2)
             .Build();
+        await VerifyConcurrentReplacement(cache, createValue, isConsistent);
+    }
+
+    private static async Task VerifyConcurrentReplacement<TValue>(
+        ICache<int, TValue> cache,
+        Func<int, TValue> createValue,
+        Func<TValue, bool> isConsistent
+    )
+        where TValue : notnull
+    {
+        const int iterations = 4096;
         cache.Put(1, createValue(0));
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Task writer = Task.Run(async () =>
@@ -167,7 +184,7 @@ public sealed class ResidentReadTests
                     await start.Task;
                     for (int iteration = 0; iteration < iterations; iteration++)
                     {
-                        if (!cache.TryGet(1, out TValue? value) || !isConsistent(value!))
+                        if (!cache.TryGet(1, out TValue? value) || !isConsistent(value))
                         {
                             throw new InvalidOperationException(
                                 "A resident publication was torn or lost."
@@ -202,22 +219,6 @@ public sealed class ResidentReadTests
         cache.Policy.ExpireAfterAccess!.SetDuration(TimeSpan.FromSeconds(2));
         clock.Advance(TimeSpan.FromSeconds(2));
         cache.TryGet(1, out _).Should().BeFalse();
-    }
-
-    private sealed class PublicationTimeProvider(BlockingTestHook gate) : TimeProvider
-    {
-        private int _blockNext;
-
-        internal void BlockNextTimestamp() => Volatile.Write(ref _blockNext, 1);
-
-        public override long GetTimestamp()
-        {
-            if (Interlocked.Exchange(ref _blockNext, 0) != 0)
-            {
-                gate.Invoke();
-            }
-            return 0;
-        }
     }
 
     private sealed class RejectReadTimeProvider : TimeProvider

@@ -16,13 +16,28 @@ public sealed class AtomicPublicationRaceTests
     public async Task TaskLookupDuringResidentPutKeepsValueAndTaskPaired(bool materializeOldTask)
     {
         await using var publication = new BlockingTestHook(Watchdog);
-        var clock = new PublicationClock(publication);
-        await using IAsyncLoadingCache<int, string> cache = CacheBuilder
+        CacheEngine<int, string> engine = CacheBuilder
             .Create<int, string>()
             .MaximumSize(8)
             .MaxConcurrentLoads(2)
-            .TimeProvider(clock)
-            .BuildAsyncLoading(static (_, _) => Task.FromResult("unexpected"));
+            .CreateEngine(
+                new LoadingCacheTestHooks { BeforeResidentValuePublished = publication.Invoke },
+                hasFixedLoader: true,
+                isAsync: true
+            );
+        await using var cache = new AsyncLoadingCache<int, string>(
+            engine,
+            static (_, _) => Task.FromResult("unexpected")
+        );
+        await VerifyTaskLookupDuringResidentPut(cache, publication, materializeOldTask);
+    }
+
+    private static async Task VerifyTaskLookupDuringResidentPut(
+        AsyncLoadingCache<int, string> cache,
+        BlockingTestHook publication,
+        bool materializeOldTask
+    )
+    {
         cache.Set(1, "old");
         Task<string>? oldTask = null;
         if (materializeOldTask)
@@ -32,7 +47,6 @@ public sealed class AtomicPublicationRaceTests
 
         var readerEntered = NewSignal();
         Task<TaskObservation<string>>? reader = null;
-        clock.BlockNextTimestamp();
         Task writer = Task.Run(() => cache.Set(1, "new"));
         try
         {
@@ -51,15 +65,11 @@ public sealed class AtomicPublicationRaceTests
         finally
         {
             publication.Release();
-            await writer.WaitAsync(Watchdog);
-            if (reader is not null)
-            {
-                await reader.WaitAsync(Watchdog);
-            }
+            await Task.WhenAll(writer, reader ?? Task.CompletedTask).WaitAsync(Watchdog);
         }
 
         publication.TimedOut.Should().BeFalse();
-        Task<string> observed = (await reader!).Task;
+        Task<string> observed = (await reader).Task;
         (await observed).Should().Be("new");
         cache.TryGetTask(1, out Task<string>? current).Should().BeTrue();
         current.Should().BeSameAs(observed);
@@ -587,23 +597,6 @@ public sealed class AtomicPublicationRaceTests
             }
 
             return currentDuration;
-        }
-    }
-
-    private sealed class PublicationClock(BlockingTestHook publication) : TimeProvider
-    {
-        private int _blockNext;
-
-        internal void BlockNextTimestamp() => Volatile.Write(ref _blockNext, 1);
-
-        public override long GetTimestamp()
-        {
-            if (Interlocked.Exchange(ref _blockNext, 0) != 0)
-            {
-                publication.Invoke();
-            }
-
-            return 0;
         }
     }
 

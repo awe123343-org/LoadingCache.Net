@@ -910,7 +910,6 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 key,
                 value,
                 weight,
-                variableDuration,
                 out replacementPolicyToken
             );
             if (!replacedResidentValue)
@@ -2164,7 +2163,6 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         TKey key,
         TValue value,
         long weight,
-        TimeSpan variableDuration,
         out object? policyToken
     )
     {
@@ -2173,10 +2171,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             _policy is not WindowTinyLfuEnginePolicy
             || _weakKeys
             || _weakValues
-            || _expiry is not null
-            || Volatile.Read(ref _expireAfterWriteTicks) >= 0
-            || Volatile.Read(ref _expireAfterAccessTicks) >= 0
-            || Volatile.Read(ref _refreshAfterWriteTicks) >= 0
+            || _requiresReadTime
         )
         {
             return false;
@@ -2219,13 +2214,10 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
 
             residentKey = liveKey!;
             retiredValue = liveValue!;
-            long timestamp = _timeProvider.GetTimestamp();
+            InvokeHook(_testHooks?.BeforeResidentValuePublished);
             entry.SetValue(value, weak: false);
-            entry.Weight = weight;
-            entry.WriteTimestamp = timestamp;
-            entry.AccessTimestamp = timestamp;
-            entry.VariableTimestamp = timestamp;
-            entry.VariableDuration = variableDuration;
+            // This path excludes every time policy and preserves weight. Disabled
+            // policies cannot be enabled later, so their metadata needs no update.
             entry.VariableRevision++;
             entry.PublicationRevision++;
             // A synchronous Put does not need to allocate a completed Task. An async consumer

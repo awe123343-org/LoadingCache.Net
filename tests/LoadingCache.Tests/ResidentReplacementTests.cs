@@ -8,6 +8,27 @@ namespace LoadingCache.Tests;
 public sealed class ResidentReplacementTests
 {
     [Test]
+    public void ResidentPutWithoutTimePoliciesDoesNotSampleTheClock()
+    {
+        var clock = new CountingTimestampProvider();
+        using ICache<int, string> cache = CacheBuilder
+            .Create<int, string>()
+            .MaximumSize(8)
+            .MaxConcurrentLoads(2)
+            .TimeProvider(clock)
+            .Build();
+        cache.Put(1, "first");
+        int timestampCalls = clock.TimestampCalls;
+
+        cache.Put(1, "second");
+
+        clock.TimestampCalls.Should().Be(timestampCalls);
+        cache.TryGet(1, out string? value).Should().BeTrue();
+        value.Should().Be("second");
+        cache.EstimatedCount.Should().Be(1);
+    }
+
+    [Test]
     public async Task ReplacingResidentValueKeepsOnePolicyResidentAndPublishesNewValue()
     {
         var notifications = new ConcurrentQueue<RemovalNotification<int, string>>();
@@ -245,6 +266,50 @@ public sealed class ResidentReplacementTests
     }
 
     [Test]
+    public async Task SameReferenceSetCreatesANewTaskVersionAndReplacementNotification()
+    {
+        object value = new();
+        var replaced = new TaskCompletionSource<RemovalNotification<int, object>>(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        var notifications = new ConcurrentQueue<RemovalNotification<int, object>>();
+        await using IAsyncLoadingCache<int, object> cache = CacheBuilder
+            .Create<int, object>()
+            .MaximumSize(8)
+            .MaxConcurrentLoads(2)
+            .RemovalListener(notification =>
+            {
+                notifications.Enqueue(notification);
+                if (notification.Cause == RemovalCause.Replaced)
+                {
+                    replaced.TrySetResult(notification);
+                }
+            })
+            .BuildAsyncLoading(
+                static (_, _) => throw new InvalidOperationException("No load should start.")
+            );
+        cache.Set(1, value);
+        cache.TryGetTask(1, out Task<object>? first).Should().BeTrue();
+
+        cache.Set(1, value);
+
+        cache.TryGetTask(1, out Task<object>? second).Should().BeTrue();
+        second.Should().NotBeSameAs(first);
+        cache.TryGetTask(1, out Task<object>? sameVersion).Should().BeTrue();
+        sameVersion.Should().BeSameAs(second);
+        (await first!).Should().BeSameAs(value);
+        (await second).Should().BeSameAs(value);
+        RemovalNotification<int, object> replacement = await replaced.Task.WaitAsync(
+            TimeSpan.FromSeconds(5)
+        );
+        replacement.Key.Should().Be(1);
+        replacement.Value.Should().BeSameAs(value);
+        replacement.Cause.Should().Be(RemovalCause.Replaced);
+        notifications.Should().ContainSingle();
+        cache.EstimatedCount.Should().Be(1);
+    }
+
+    [Test]
     public async Task SetAfterReadyPublicationPreservesLateCompletionResult()
     {
         var completionEntered = new TaskCompletionSource<object?>(
@@ -324,6 +389,15 @@ public sealed class ResidentReplacementTests
         cache.Invalidate(1).Should().BeTrue();
         await disposed.Task.WaitAsync(TimeSpan.FromSeconds(5));
         value.DisposeCount.Should().Be(1);
+    }
+
+    private sealed class CountingTimestampProvider : TimeProvider
+    {
+        private int _timestampCalls;
+
+        internal int TimestampCalls => Volatile.Read(ref _timestampCalls);
+
+        public override long GetTimestamp() => Interlocked.Increment(ref _timestampCalls);
     }
 
     private sealed class OwnedDisposableValue
