@@ -480,7 +480,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
             weight,
             variableDuration,
             _weakKeys,
-            _weakValues
+            _weakValues,
+            createWriteSnapshot: _useFixedWriteSnapshots
         );
         entry.PolicyToken = new WindowTinyLfuEnginePolicy.EngineEntryToken(
             entry,

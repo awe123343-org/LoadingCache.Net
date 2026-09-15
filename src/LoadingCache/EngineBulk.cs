@@ -938,6 +938,10 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 GetPolicyHash(publication.Key)
             );
             InvokeHook(_testHooks?.BeforeReadyPublish);
+            if (_useFixedWriteSnapshots)
+            {
+                entry.PublishInitialWriteSnapshot(publication.Value, timestamp);
+            }
             Volatile.Write(ref entry.IsReady, true);
         }
 
@@ -963,7 +967,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
             publication.Weight,
             publication.Duration,
             _weakKeys,
-            _weakValues
+            _weakValues,
+            createWriteSnapshot: _useFixedWriteSnapshots
         );
         entry.PolicyToken = new WindowTinyLfuEnginePolicy.EngineEntryToken(
             entry,

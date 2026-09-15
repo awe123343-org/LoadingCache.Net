@@ -18,6 +18,14 @@ internal sealed class LoadingCacheTestHooks
     // acquires the engine gate. No hook is invoked on a resident hit.
     internal Action? BeforeExpiredReadCleanup { get; init; }
 
+    // Refresh holds entry.Sync with mutable fields prepared, before releasing
+    // a complete fixed-write publication to unlocked value readers.
+    internal Action? BeforeRefreshSnapshotPublished { get; init; }
+
+    // Rollback holds entry.Sync after restoring the value but before restoring
+    // its timestamps and releasing a complete fixed-write publication.
+    internal Action? BeforeRefreshSnapshotRestored { get; init; }
+
     // Internal race-test seam. The variable read-expiry revision has been
     // committed before this callback is invoked.
     internal Action? AfterReadExpiryUpdate { get; init; }

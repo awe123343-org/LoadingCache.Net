@@ -526,6 +526,10 @@ internal sealed partial class CacheEngine<TKey, TValue>
                             {
                                 previousSnapshot = new RefreshPublicationSnapshot(entry);
                                 previousSnapshotCaptured = true;
+                                if (_useFixedWriteSnapshots)
+                                {
+                                    entry.PrepareWriteSnapshotUpdate();
+                                }
                                 entry.SetValue(value, _weakValues);
                                 entry.Weight = weight;
                                 entry.WriteTimestamp = timestamp;
@@ -540,6 +544,11 @@ internal sealed partial class CacheEngine<TKey, TValue>
                                 entry.PolicyDetached = false;
                                 entry.RefreshFlight = null;
                                 entry.SharedTask = _weakValues ? null : Task.FromResult(value);
+                                InvokeHook(_testHooks?.BeforeRefreshSnapshotPublished);
+                                if (_useFixedWriteSnapshots)
+                                {
+                                    entry.PublishWriteSnapshot(value, timestamp);
+                                }
                                 published = true;
                             }
                         }
@@ -648,7 +657,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
                         && entry.RefreshFlight is null
                     )
                     {
-                        previousSnapshot.Restore(entry);
+                        previousSnapshot.Restore(entry, _testHooks?.BeforeRefreshSnapshotRestored);
                         restored = true;
                     }
                     else if (ReferenceEquals(entry.RefreshFlight, flight))
@@ -693,7 +702,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
                                 _entries.TryRemoveExact(entry);
                             }
 
-                            entry.Retired = true;
+                            Volatile.Write(ref entry.Retired, true);
                             entry.RefreshFlight = null;
                         }
                     }
@@ -906,9 +915,10 @@ internal sealed partial class CacheEngine<TKey, TValue>
         private readonly long _refreshFailureTimestamp;
         private readonly bool _hasRefreshFailure;
 
-        internal void Restore(Entry entry)
+        internal void Restore(Entry entry, Action? beforeSnapshotRestored)
         {
             entry.SetValue(Value, _weakValue);
+            InvokeHook(beforeSnapshotRestored);
             entry.Weight = Weight;
             entry.WriteTimestamp = _writeTimestamp;
             entry.AccessTimestamp = _accessTimestamp;
@@ -934,6 +944,11 @@ internal sealed partial class CacheEngine<TKey, TValue>
             entry.RefreshFailureTimestamp = _refreshFailureTimestamp;
             entry.HasRefreshFailure = _hasRefreshFailure;
             entry.RefreshFlight = null;
+            if (entry.PublishedWrite is not null)
+            {
+                // Rollback is a new publication, not a restoration of an old reference.
+                entry.PublishWriteSnapshot(Value, _writeTimestamp);
+            }
         }
     }
 

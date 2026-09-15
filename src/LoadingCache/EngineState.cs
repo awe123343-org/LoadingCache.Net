@@ -197,6 +197,12 @@ internal sealed partial class CacheEngine<TKey, TValue>
         }
     }
 
+    private sealed class FixedWritePublication(TValue value, long timestamp)
+    {
+        internal readonly TValue Value = value;
+        internal readonly long Timestamp = timestamp;
+    }
+
     private sealed class Entry
     {
         private Entry(TKey key, long epoch, long generation, bool weakKey)
@@ -226,6 +232,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         internal bool PolicyDetached;
         internal bool RemovalNotified;
         private TValue _strongValue = default!;
+        internal FixedWritePublication? PublishedWrite;
 
         // Reference, Int32, and Int64 have BCL volatile primitives. Other value types retain
         // the entry lock instead of adding a per-Put box or assuming struct copies are atomic.
@@ -281,7 +288,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
             TimeSpan? variableDuration = null,
             bool weakKey = false,
             bool weakValue = false,
-            bool createSharedTask = true
+            bool createSharedTask = true,
+            bool createWriteSnapshot = false
         )
         {
             var entry = new Entry(key, epoch, generation, weakKey)
@@ -297,7 +305,38 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 SharedTask = !weakValue && createSharedTask ? Task.FromResult(value) : null,
             };
             entry.SetValue(value, weakValue);
+            if (createWriteSnapshot)
+            {
+                entry.PublishInitialWriteSnapshot(value, timestamp);
+            }
             return entry;
+        }
+
+        internal void PublishWriteSnapshot(TValue value, long timestamp)
+        {
+            Volatile.Write(ref PublishedWrite, new FixedWritePublication(value, timestamp));
+        }
+
+        internal void PublishInitialWriteSnapshot(TValue value, long timestamp)
+        {
+            if (!SupportsAtomicStrongValue)
+            {
+                PublishWriteSnapshot(value, timestamp);
+            }
+        }
+
+        internal void PrepareWriteSnapshotUpdate()
+        {
+            if (PublishedWrite is null)
+            {
+                // Initial atomic fields are immutable until this full fence. Readers
+                // validate the null marker after acquiring both fields; subsequent
+                // mutations cannot become visible before the snapshot replaces it.
+                Interlocked.Exchange(
+                    ref PublishedWrite,
+                    new FixedWritePublication(_strongValue, WriteTimestamp)
+                );
+            }
         }
 
         internal bool TryGetKey([MaybeNullWhen(false)] out TKey key)

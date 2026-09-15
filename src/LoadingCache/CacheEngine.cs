@@ -31,6 +31,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     private readonly TimeProvider _timeProvider;
     private readonly bool _requiresReadTime;
     private readonly bool _useAtomicResidentReads;
+    private readonly bool _useFixedWriteSnapshots;
     private readonly bool _recordStatistics;
     private readonly bool _enableExpirationScheduler;
     private readonly ITimer? _expirationTimer;
@@ -223,6 +224,14 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             && !options.WeakValues
             && options.OnValueRetired is null
             && Entry.SupportsAtomicStrongValue;
+        _useFixedWriteSnapshots =
+            options.ExpireAfterWrite.HasValue
+            && !options.ExpireAfterAccess.HasValue
+            && !options.RefreshAfterWrite.HasValue
+            && options.Expiry is null
+            && !options.WeakKeys
+            && !options.WeakValues
+            && options.OnValueRetired is null;
         _recordStatistics = options.RecordStatistics;
         _enableExpirationScheduler = options.EnableExpirationScheduler;
         _testHooks = options.TestHooks;
@@ -924,7 +933,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                     variableDuration,
                     _weakKeys,
                     _weakValues,
-                    createSharedTask: false
+                    createSharedTask: false,
+                    createWriteSnapshot: _useFixedWriteSnapshots
                 );
                 entry.PolicyToken = new WindowTinyLfuEnginePolicy.EngineEntryToken(
                     entry,
@@ -1701,6 +1711,10 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                             GetPolicyHash(flight.Key)
                         );
                         InvokeHook(_testHooks?.BeforeReadyPublish);
+                        if (_useFixedWriteSnapshots)
+                        {
+                            entry.PublishInitialWriteSnapshot(value, timestamp);
+                        }
                         // Publish the complete snapshot last. Readers use an
                         // acquire read, so they cannot observe IsReady before
                         // PolicyToken/SharedTask and timestamps are initialized.
@@ -2258,7 +2272,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
 
         RetireExpirationNodeLocked(entry);
         _entries.TryRemoveExact(entry);
-        entry.Retired = true;
+        Volatile.Write(ref entry.Retired, true);
         Flight? refreshFlight = entry.RefreshFlight;
         if (refreshFlight is not null)
         {
@@ -2372,6 +2386,41 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             return true;
         }
 
+        if (_useFixedWriteSnapshots && !materializeSharedTask)
+        {
+            FixedWritePublication? publication = Volatile.Read(ref entry.PublishedWrite);
+            long duration = Volatile.Read(ref _expireAfterWriteTicks);
+            TValue snapshotValue;
+            long writeTimestamp;
+            if (publication is null)
+            {
+                snapshotValue = entry.ReadStrongValueAtomic();
+                writeTimestamp = Volatile.Read(ref entry.WriteTimestamp);
+            }
+            else
+            {
+                snapshotValue = publication.Value;
+                writeTimestamp = publication.Timestamp;
+            }
+            long now = _timeProvider.GetTimestamp();
+            if (
+                GetElapsedTime(writeTimestamp, now) < TimeSpan.FromTicks(duration)
+                && ReferenceEquals(publication, Volatile.Read(ref entry.PublishedWrite))
+                && !Volatile.Read(ref entry.Retired)
+            )
+            {
+                // Duration was observed while this publication was current. Sampling time
+                // afterwards is conservative; revalidation prevents combining an old value
+                // with a duration extended only after refresh/replacement. Rollback always
+                // publishes a new reference, so it cannot conceal an intervening version.
+                value = snapshotValue;
+                readyEntry = entry;
+                RecordHit();
+                _policy.OnAccess(entry.PolicyToken);
+                return true;
+            }
+        }
+
         return TryReadReadyLocked(
             entry,
             key,
@@ -2403,54 +2452,80 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         bool preserveForRefresh = false;
         bool valueCollected = false;
         long observedPublicationRevision = 0;
-        lock (entry.Sync)
+        bool coordinationTaken = false;
+        try
         {
-            // Sample the monotonic clock while holding the entry snapshot lock.
-            // This keeps access/write timestamps and the freshness decision from
-            // observing a torn value during replacement.
-            long now = _requiresReadTime ? _timeProvider.GetTimestamp() : 0;
-            if (!Volatile.Read(ref entry.IsReady) || IsExpired(entry, now))
+            // Only the fixed-write snapshot fallback needs mapping/configuration
+            // coordination. Its ordinary fresh hit never enters either lock.
+            if (_useFixedWriteSnapshots)
             {
-                value = default!;
-                observedPublicationRevision = entry.PublicationRevision;
-                preserveForRefresh =
-                    entry.RefreshFlight is not null
-                    && IsCurrentRefreshFlightSnapshot(entry, entry.RefreshFlight);
-            }
-            else
-            {
-                if (Volatile.Read(ref _expireAfterAccessTicks) >= 0)
+                Monitor.Enter(_gate, ref coordinationTaken);
+                if (
+                    !_entries.TryGetValue(key, out Entry? currentEntry)
+                    || !Volatile.Read(ref currentEntry.IsReady)
+                )
                 {
-                    TouchWithoutLock(entry, now);
+                    value = default!;
+                    return false;
                 }
-                if (!entry.TryGetValue(out TValue? liveValue))
+                entry = currentEntry;
+            }
+            lock (entry.Sync)
+            {
+                // Sample the monotonic clock while holding the entry snapshot lock.
+                // This keeps access/write timestamps and the freshness decision from
+                // observing a torn value during replacement.
+                long now = _requiresReadTime ? _timeProvider.GetTimestamp() : 0;
+                if (!Volatile.Read(ref entry.IsReady) || IsExpired(entry, now))
                 {
-                    preserveForRefresh = false;
-                    valueCollected = true;
                     value = default!;
                     observedPublicationRevision = entry.PublicationRevision;
+                    preserveForRefresh =
+                        entry.RefreshFlight is not null
+                        && IsCurrentRefreshFlightSnapshot(entry, entry.RefreshFlight);
                 }
                 else
                 {
-                    value = liveValue!;
-                    policyToken = entry.PolicyToken;
-                    if (materializeSharedTask)
+                    if (Volatile.Read(ref _expireAfterAccessTicks) >= 0)
                     {
-                        sharedTask = entry.GetOrCreateSharedTaskLocked();
+                        TouchWithoutLock(entry, now);
                     }
-                    if (_expiry is not null)
+                    if (!entry.TryGetValue(out TValue? liveValue))
                     {
-                        variableTimestamp = entry.VariableTimestamp;
-                        variableRevision = entry.VariableRevision;
-                        variableDuration = GetRemainingDuration(
-                            entry,
-                            now,
-                            ExpirationKind.Variable
-                        );
+                        preserveForRefresh = false;
+                        valueCollected = true;
+                        value = default!;
+                        observedPublicationRevision = entry.PublicationRevision;
                     }
-                    readyEntry = entry;
-                    refreshEligible = IsRefreshEligibleLocked(entry, now);
+                    else
+                    {
+                        value = liveValue!;
+                        policyToken = entry.PolicyToken;
+                        if (materializeSharedTask)
+                        {
+                            sharedTask = entry.GetOrCreateSharedTaskLocked();
+                        }
+                        if (_expiry is not null)
+                        {
+                            variableTimestamp = entry.VariableTimestamp;
+                            variableRevision = entry.VariableRevision;
+                            variableDuration = GetRemainingDuration(
+                                entry,
+                                now,
+                                ExpirationKind.Variable
+                            );
+                        }
+                        readyEntry = entry;
+                        refreshEligible = IsRefreshEligibleLocked(entry, now);
+                    }
                 }
+            }
+        }
+        finally
+        {
+            if (coordinationTaken)
+            {
+                Monitor.Exit(_gate);
             }
         }
 
