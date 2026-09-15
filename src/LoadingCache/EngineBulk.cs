@@ -927,6 +927,10 @@ internal sealed partial class CacheEngine<TKey, TValue>
             entry.VariableDuration = publication.Duration;
             entry.VariableRevision++;
             entry.PublicationRevision++;
+            // Capture ownership before clearing Flight or invoking any later
+            // publication step that can throw, including BeforeReadyPublish.
+            publication.PublishedEntry = entry;
+            publication.PublishedRevision = entry.PublicationRevision;
             entry.Flight = null;
             entry.SharedTask = _weakValues ? null : Task.FromResult(publication.Value);
             entry.PolicyToken = new WindowTinyLfuEnginePolicy.EngineEntryToken(
@@ -1048,9 +1052,20 @@ internal sealed partial class CacheEngine<TKey, TValue>
             {
                 if (
                     _entries.TryGetValue(key, out Entry? entry)
-                    && (ReferenceEquals(entry.Flight, group.Owner) || entry.Flight is null)
                     && entry.Epoch == group.Epoch
                     && entry.Generation == group.Owner.Generation
+                    && (
+                        ReferenceEquals(entry.Flight, group.Owner)
+                        || (
+                            group.Prepared is { } prepared
+                            && prepared.Publications.TryGetValue(
+                                key,
+                                out BulkPublication? publication
+                            )
+                            && ReferenceEquals(publication.PublishedEntry, entry)
+                            && publication.PublishedRevision == entry.PublicationRevision
+                        )
+                    )
                 )
                 {
                     RemoveCurrentEntryLocked(entry);
@@ -1285,6 +1300,10 @@ internal sealed partial class CacheEngine<TKey, TValue>
         internal TValue Value { get; } = value;
         internal long Weight { get; } = weight;
         internal TimeSpan Duration { get; } = duration;
+
+        // Only the owning engine gate reads or writes publication ownership.
+        internal Entry? PublishedEntry;
+        internal long PublishedRevision;
     }
 
     private sealed class BulkPrepared(
