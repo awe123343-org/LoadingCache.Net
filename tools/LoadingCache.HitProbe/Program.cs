@@ -695,6 +695,7 @@ internal static class Program
         private readonly FieldInfo _readCursor;
         private readonly FieldInfo _writeCursor;
         private readonly bool _recordStatistics;
+        private readonly bool _recordTotals;
         private readonly uint _policySeed;
 
         internal LoadingDiagnostics(object cache)
@@ -707,6 +708,11 @@ internal static class Program
             Type bufferType = _buffer.GetType();
             _consumerGate = Field(bufferType, "_consumerGate").GetValue(_buffer)!;
             _recordStatistics = (bool)Field(bufferType, "_recordStatistics").GetValue(_buffer)!;
+            // Older frozen libraries couple success totals to drop statistics. Resolve this
+            // once before timing so one harness can compare both recording implementations.
+            _recordTotals =
+                (bool?)bufferType.GetField("_recordTotals", InstanceMembers)?.GetValue(_buffer)
+                ?? _recordStatistics;
             _table = Field(bufferType, "_table");
             Type ringType = _table.FieldType.GetElementType()!;
             _readCursor = Field(ringType, "_readCounter");
@@ -754,8 +760,8 @@ internal static class Program
             return new(
                 (long)_requests.GetValue(maintenance)!,
                 (long)_drainPasses.GetValue(maintenance)!,
-                _recordStatistics ? (long)_enqueued.GetValue(reads)! : null,
-                _recordStatistics ? (long)_dequeued.GetValue(reads)! : null,
+                _recordTotals ? (long)_enqueued.GetValue(reads)! : null,
+                _recordTotals ? (long)_dequeued.GetValue(reads)! : null,
                 _recordStatistics ? (long)_droppedFull.GetValue(reads)! : null,
                 _recordStatistics ? (long)_droppedFailed.GetValue(reads)! : null,
                 reserved,
@@ -764,7 +770,9 @@ internal static class Program
                 _policySeed,
                 ThreadPool.ThreadCount,
                 ThreadPool.PendingWorkItemCount,
-                ThreadPool.CompletedWorkItemCount
+                ThreadPool.CompletedWorkItemCount,
+                _recordTotals,
+                _recordStatistics
             );
         }
 
@@ -1021,7 +1029,9 @@ internal static class Program
         uint PolicySeed,
         int ThreadPoolThreads,
         long ThreadPoolPendingItems,
-        long ThreadPoolCompletedItems
+        long ThreadPoolCompletedItems,
+        bool ReadTotalsRecorded,
+        bool ReadDropsRecorded
     );
 
     [UsedImplicitly(ImplicitUseTargetFlags.WithMembers)]
