@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using LoadingCache.Maintenance;
 using LoadingCache.Ownership;
 
 namespace LoadingCache;
@@ -149,7 +150,8 @@ public sealed class OwnedCache<TKey, TValue> : IDisposable, IAsyncDisposable
         OwnedCacheOptions<TKey, TValue> options,
         Action<TValue>? disposeValue,
         Func<TValue, ValueTask>? disposeValueAsync,
-        Func<Action, bool>? scheduleDisposal = null
+        Func<Action, bool>? scheduleDisposal = null,
+        IMaintenanceScheduler? maintenanceScheduler = null
     )
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -193,6 +195,7 @@ public sealed class OwnedCache<TKey, TValue> : IDisposable, IAsyncDisposable
                     TimeProvider = options.TimeProvider,
                     EnableExpirationScheduler = options.EnableExpirationScheduler,
                     RecordStatistics = options.RecordStatistics,
+                    MaintenanceScheduler = maintenanceScheduler,
                     MemoryPressureSamplingInterval = options.MemoryPressureSamplingInterval,
                     MemoryPressureThreshold = options.MemoryPressureThreshold,
                     MemoryPressureTrimFraction = options.MemoryPressureTrimFraction,

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using FluentAssertions;
+using LoadingCache.Maintenance;
 using Microsoft.Extensions.Time.Testing;
 using NUnit.Framework;
 
@@ -208,22 +209,67 @@ public sealed class OwnedCacheTests
     {
         var first = new DisposableValue();
         var second = new DisposableValue();
-        using var cache = OwnedCache.Create(
+        ConcurrentQueue<Action> disposals = new();
+        var maintenance = new ManualMaintenanceScheduler();
+        var cache = new OwnedCache<int, DisposableValue>(
             CreateOptions(maximumSize: 1, maximumActiveValues: 3),
-            item => item.Dispose()
+            static item => item.Dispose(),
+            disposeValueAsync: null,
+            scheduleDisposal: work =>
+            {
+                disposals.Enqueue(work);
+                return true;
+            },
+            maintenanceScheduler: maintenance
         );
 
-        cache.Put(1, first);
-        cache.Put(2, second);
-        cache.CleanUp();
-        cache.EstimatedCount.Should().BeLessOrEqualTo(1);
-        WaitUntil(() => first.DisposeCount + second.DisposeCount == 1, TimeSpan.FromSeconds(2));
-        cache.Dispose();
+        try
+        {
+            cache.Put(1, first);
+            cache.Put(2, second);
+            maintenance.Pending.Should().BePositive();
+            disposals.Should().BeEmpty();
+            first.DisposeCount.Should().Be(0);
+            second.DisposeCount.Should().Be(0);
 
-        WaitUntil(
-            () => first.DisposeCount == 1 && second.DisposeCount == 1,
-            TimeSpan.FromSeconds(2)
-        );
+            cache.CleanUp();
+            maintenance.RunAll();
+            cache.EstimatedCount.Should().Be(1);
+            disposals.Should().ContainSingle();
+            cache.GetDisposalStatistics().PendingDisposals.Should().Be(1);
+            first.DisposeCount.Should().Be(0);
+            second.DisposeCount.Should().Be(0);
+
+            disposals.TryDequeue(out Action? disposeEvicted).Should().BeTrue();
+            disposeEvicted!();
+            (first.DisposeCount + second.DisposeCount).Should().Be(1);
+            cache.GetDisposalStatistics().PendingDisposals.Should().Be(0);
+            cache.GetDisposalStatistics().ActiveValueCount.Should().Be(1);
+            disposals.Should().BeEmpty();
+
+            cache.Dispose();
+            maintenance.RunAll();
+            disposals.Should().ContainSingle();
+            cache.GetDisposalStatistics().PendingDisposals.Should().Be(1);
+            (first.DisposeCount + second.DisposeCount).Should().Be(1);
+
+            disposals.TryDequeue(out Action? disposeRemaining).Should().BeTrue();
+            disposeRemaining!();
+            first.DisposeCount.Should().Be(1);
+            second.DisposeCount.Should().Be(1);
+            cache.GetDisposalStatistics().PendingDisposals.Should().Be(0);
+            cache.GetDisposalStatistics().ActiveValueCount.Should().Be(0);
+            disposals.Should().BeEmpty();
+        }
+        finally
+        {
+            cache.Dispose();
+            maintenance.RunAll();
+            while (disposals.TryDequeue(out Action? pendingDisposal))
+            {
+                pendingDisposal();
+            }
+        }
     }
 
     [Test]
@@ -548,6 +594,32 @@ public sealed class OwnedCacheTests
     private static void WaitUntil(Func<bool> condition, TimeSpan timeout)
     {
         SpinWait.SpinUntil(condition, timeout).Should().BeTrue();
+    }
+
+    private sealed class ManualMaintenanceScheduler : IMaintenanceScheduler
+    {
+        private readonly ConcurrentQueue<Action> _callbacks = new();
+
+        internal int Pending => _callbacks.Count;
+
+        public bool TrySchedule(Action callback)
+        {
+            _callbacks.Enqueue(callback);
+            return true;
+        }
+
+        internal void RunAll()
+        {
+            int budget = 128;
+            while (_callbacks.TryDequeue(out Action? callback))
+            {
+                if (--budget == 0)
+                {
+                    throw new InvalidOperationException("Maintenance did not quiesce.");
+                }
+                callback();
+            }
+        }
     }
 
     private sealed class DisposableValue
