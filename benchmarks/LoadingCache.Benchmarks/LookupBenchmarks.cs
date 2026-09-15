@@ -23,7 +23,7 @@ public class LookupBenchmarks : IAsyncDisposable
     [Params(64, 10_000)]
     public int Capacity { get; set; }
 
-    /// <summary>Gets or sets whether this library's statistics are enabled.</summary>
+    /// <summary>Gets or sets whether LoadingCache and MemoryCache statistics are enabled.</summary>
     [UsedImplicitly]
     [Params(false, true)]
     public bool Statistics { get; set; }
@@ -32,7 +32,9 @@ public class LookupBenchmarks : IAsyncDisposable
     [GlobalSetup]
     public void Setup()
     {
-        _memory = new MemoryCache(new MemoryCacheOptions { SizeLimit = Capacity });
+        _memory = new MemoryCache(
+            new MemoryCacheOptions { SizeLimit = Capacity, TrackStatistics = Statistics }
+        );
         _bitFaster = new ConcurrentLfuBuilder<int, int>().WithCapacity(Capacity).Build();
         var builder = CacheBuilder.Create<int, int>().MaximumSize(Capacity).MaxConcurrentLoads(16);
         if (Statistics)
