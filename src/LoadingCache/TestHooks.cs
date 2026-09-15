@@ -10,6 +10,10 @@ internal sealed class LoadingCacheTestHooks
     // but IsReady has not yet been release-published.
     internal Action? BeforeReadyPublish { get; init; }
 
+    // A read observed expiry and released entry.Sync, before physical cleanup
+    // acquires the engine gate. No hook is invoked on a resident hit.
+    internal Action? BeforeExpiredReadCleanup { get; init; }
+
     // Internal race-test seam. The variable read-expiry revision has been
     // committed before this callback is invoked.
     internal Action? AfterReadExpiryUpdate { get; init; }

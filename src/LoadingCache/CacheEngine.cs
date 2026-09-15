@@ -2410,6 +2410,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         TimeSpan variableDuration = TimeSpan.MaxValue;
         bool preserveForRefresh = false;
         bool valueCollected = false;
+        long observedPublicationRevision = 0;
         lock (entry.Sync)
         {
             // Sample the monotonic clock while holding the entry snapshot lock.
@@ -2419,6 +2420,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             if (!Volatile.Read(ref entry.IsReady) || IsExpired(entry, now))
             {
                 value = default!;
+                observedPublicationRevision = entry.PublicationRevision;
                 preserveForRefresh =
                     entry.RefreshFlight is not null
                     && IsCurrentRefreshFlightSnapshot(entry, entry.RefreshFlight);
@@ -2434,6 +2436,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                     preserveForRefresh = false;
                     valueCollected = true;
                     value = default!;
+                    observedPublicationRevision = entry.PublicationRevision;
                 }
                 else
                 {
@@ -2466,15 +2469,37 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 return false;
             }
 
+            if (!valueCollected)
+            {
+                InvokeHook(_testHooks?.BeforeExpiredReadCleanup);
+            }
+
             // A nested lookup owns its expiration notification. It must not enqueue
             // into a surrounding loader's scope and defer delivery until that loader returns.
             using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
-            RemovalNotification<TKey, TValue>? evictionNotification;
+            RemovalNotification<TKey, TValue>? evictionNotification = null;
             lock (_gate)
             {
-                evictionNotification = valueCollected
-                    ? RemoveCurrentEntryLocked(entry, collected: true)
-                    : RemoveExpiredEntryLocked(entry);
+                lock (entry.Sync)
+                {
+                    // Refresh publishes a new value into the same Entry. The earlier
+                    // miss cannot remove that version, even though entry identity matches.
+                    // A duration change can also make the observed value fresh again.
+                    if (
+                        entry.PublicationRevision == observedPublicationRevision
+                        && _entries.IsCurrent(entry)
+                    )
+                    {
+                        if (valueCollected && !entry.TryGetValue(out _))
+                        {
+                            evictionNotification = RemoveCurrentEntryLocked(entry, collected: true);
+                        }
+                        else if (!valueCollected && IsExpired(entry, _timeProvider.GetTimestamp()))
+                        {
+                            evictionNotification = RemoveExpiredEntryLocked(entry);
+                        }
+                    }
+                }
             }
             if (evictionNotification is { } notification)
             {
