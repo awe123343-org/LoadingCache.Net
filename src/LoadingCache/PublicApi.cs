@@ -112,7 +112,7 @@ public sealed class LoadingCacheOptions
     public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
 
     /// <summary>
-    /// Gets or sets whether cache operation counters are recorded.
+    /// Gets or sets whether cache operation counters are recorded. The default is false.
     /// </summary>
     [PublicAPI]
     public bool RecordStatistics { get; init; }
