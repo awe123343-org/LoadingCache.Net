@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
 using NUnit.Framework;
@@ -306,7 +307,8 @@ public sealed class OwnedCacheTests
     public void OverweightPutAndLeaseKeepsRejectedValueUsable()
     {
         var value = new DisposableValue();
-        using var cache = OwnedCache.Create(
+        ConcurrentQueue<Action> disposals = new();
+        using var cache = new OwnedCache<int, DisposableValue>(
             new OwnedCacheOptions<int, DisposableValue>
             {
                 MaximumWeight = 1,
@@ -314,15 +316,32 @@ public sealed class OwnedCacheTests
                 MaximumActiveValues = 2,
                 Weigher = (_, _) => 2,
             },
-            item => item.Dispose()
+            static item => item.Dispose(),
+            disposeValueAsync: null,
+            scheduleDisposal: work =>
+            {
+                disposals.Enqueue(work);
+                return true;
+            }
         );
 
-        CacheLease<DisposableValue> lease = cache.PutAndLease(1, value);
+        using CacheLease<DisposableValue> lease = cache.PutAndLease(1, value);
         cache.CleanUp();
         lease.Value.Should().BeSameAs(value);
         value.DisposeCount.Should().Be(0);
+        disposals.Should().BeEmpty();
         lease.Dispose();
-        WaitUntil(() => value.DisposeCount == 1, TimeSpan.FromSeconds(2));
+        disposals.Should().ContainSingle();
+        cache.GetDisposalStatistics().PendingDisposals.Should().Be(1);
+        value.DisposeCount.Should().Be(0);
+
+        disposals.TryDequeue(out Action? dispose).Should().BeTrue();
+        dispose!();
+
+        value.DisposeCount.Should().Be(1);
+        cache.GetDisposalStatistics().PendingDisposals.Should().Be(0);
+        cache.GetDisposalStatistics().ActiveValueCount.Should().Be(0);
+        disposals.Should().BeEmpty();
     }
 
     [Test]
@@ -419,6 +438,7 @@ public sealed class OwnedCacheTests
     {
         var first = new DisposableValue();
         var second = new DisposableValue();
+        ConcurrentQueue<Action> disposals = new();
         var started = new TaskCompletionSource<object?>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
@@ -428,21 +448,34 @@ public sealed class OwnedCacheTests
         var completed = new TaskCompletionSource<object?>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
-        var cache = OwnedCache.CreateAsync(
+        var cache = new OwnedCache<int, DisposableValue>(
             CreateOptions(maximumSize: 1, maximumActiveValues: 1),
-            async item =>
+            disposeValue: null,
+            disposeValueAsync: async item =>
             {
                 started.TrySetResult(null);
                 await release.Task.ConfigureAwait(false);
                 item.Dispose();
                 completed.TrySetResult(null);
+            },
+            scheduleDisposal: work =>
+            {
+                disposals.Enqueue(work);
+                return true;
             }
         );
 
         try
         {
             cache.Put(1, first);
+            disposals.Should().BeEmpty();
             cache.Invalidate(1).Should().BeTrue();
+            disposals.Should().ContainSingle();
+            cache.GetDisposalStatistics().PendingDisposals.Should().Be(1);
+            first.DisposeCount.Should().Be(0);
+            started.Task.IsCompleted.Should().BeFalse();
+            disposals.TryDequeue(out Action? startDisposal).Should().BeTrue();
+            startDisposal!();
             await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
             Action putWhileDisposing = () => cache.Put(2, second);
@@ -457,11 +490,22 @@ public sealed class OwnedCacheTests
             );
             cache.Put(2, second);
             cache.Invalidate(2).Should().BeTrue();
-            WaitForDisposal(second);
+            disposals.Should().ContainSingle();
+            second.DisposeCount.Should().Be(0);
+            disposals.TryDequeue(out Action? disposeSecond).Should().BeTrue();
+            disposeSecond!();
+            second.DisposeCount.Should().Be(1);
+            cache.GetDisposalStatistics().PendingDisposals.Should().Be(0);
+            disposals.Should().BeEmpty();
         }
         finally
         {
+            release.TrySetResult(null);
             await cache.DisposeAsync();
+            while (disposals.TryDequeue(out Action? pendingDisposal))
+            {
+                pendingDisposal();
+            }
         }
     }
 

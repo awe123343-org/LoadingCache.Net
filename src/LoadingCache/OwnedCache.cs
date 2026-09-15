@@ -148,7 +148,8 @@ public sealed class OwnedCache<TKey, TValue> : IDisposable, IAsyncDisposable
     internal OwnedCache(
         OwnedCacheOptions<TKey, TValue> options,
         Action<TValue>? disposeValue,
-        Func<TValue, ValueTask>? disposeValueAsync
+        Func<TValue, ValueTask>? disposeValueAsync,
+        Func<Action, bool>? scheduleDisposal = null
     )
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -163,8 +164,16 @@ public sealed class OwnedCache<TKey, TValue> : IDisposable, IAsyncDisposable
         int maximumActiveValues = ResolveMaximumActiveValues(options);
         Func<TKey, TValue, long>? configuredWeigher = options.Weigher;
         _ownership = disposeValue is not null
-            ? new ValueOwnership<TValue>(maximumActiveValues, disposeValue)
-            : new ValueOwnership<TValue>(maximumActiveValues, disposeValueAsync!);
+            ? new ValueOwnership<TValue>(
+                maximumActiveValues,
+                disposeValue,
+                scheduleDisposal: scheduleDisposal
+            )
+            : new ValueOwnership<TValue>(
+                maximumActiveValues,
+                disposeValueAsync!,
+                scheduleDisposal: scheduleDisposal
+            );
 
         try
         {
