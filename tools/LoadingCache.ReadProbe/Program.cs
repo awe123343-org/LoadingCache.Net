@@ -26,6 +26,11 @@ internal static class Program
 
     private static int Main(string[] args)
     {
+        if (Array.IndexOf(args, "--cache-path") >= 0)
+        {
+            return CachePathDiagnostic.Run(args);
+        }
+
         ProbeOptions options = ProbeOptions.Parse(args);
         List<ProbeSample> samples = [];
 
