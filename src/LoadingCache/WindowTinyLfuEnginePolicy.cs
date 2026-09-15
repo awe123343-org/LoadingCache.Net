@@ -35,6 +35,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
     private int _maintenanceSignal;
     private int _writeMaintenanceSignal;
     private bool _evictionPending;
+    private bool _skipReadBuffer;
 
     internal WindowTinyLfuEnginePolicy(
         long maximum,
@@ -61,6 +62,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
         _coldStartEnabled = enableColdStart;
         _accessConsumer = ConsumeAccess;
         _policy = CreatePolicy();
+        _skipReadBuffer = _coldStartEnabled;
         _pendingAccesses = new StripedReadBuffer<EngineEntryToken>(
             readStripeCount,
             readStripeCapacity,
@@ -107,7 +109,15 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
                 countChanged = _policy.SetMaximumCount(_maximumResidentCount);
             }
 
-            IReadOnlyList<PolicyNode<object>> changed = _policy.SetMaximum(maximum);
+            IReadOnlyList<PolicyNode<object>> changed;
+            try
+            {
+                changed = _policy.SetMaximum(maximum);
+            }
+            finally
+            {
+                EnableReadRecordingIfInitializedLocked();
+            }
             Maximum = maximum;
             ProcessBoth(countChanged, changed);
         }
@@ -150,7 +160,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
             return;
         }
 
-        if (_coldStartEnabled && !Volatile.Read(ref _policy).IsSketchInitialized)
+        if (Volatile.Read(ref _skipReadBuffer))
         {
             return;
         }
@@ -275,7 +285,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
             }
 
             _nodes.Clear();
-            Volatile.Write(ref _policy, CreatePolicy());
+            ResetPolicyLocked();
             _evictionPending = false;
             UpdateWriteMaintenanceSignalLocked();
             UpdateMaintenanceSignalLocked();
@@ -290,7 +300,16 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
             DrainWritesLocked(MaximumWriteDrainPerPass);
             bool writesRemain = _pendingWrites.Queued != 0;
             DrainAccessesLocked(MaximumReadDrainPerPass);
-            Process(_policy.Maintain());
+            IReadOnlyList<PolicyNode<object>> maintained;
+            try
+            {
+                maintained = _policy.Maintain();
+            }
+            finally
+            {
+                EnableReadRecordingIfInitializedLocked();
+            }
+            Process(maintained);
             _beforeMaintenanceSignalClear?.Invoke();
             bool writesPending = UpdateWriteMaintenanceSignalLocked();
             return writesRemain || writesPending || UpdateMaintenanceSignalLocked();
@@ -433,7 +452,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
                 }
             }
 
-            Volatile.Write(ref _policy, CreatePolicy());
+            ResetPolicyLocked();
             _nodes.Clear();
             Volatile.Write(ref _maintenanceSignal, 0);
             Volatile.Write(ref _writeMaintenanceSignal, 0);
@@ -604,7 +623,15 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
         node.AppliedPolicyWriteSequence = write.Sequence;
         token.Node = node;
         _nodes.Add(node);
-        IReadOnlyList<PolicyNode<object>> added = _policy.AddDeferred(node);
+        IReadOnlyList<PolicyNode<object>> added;
+        try
+        {
+            added = _policy.AddDeferred(node);
+        }
+        finally
+        {
+            EnableReadRecordingIfInitializedLocked();
+        }
         if (added.Count != 0)
         {
             Process(added);
@@ -665,6 +692,28 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
 
         Volatile.Write(ref _writeMaintenanceSignal, 0);
         return false;
+    }
+
+    private void EnableReadRecordingIfInitializedLocked()
+    {
+        // Initialization is monotonic within one policy generation. Publish only the transition,
+        // so resident reads need not visit policy/sketch fields changed by the maintenance owner.
+        if (_skipReadBuffer && _policy.IsSketchInitialized)
+        {
+            Volatile.Write(ref _skipReadBuffer, false);
+        }
+    }
+
+    private void ResetPolicyLocked()
+    {
+        WindowTinyLfuPolicy<object> replacement = CreatePolicy();
+        // Close cold-start read admission before publishing the replacement. An overlapping
+        // read that already passed the old flag still carries its exact, retired entry token.
+        if (_skipReadBuffer != _coldStartEnabled)
+        {
+            Volatile.Write(ref _skipReadBuffer, _coldStartEnabled);
+        }
+        Volatile.Write(ref _policy, replacement);
     }
 
     private WindowTinyLfuPolicy<object> CreatePolicy()

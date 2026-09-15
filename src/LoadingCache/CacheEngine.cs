@@ -228,7 +228,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         _testHooks = options.TestHooks;
         int maintenanceReadStripeCount =
             options.MaintenanceReadStripeCount ?? DefaultMaintenanceReadStripeCount();
-        int maintenanceReadStripeCapacity = options.MaintenanceReadStripeCapacity ?? 16;
+        int maintenanceReadStripeCapacity = options.MaintenanceReadStripeCapacity ?? 64;
         bool enableColdStart = CanUseColdStartPolicy(options);
         _policy =
             options.Policy
@@ -2439,14 +2439,20 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 {
                     value = liveValue!;
                     policyToken = entry.PolicyToken;
-                    sharedTask = materializeSharedTask
-                        ? entry.GetOrCreateSharedTaskLocked()
-                        : entry.SharedTask;
-                    variableTimestamp = entry.VariableTimestamp;
-                    variableRevision = entry.VariableRevision;
-                    variableDuration = _expiry is null
-                        ? TimeSpan.MaxValue
-                        : GetRemainingDuration(entry, now, ExpirationKind.Variable);
+                    if (materializeSharedTask)
+                    {
+                        sharedTask = entry.GetOrCreateSharedTaskLocked();
+                    }
+                    if (_expiry is not null)
+                    {
+                        variableTimestamp = entry.VariableTimestamp;
+                        variableRevision = entry.VariableRevision;
+                        variableDuration = GetRemainingDuration(
+                            entry,
+                            now,
+                            ExpirationKind.Variable
+                        );
+                    }
                     readyEntry = entry;
                     refreshEligible = IsRefreshEligibleLocked(entry, now);
                 }
@@ -2477,14 +2483,17 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             return false;
         }
 
-        ApplyReadExpiryUpdate(
-            entry,
-            key,
-            value,
-            variableTimestamp,
-            variableRevision,
-            variableDuration
-        );
+        if (_expiry is not null)
+        {
+            ApplyReadExpiryUpdate(
+                entry,
+                key,
+                value,
+                variableTimestamp,
+                variableRevision,
+                variableDuration
+            );
+        }
         RecordHit();
         // Access recording is a bounded, lossy policy event.  It intentionally
         // runs after releasing the entry lock and never takes the engine gate.

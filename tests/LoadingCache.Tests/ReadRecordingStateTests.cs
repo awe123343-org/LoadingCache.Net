@@ -1,0 +1,120 @@
+using FluentAssertions;
+using NUnit.Framework;
+
+namespace LoadingCache.Tests;
+
+[TestFixture]
+public sealed class ReadRecordingStateTests
+{
+    [TestCase("flush")]
+    [TestCase("cleanup")]
+    [TestCase("snapshot")]
+    public void WriteDrainActivatesReadRecordingAndClearRestoresColdStart(string drain)
+    {
+        using WindowTinyLfuEnginePolicy policy = CreatePolicy(maximum: 4);
+        var first = CreateToken(1);
+        var second = CreateToken(2);
+
+        policy.OnPublish(first, 1);
+        DrainWrites(policy, drain);
+        policy.OnAccess(first);
+        policy.IsSketchInitialized.Should().BeFalse();
+        policy.GetReadBufferStatistics().Enqueued.Should().Be(0);
+
+        policy.OnPublish(second, 1);
+        DrainWrites(policy, drain);
+        policy.OnAccess(second);
+        policy.IsSketchInitialized.Should().BeTrue();
+        policy.GetReadBufferStatistics().Enqueued.Should().Be(1);
+
+        policy.Clear();
+        var third = CreateToken(3);
+        var fourth = CreateToken(4);
+        policy.OnPublish(third, 1);
+        DrainWrites(policy, drain);
+        policy.OnAccess(first);
+        policy.OnAccess(third);
+        policy.IsSketchInitialized.Should().BeFalse();
+        policy.GetReadBufferStatistics().Enqueued.Should().Be(1);
+
+        policy.OnPublish(fourth, 1);
+        DrainWrites(policy, drain);
+        policy.OnAccess(fourth);
+        policy.IsSketchInitialized.Should().BeTrue();
+        policy.GetReadBufferStatistics().Enqueued.Should().Be(2);
+        policy.CleanUp();
+        policy.GetReadBufferStatistics().Queued.Should().Be(0);
+        policy
+            .Snapshot(hottest: true, limit: 4)
+            .Should()
+            .BeEquivalentTo([third.Entry, fourth.Entry]);
+    }
+
+    [TestCase(6)]
+    [TestCase(8)]
+    [TestCase(16)]
+    public void ResizeActivatesReadsAndRemovalBelowThresholdDoesNotDisableThem(int maximum)
+    {
+        using WindowTinyLfuEnginePolicy policy = CreatePolicy(maximum: 8);
+        var first = CreateToken(1);
+        policy.OnPublish(first, 1);
+        policy.FlushWrites();
+        policy.OnAccess(first);
+        policy.IsSketchInitialized.Should().BeFalse();
+        policy.GetReadBufferStatistics().Enqueued.Should().Be(0);
+
+        // Same-size, smaller, and larger maxima all explicitly initialize the sketch,
+        // even though one resident is below every selected half-capacity threshold.
+        policy.SetMaximum(maximum, weighted: false);
+        policy.OnAccess(first);
+        policy.IsSketchInitialized.Should().BeTrue();
+        policy.GetReadBufferStatistics().Enqueued.Should().Be(1);
+
+        policy.OnRemove(first);
+        policy.FlushWrites();
+        policy.ResidentCount.Should().Be(0);
+        var second = CreateToken(2);
+        policy.OnPublish(second, 1);
+        policy.FlushWrites();
+        policy.OnAccess(second);
+        policy.IsSketchInitialized.Should().BeTrue();
+        policy.GetReadBufferStatistics().Enqueued.Should().Be(2);
+        policy.CleanUp();
+        policy.GetReadBufferStatistics().Queued.Should().Be(0);
+        policy.Snapshot(hottest: true, limit: 4).Should().BeEquivalentTo([second.Entry]);
+    }
+
+    private static void DrainWrites(WindowTinyLfuEnginePolicy policy, string drain)
+    {
+        switch (drain)
+        {
+            case "flush":
+                policy.FlushWrites();
+                break;
+            case "cleanup":
+                policy.CleanUp();
+                break;
+            case "snapshot":
+                policy.Snapshot(hottest: true, limit: 4);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(drain));
+        }
+    }
+
+    private static WindowTinyLfuEnginePolicy CreatePolicy(long maximum) =>
+        new(
+            maximum,
+            maximumResidentCount: checked((int)maximum),
+            static _ => { },
+            requestMaintenance: static () => false,
+            beforeMaintenance: null,
+            beforeMaintenanceSignalClear: null,
+            readStripeCount: 1,
+            readStripeCapacity: 8,
+            enableColdStart: true
+        );
+
+    private static WindowTinyLfuEnginePolicy.EngineEntryToken CreateToken(int value) =>
+        new(value, unchecked((uint)value * 0x9E3779B9u));
+}

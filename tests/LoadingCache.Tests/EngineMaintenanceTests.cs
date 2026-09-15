@@ -41,6 +41,57 @@ public sealed class EngineMaintenanceTests
     }
 
     [Test]
+    public void DefaultReadBufferBatches64HitsBeforeSchedulingMaintenance()
+    {
+        ManualMaintenanceScheduler scheduler = new();
+        CacheEngine<int, string> engine = new(
+            new CacheEngineOptions<int, string>
+            {
+                MaximumSize = 4,
+                MaxConcurrentLoads = 4,
+                RecordStatistics = true,
+                MaintenanceScheduler = scheduler,
+            }
+        );
+        using var cache = new Cache<int, string>(engine);
+
+        // Activate read recording without overriding either production buffer default.
+        cache.Policy.Eviction!.SetMaximum(4);
+        cache.Put(1, "ready");
+        scheduler.Pending.Should().Be(1);
+        scheduler.RunNext();
+        scheduler.Pending.Should().Be(0);
+        int writeScheduleCalls = scheduler.ScheduleCalls;
+
+        for (int index = 0; index < 64; index++)
+        {
+            cache.TryGet(1, out string? value).Should().BeTrue();
+            value.Should().Be("ready");
+            scheduler.Pending.Should().Be(0);
+        }
+
+        ReadBufferStatistics full = engine.GetPolicyReadBufferStatistics();
+        full.Queued.Should().Be(64);
+        full.Enqueued.Should().Be(64);
+        full.DroppedFull.Should().Be(0);
+        scheduler.ScheduleCalls.Should().Be(writeScheduleCalls);
+
+        cache.TryGet(1, out string? last).Should().BeTrue();
+        last.Should().Be("ready");
+        engine.GetPolicyReadBufferStatistics().DroppedFull.Should().Be(1);
+        scheduler.Pending.Should().Be(1);
+        scheduler.ScheduleCalls.Should().Be(writeScheduleCalls + 1);
+
+        scheduler.RunNext();
+        ReadBufferStatistics drained = engine.GetPolicyReadBufferStatistics();
+        drained.Queued.Should().Be(0);
+        drained.Dequeued.Should().Be(64);
+        scheduler.Pending.Should().Be(0);
+        engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
+        engine.AssertInvariants();
+    }
+
+    [Test]
     public async Task ReadyHitProgressesWhilePolicyMaintenanceIsPaused()
     {
         ManualMaintenanceScheduler scheduler = new();
