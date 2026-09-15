@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using JetBrains.Annotations;
 using Microsoft.Extensions.Caching.Memory;
 
@@ -49,7 +50,8 @@ internal static class Program
         if (options.Backend == "loadingcache")
         {
             using ICache<TKey, int> cache = CreateCache<TKey>(options);
-            Run<TKey, LoadingBackend<TKey>>(options, keys, new(cache));
+            LoadingDiagnostics? diagnostics = options.Diagnostics ? new(cache) : null;
+            Run<TKey, LoadingBackend<TKey>>(options, keys, new(cache), diagnostics);
         }
         else
         {
@@ -64,7 +66,12 @@ internal static class Program
         }
     }
 
-    private static void Run<TKey, TBackend>(ProbeOptions options, TKey[] keys, TBackend cache)
+    private static void Run<TKey, TBackend>(
+        ProbeOptions options,
+        TKey[] keys,
+        TBackend cache,
+        LoadingDiagnostics? diagnostics = null
+    )
         where TKey : notnull
         where TBackend : struct, IBackend<TKey>
     {
@@ -92,7 +99,7 @@ internal static class Program
             for (int sampleIndex = 0; sampleIndex < options.SampleCount; sampleIndex++)
             {
                 bool warmup = sampleIndex < options.Warmups;
-                samples.Add(coordinator.RunSample(sampleIndex, warmup));
+                samples.Add(coordinator.RunSample(sampleIndex, warmup, diagnostics));
             }
         }
 
@@ -376,11 +383,16 @@ internal static class Program
             }
         }
 
-        internal ProbeSample RunSample(int sampleIndex, bool warmup)
+        internal ProbeSample RunSample(
+            int sampleIndex,
+            bool warmup,
+            LoadingDiagnostics? diagnostics
+        )
         {
             ThrowIfWorkerFailed();
 
             RequestStatistics beforeStatistics = _cache.Statistics;
+            ProbeDiagnosticSnapshot? diagnosticBefore = diagnostics?.Capture();
             long allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
             long[] collectionsBefore = CollectionCounts();
             long wallStarted = Stopwatch.GetTimestamp();
@@ -403,6 +415,7 @@ internal static class Program
             long managedAllocatedBytes = GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore;
             long[] gcCollections = CollectionDelta(collectionsBefore);
             ThrowIfWorkerFailed();
+            ProbeDiagnosticSnapshot? diagnosticAfter = diagnostics?.Capture();
 
             RequestStatistics afterStatistics = _cache.Statistics;
             long operations = 0;
@@ -500,7 +513,14 @@ internal static class Program
                 ReadOnlyOperationsPerSecond: operations / wallSeconds,
                 OperationsPerSecondIncludingCleanup: operations / (wallSeconds + cleanupSeconds),
                 ManagedAllocatedBytes: managedAllocatedBytes,
-                GcCollections: gcCollections
+                GcCollections: gcCollections,
+                Diagnostics: diagnosticBefore is null || diagnosticAfter is null
+                    ? null
+                    : new(
+                        diagnosticBefore,
+                        diagnosticAfter,
+                        operations - (diagnosticAfter.Reserved - diagnosticBefore.Reserved)
+                    )
             );
         }
 
@@ -654,6 +674,107 @@ internal static class Program
         }
     }
 
+    // Opt-in diagnostic snapshots run while all reader threads are stopped at a barrier,
+    // outside both timing and allocation deltas. Reflection metadata is resolved once;
+    // production counters, scheduling, and the measured worker loop remain unchanged.
+    private sealed class LoadingDiagnostics
+    {
+        private const BindingFlags InstanceMembers = BindingFlags.Instance | BindingFlags.NonPublic;
+        private readonly object _engine;
+        private readonly object _buffer;
+        private readonly object _consumerGate;
+        private readonly MethodInfo _maintenanceStatistics;
+        private readonly MethodInfo _readStatistics;
+        private readonly PropertyInfo _requests;
+        private readonly PropertyInfo _drainPasses;
+        private readonly PropertyInfo _enqueued;
+        private readonly PropertyInfo _dequeued;
+        private readonly PropertyInfo _droppedFull;
+        private readonly PropertyInfo _droppedFailed;
+        private readonly FieldInfo _table;
+        private readonly FieldInfo _readCursor;
+        private readonly FieldInfo _writeCursor;
+        private readonly bool _recordStatistics;
+        private readonly uint _policySeed;
+
+        internal LoadingDiagnostics(object cache)
+        {
+            _engine = Field(cache.GetType(), "Engine").GetValue(cache)!;
+            Type engineType = _engine.GetType();
+            object policy = Field(engineType, "_policy").GetValue(_engine)!;
+            _buffer = Field(policy.GetType(), "_pendingAccesses").GetValue(policy)!;
+            _policySeed = (uint)Field(policy.GetType(), "_policySeed").GetValue(policy)!;
+            Type bufferType = _buffer.GetType();
+            _consumerGate = Field(bufferType, "_consumerGate").GetValue(_buffer)!;
+            _recordStatistics = (bool)Field(bufferType, "_recordStatistics").GetValue(_buffer)!;
+            _table = Field(bufferType, "_table");
+            Type ringType = _table.FieldType.GetElementType()!;
+            _readCursor = Field(ringType, "_readCounter");
+            _writeCursor = Field(ringType, "_writeCounter");
+            _maintenanceStatistics = engineType.GetMethod(
+                "GetMaintenanceStatistics",
+                InstanceMembers
+            )!;
+            _readStatistics = engineType.GetMethod(
+                "GetPolicyReadBufferStatistics",
+                InstanceMembers
+            )!;
+            Type maintenanceType = _maintenanceStatistics.ReturnType;
+            _requests = maintenanceType.GetProperty("Requests", InstanceMembers)!;
+            _drainPasses = maintenanceType.GetProperty("DrainPasses", InstanceMembers)!;
+            Type readType = _readStatistics.ReturnType;
+            _enqueued = readType.GetProperty("Enqueued", InstanceMembers)!;
+            _dequeued = readType.GetProperty("Dequeued", InstanceMembers)!;
+            _droppedFull = readType.GetProperty("DroppedFull", InstanceMembers)!;
+            _droppedFailed = readType.GetProperty("DroppedFailed", InstanceMembers)!;
+        }
+
+        internal ProbeDiagnosticSnapshot Capture()
+        {
+            object maintenance = _maintenanceStatistics.Invoke(_engine, null)!;
+            object reads = _readStatistics.Invoke(_engine, null)!;
+            long reserved = 0;
+            long consumed = 0;
+            int stripes = 0;
+            lock (_consumerGate)
+            {
+                if (_table.GetValue(_buffer) is Array table)
+                {
+                    foreach (object? ring in table)
+                    {
+                        if (ring is null)
+                            continue;
+                        stripes++;
+                        reserved = checked(reserved + (long)_writeCursor.GetValue(ring)!);
+                        consumed = checked(consumed + (long)_readCursor.GetValue(ring)!);
+                    }
+                }
+            }
+
+            return new(
+                (long)_requests.GetValue(maintenance)!,
+                (long)_drainPasses.GetValue(maintenance)!,
+                _recordStatistics ? (long)_enqueued.GetValue(reads)! : null,
+                _recordStatistics ? (long)_dequeued.GetValue(reads)! : null,
+                _recordStatistics ? (long)_droppedFull.GetValue(reads)! : null,
+                _recordStatistics ? (long)_droppedFailed.GetValue(reads)! : null,
+                reserved,
+                consumed,
+                stripes,
+                _policySeed,
+                ThreadPool.ThreadCount,
+                ThreadPool.PendingWorkItemCount,
+                ThreadPool.CompletedWorkItemCount
+            );
+        }
+
+        private static FieldInfo Field(Type type, string name) =>
+            type.GetField(name, InstanceMembers)
+            ?? throw new InvalidOperationException(
+                $"Diagnostic field {type.FullName}.{name} is missing."
+            );
+    }
+
     private sealed record ProbeOptions(
         string Backend,
         string KeyMode,
@@ -666,6 +787,7 @@ internal static class Program
         int Warmups,
         int Runs,
         int DurationMilliseconds,
+        bool Diagnostics,
         string? OutputPath
     )
     {
@@ -709,6 +831,7 @@ internal static class Program
                         or "--warmups"
                         or "--runs"
                         or "--duration-ms"
+                        or "--diagnostics"
                         or "--output"
                     )
                 )
@@ -744,6 +867,12 @@ internal static class Program
                 throw new ArgumentException("--statistics must be on or off.");
             }
 
+            string diagnosticsValue = ReadString(values, "--diagnostics", "off");
+            if (diagnosticsValue is not ("on" or "off"))
+                throw new ArgumentException("--diagnostics must be on or off.");
+            if (diagnosticsValue == "on" && backend != "loadingcache")
+                throw new ArgumentException("--diagnostics on requires the loadingcache backend.");
+
             if (!IsPowerOfTwo(capacity) || !IsPowerOfTwo(residents))
             {
                 throw new ArgumentException(
@@ -769,6 +898,7 @@ internal static class Program
                 warmups,
                 runs,
                 durationMilliseconds,
+                diagnosticsValue == "on",
                 values.TryGetValue("--output", out string? output) ? output : null
             );
         }
@@ -865,7 +995,33 @@ internal static class Program
         double ReadOnlyOperationsPerSecond,
         double OperationsPerSecondIncludingCleanup,
         long ManagedAllocatedBytes,
-        long[] GcCollections
+        long[] GcCollections,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            ProbeDiagnostics? Diagnostics
+    );
+
+    [UsedImplicitly(ImplicitUseTargetFlags.WithMembers)]
+    private sealed record ProbeDiagnostics(
+        ProbeDiagnosticSnapshot Before,
+        ProbeDiagnosticSnapshot After,
+        long UnrecordedReads
+    );
+
+    [UsedImplicitly(ImplicitUseTargetFlags.WithMembers)]
+    private sealed record ProbeDiagnosticSnapshot(
+        long MaintenanceRequests,
+        long MaintenanceDrainPasses,
+        long? Enqueued,
+        long? Dequeued,
+        long? DroppedFull,
+        long? DroppedFailed,
+        long Reserved,
+        long Consumed,
+        int ActiveStripes,
+        uint PolicySeed,
+        int ThreadPoolThreads,
+        long ThreadPoolPendingItems,
+        long ThreadPoolCompletedItems
     );
 
     [UsedImplicitly(ImplicitUseTargetFlags.WithMembers)]
