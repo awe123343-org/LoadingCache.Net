@@ -94,6 +94,7 @@ internal static class Program
         }
 
         List<ProbeSample> samples = [];
+        IReadOnlyList<ProbeReaderDiagnostic>? readerDiagnostics;
         using (ReaderCoordinator<TKey, TBackend> coordinator = new(cache, keys, options))
         {
             for (int sampleIndex = 0; sampleIndex < options.SampleCount; sampleIndex++)
@@ -101,6 +102,7 @@ internal static class Program
                 bool warmup = sampleIndex < options.Warmups;
                 samples.Add(coordinator.RunSample(sampleIndex, warmup, diagnostics));
             }
+            readerDiagnostics = coordinator.CaptureReaderDiagnostics(diagnostics);
         }
 
         ProbeReport report = new(
@@ -136,7 +138,8 @@ internal static class Program
             CacheAssemblySha256: Sha256(typeof(CacheBuilder).Assembly.Location),
             HarnessAssemblySha256: Sha256(typeof(Program).Assembly.Location),
             ManagedAllocationScope: "process managed allocation delta from before start release through finish barrier",
-            Samples: samples
+            Samples: samples,
+            ReaderDiagnostics: readerDiagnostics
         );
 
         string json = JsonSerializer.Serialize(report, JsonOptions);
@@ -331,6 +334,7 @@ internal static class Program
         private readonly ManualResetEventSlim _stop = new(false);
         private readonly Thread?[] _threads;
         private readonly WorkerResult[] _results;
+        private readonly int[]? _readerManagedThreadIds;
         private readonly object _failureGate = new();
         private Exception? _failure;
         private long _deadline;
@@ -349,6 +353,7 @@ internal static class Program
             _ready = new CountdownEvent(_workerCount);
             _threads = new Thread[_workerCount];
             _results = new WorkerResult[_workerCount];
+            _readerManagedThreadIds = options.Diagnostics ? new int[_workerCount] : null;
 
             try
             {
@@ -381,6 +386,21 @@ internal static class Program
                 _stop.Dispose();
                 throw;
             }
+        }
+
+        internal ProbeReaderDiagnostic[]? CaptureReaderDiagnostics(LoadingDiagnostics? diagnostics)
+        {
+            if (_readerManagedThreadIds is not { } ids || diagnostics is null)
+            {
+                return null;
+            }
+
+            ProbeReaderDiagnostic[] readers = new ProbeReaderDiagnostic[ids.Length];
+            for (int worker = 0; worker < ids.Length; worker++)
+            {
+                readers[worker] = diagnostics.DescribeReader(worker, ids[worker]);
+            }
+            return readers;
         }
 
         internal ProbeSample RunSample(
@@ -544,6 +564,11 @@ internal static class Program
         {
             try
             {
+                // Publish once before readiness; the timed sample loop does not collect IDs.
+                if (_readerManagedThreadIds is { } ids)
+                {
+                    ids[worker] = Environment.CurrentManagedThreadId;
+                }
                 _ready.Signal();
                 for (int sample = 0; sample < _sampleCount; sample++)
                 {
@@ -697,6 +722,8 @@ internal static class Program
         private readonly bool _recordStatistics;
         private readonly bool _recordTotals;
         private readonly uint _policySeed;
+        private readonly int? _statisticsStripeMask;
+        private readonly int? _dropStripeMask;
 
         internal LoadingDiagnostics(object cache)
         {
@@ -708,6 +735,27 @@ internal static class Program
             Type bufferType = _buffer.GetType();
             _consumerGate = Field(bufferType, "_consumerGate").GetValue(_buffer)!;
             _recordStatistics = (bool)Field(bufferType, "_recordStatistics").GetValue(_buffer)!;
+            if (_recordStatistics)
+            {
+                object? counters = Field(engineType, "_counters").GetValue(_engine);
+                if (counters is not null)
+                {
+                    _statisticsStripeMask = (int)
+                        Field(counters.GetType(), "_stripeMask").GetValue(counters)!;
+                }
+
+                if (Field(bufferType, "_dropCounters").GetValue(_buffer) is long[] dropCounters)
+                {
+                    int stride = (int)
+                        bufferType
+                            .GetField(
+                                "DropCounterStride",
+                                BindingFlags.Static | BindingFlags.NonPublic
+                            )!
+                            .GetRawConstantValue()!;
+                    _dropStripeMask = dropCounters.Length / stride - 1;
+                }
+            }
             // Older frozen libraries couple success totals to drop statistics. Resolve this
             // once before timing so one harness can compare both recording implementations.
             _recordTotals =
@@ -733,6 +781,21 @@ internal static class Program
             _dequeued = readType.GetProperty("Dequeued", InstanceMembers)!;
             _droppedFull = readType.GetProperty("DroppedFull", InstanceMembers)!;
             _droppedFailed = readType.GetProperty("DroppedFailed", InstanceMembers)!;
+        }
+
+        internal ProbeReaderDiagnostic DescribeReader(int workerIndex, int managedThreadId)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(managedThreadId);
+            return new(
+                workerIndex,
+                managedThreadId,
+                _statisticsStripeMask,
+                _statisticsStripeMask is { } statisticsMask
+                    ? managedThreadId & statisticsMask
+                    : null,
+                _dropStripeMask,
+                _dropStripeMask is { } dropMask ? managedThreadId & dropMask : null
+            );
         }
 
         internal ProbeDiagnosticSnapshot Capture()
@@ -982,7 +1045,19 @@ internal static class Program
         string CacheAssemblySha256,
         string HarnessAssemblySha256,
         string ManagedAllocationScope,
-        IReadOnlyList<ProbeSample> Samples
+        IReadOnlyList<ProbeSample> Samples,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            IReadOnlyList<ProbeReaderDiagnostic>? ReaderDiagnostics
+    );
+
+    [UsedImplicitly(ImplicitUseTargetFlags.WithMembers)]
+    private sealed record ProbeReaderDiagnostic(
+        int WorkerIndex,
+        int ManagedThreadId,
+        int? StatisticsStripeMask,
+        int? StatisticsStripeIndex,
+        int? DropStripeMask,
+        int? DropStripeIndex
     );
 
     [UsedImplicitly(ImplicitUseTargetFlags.WithMembers)]
