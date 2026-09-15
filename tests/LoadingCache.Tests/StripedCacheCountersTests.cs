@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Numerics;
 using FluentAssertions;
 using LoadingCache.Diagnostics;
 using NUnit.Framework;
@@ -47,6 +48,91 @@ public sealed class StripedCacheCountersTests
     }
 
     [Test]
+    public void EveryCounterSaturatesAcrossRepeatedUnitAdds()
+    {
+        StripedCacheCounters counters = new(1);
+
+        for (int index = 0; index < (int)CacheCounterKind.Count; index++)
+        {
+            CacheCounterKind counter = (CacheCounterKind)index;
+            counters.Add(counter, long.MaxValue - 1);
+
+            counters.Add(counter);
+            counters.Snapshot()[counter].Should().Be(long.MaxValue);
+
+            counters.Add(counter);
+            counters.Snapshot()[counter].Should().Be(long.MaxValue);
+        }
+    }
+
+    [TestCase(37L)]
+    [TestCase(long.MaxValue - 17)]
+    public async Task CollidingUnitAndArbitraryAddsAreExactAfterQuiescence(long initialValue)
+    {
+        StripedCacheCounters counters = new(4);
+        const int stripe = 2;
+        const int incrementsPerWorker = 2_048;
+        long[] deltas = [0, 2, 17, 1_024];
+        counters.AddToStripeForTesting(stripe, CacheCounterKind.TotalLoadTimeTicks, initialValue);
+        using CountdownEvent ready = new(deltas.Length);
+        using ManualResetEventSlim start = new();
+        Task[] workers = new Task[deltas.Length];
+        for (int worker = 0; worker < workers.Length; worker++)
+        {
+            workers[worker] = Task.Factory.StartNew(
+                static state =>
+                {
+                    var work = ((
+                        StripedCacheCounters Counters,
+                        CountdownEvent Ready,
+                        ManualResetEventSlim Start,
+                        long Delta
+                    ))
+                        state!;
+                    work.Ready.Signal();
+                    work.Start.Wait();
+                    for (int index = 0; index < incrementsPerWorker; index++)
+                    {
+                        work.Counters.AddToStripeForTesting(
+                            stripe,
+                            CacheCounterKind.TotalLoadTimeTicks
+                        );
+                        work.Counters.AddToStripeForTesting(
+                            stripe,
+                            CacheCounterKind.TotalLoadTimeTicks,
+                            work.Delta
+                        );
+                    }
+                },
+                (counters, ready, start, deltas[worker]),
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default
+            );
+        }
+
+        try
+        {
+            ready.Wait(TimeSpan.FromSeconds(10)).Should().BeTrue();
+        }
+        finally
+        {
+            // The gate starts colliding writers together. Exact counts are
+            // asserted only after every writer has completed.
+            start.Set();
+            await Task.WhenAll(workers).WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
+        }
+
+        BigInteger sum = deltas.Aggregate(
+            (BigInteger)initialValue,
+            static (total, delta) => total + (BigInteger)incrementsPerWorker * (delta + 1)
+        );
+
+        long expected = (long)BigInteger.Min(sum, long.MaxValue);
+        counters.Snapshot()[CacheCounterKind.TotalLoadTimeTicks].Should().Be(expected);
+    }
+
+    [Test]
     public void AggregateSnapshotSaturatesAcrossStripes()
     {
         StripedCacheCounters counters = new(4);
@@ -63,9 +149,11 @@ public sealed class StripedCacheCountersTests
         StripedCacheCounters counters = new(1);
 
         Action invalidCounter = () => counters.Add((CacheCounterKind)byte.MaxValue);
+        Action countSentinel = () => counters.Add(CacheCounterKind.Count);
         Action invalidDelta = () => counters.Add(CacheCounterKind.Hits, -1);
 
         invalidCounter.Should().Throw<ArgumentOutOfRangeException>();
+        countSentinel.Should().Throw<ArgumentOutOfRangeException>();
         invalidDelta.Should().Throw<ArgumentOutOfRangeException>();
         counters.Snapshot()[CacheCounterKind.Hits].Should().Be(0);
     }
