@@ -1092,7 +1092,12 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             }
         }
 
-        _maintenanceCoordinator.CleanUp();
+        MaintenanceCleanupResult cleanup = _maintenanceCoordinator.CleanUp();
+        if (cleanup.FallbackRequired)
+        {
+            DrainRejectedPolicyWrites();
+        }
+
         evictionScope.Dispatch();
         RequestExpirationTimer();
     }

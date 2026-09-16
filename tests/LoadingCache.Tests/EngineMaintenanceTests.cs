@@ -115,7 +115,17 @@ public sealed class EngineMaintenanceTests
         try
         {
             await hook.Entered.WaitAsync(Watchdog, CancellationToken.None);
-            hit = Task.Run(() => cache.TryGet(1, out string? value) && value == "ready");
+            hit = Task.Factory.StartNew(
+                static state =>
+                {
+                    var activeCache = (Cache<int, string>)state!;
+                    return activeCache.TryGet(1, out string? value) && value == "ready";
+                },
+                cache,
+                CancellationToken.None,
+                TaskCreationOptions.DenyChildAttach,
+                TaskScheduler.Default
+            );
             (await hit.WaitAsync(Watchdog, CancellationToken.None)).Should().BeTrue();
         }
         finally
@@ -186,19 +196,10 @@ public sealed class EngineMaintenanceTests
     public void FullReadStripeCanRetryAfterARejectedBudgetedFallback()
     {
         ManualMaintenanceScheduler scheduler = new() { Reject = true };
-        int keepFilling = 1;
-        int maintenanceCalls = 0;
-        Cache<int, string>? cache = null;
+        RearmRetryState state = new();
         var hooks = new LoadingCacheTestHooks
         {
-            BeforeMaintenanceSignalClear = () =>
-            {
-                Interlocked.Increment(ref maintenanceCalls);
-                if (Volatile.Read(ref keepFilling) != 0 && !cache!.TryGet(1, out _))
-                {
-                    throw new InvalidOperationException("The maintenance fill hit was not ready.");
-                }
-            },
+            BeforeMaintenanceSignalClear = state.BeforeMaintenanceSignalClear,
         };
         CacheEngine<int, string> engine = CreateEngine(
             scheduler,
@@ -207,7 +208,8 @@ public sealed class EngineMaintenanceTests
             readStripeCapacity: 1,
             maintenanceMaxPasses: 32
         );
-        cache = new Cache<int, string>(engine);
+        var cache = new Cache<int, string>(engine);
+        state.Attach(cache);
         using (cache)
         {
             cache.Put(1, "ready");
@@ -219,12 +221,12 @@ public sealed class EngineMaintenanceTests
             // leaving the signal clear while the stripe is still full.
             cache.TryGet(1, out _).Should().BeTrue();
             cache.TryGet(1, out _).Should().BeTrue();
-            Volatile.Read(ref maintenanceCalls).Should().Be(32);
+            state.MaintenanceCalls.Should().Be(32);
             engine.GetMaintenanceStatistics().BudgetExhaustions.Should().BeGreaterThan(0);
             engine.GetMaintenanceStatistics().FallbackRequired.Should().BeTrue();
             engine.GetPolicyReadBufferStatistics().Queued.Should().Be(1);
 
-            Volatile.Write(ref keepFilling, 0);
+            state.StopFilling();
 
             // The stripe is full, so this hit's event is dropped. It must still
             // observe the clear signal, request the rejected scheduler again,
@@ -349,6 +351,50 @@ public sealed class EngineMaintenanceTests
     }
 
     [Test]
+    public void ExplicitCleanupRejectionAllowsAFullReadToRecoverAfterSchedulingResumes()
+    {
+        ManualMaintenanceScheduler scheduler = new();
+        CacheEngine<int, string> engine = CreateEngine(
+            scheduler,
+            readStripeCount: 1,
+            readStripeCapacity: 512,
+            maintenanceMaxPasses: 1
+        );
+        using Cache<int, string> cache = new(engine);
+        cache.Put(1, "ready");
+        scheduler.RunNext();
+        for (int index = 0; index < 300; index++)
+        {
+            cache.TryGet(1, out _).Should().BeTrue();
+        }
+
+        scheduler.Reject = true;
+        cache.CleanUp();
+        engine.GetPolicyReadBufferStatistics().Queued.Should().Be(44);
+        engine.GetMaintenanceStatistics().FallbackRequired.Should().BeTrue();
+        scheduler.Pending.Should().Be(0);
+
+        scheduler.Reject = false;
+        for (int index = 44; index < 512; index++)
+        {
+            cache.TryGet(1, out _).Should().BeTrue();
+        }
+
+        cache.TryGet(1, out _).Should().BeTrue();
+        scheduler.Pending.Should().Be(1);
+        scheduler.RunNext();
+        scheduler.Pending.Should().Be(1);
+        scheduler.RunNext();
+
+        engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
+        engine.GetPolicyReadBufferStatistics().Dequeued.Should().Be(768);
+        engine.GetPolicyReadBufferStatistics().DroppedFull.Should().Be(1);
+        engine.GetMaintenanceStatistics().FallbackRequired.Should().BeFalse();
+        scheduler.Pending.Should().Be(0);
+        engine.AssertInvariants();
+    }
+
+    [Test]
     public void OldReadEventsAfterClearAndSetCannotPolluteTheCurrentPolicy()
     {
         ManualMaintenanceScheduler scheduler = new();
@@ -443,7 +489,7 @@ public sealed class EngineMaintenanceTests
     {
         private readonly Queue<Action> _callbacks = new();
 
-        internal bool Reject { get; init; }
+        internal bool Reject { get; set; }
 
         internal int ScheduleCalls { get; private set; }
 

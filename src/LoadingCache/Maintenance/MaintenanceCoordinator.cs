@@ -35,6 +35,7 @@ internal sealed class MaintenanceCoordinator : IDisposable, IThreadPoolWorkItem
     private MaintenanceCoordinatorState _state = MaintenanceCoordinatorState.Idle;
     private bool _fallbackRequired;
     private bool _inlineCallbackObserved;
+    private long _ownerGeneration;
     private long _requests;
     private long _coalescedRequests;
     private long _drainPasses;
@@ -81,6 +82,7 @@ internal sealed class MaintenanceCoordinator : IDisposable, IThreadPoolWorkItem
     /// </returns>
     internal MaintenanceRequestResult Request()
     {
+        long ownerGeneration;
         lock (_gate)
         {
             SaturatingIncrement(ref _requests);
@@ -90,6 +92,7 @@ internal sealed class MaintenanceCoordinator : IDisposable, IThreadPoolWorkItem
                     return MaintenanceRequestResult.Disposed;
 
                 case MaintenanceCoordinatorState.Idle:
+                    ownerGeneration = _ownerGeneration;
                     _state = MaintenanceCoordinatorState.Scheduled;
                     _fallbackRequired = false;
                     break;
@@ -132,7 +135,10 @@ internal sealed class MaintenanceCoordinator : IDisposable, IThreadPoolWorkItem
             // A well-behaved scheduler that returns false did not run the callback. An inline or
             // racing scheduler may have run it before returning; in that case its state transition
             // is already sufficient and reporting rejection would create a duplicate fallback.
-            if (_state != MaintenanceCoordinatorState.Scheduled)
+            if (
+                _state != MaintenanceCoordinatorState.Scheduled
+                || ownerGeneration != _ownerGeneration
+            )
             {
                 return MaintenanceRequestResult.Accepted;
             }
@@ -152,6 +158,7 @@ internal sealed class MaintenanceCoordinator : IDisposable, IThreadPoolWorkItem
     /// </returns>
     internal MaintenanceCleanupResult CleanUp()
     {
+        long ownerGeneration;
         lock (_gate)
         {
             switch (_state)
@@ -166,6 +173,8 @@ internal sealed class MaintenanceCoordinator : IDisposable, IThreadPoolWorkItem
 
                 case MaintenanceCoordinatorState.Idle:
                 case MaintenanceCoordinatorState.Scheduled:
+                    ownerGeneration = unchecked(++_ownerGeneration);
+                    _inlineCallbackObserved = false;
                     _state = MaintenanceCoordinatorState.Running;
                     _fallbackRequired = false;
                     SaturatingIncrement(ref _synchronousCleanUps);
@@ -176,7 +185,7 @@ internal sealed class MaintenanceCoordinator : IDisposable, IThreadPoolWorkItem
             }
         }
 
-        return RunPasses();
+        return RunPasses(ownerGeneration);
     }
 
     internal MaintenanceStatistics GetStatistics()
@@ -251,6 +260,7 @@ internal sealed class MaintenanceCoordinator : IDisposable, IThreadPoolWorkItem
 
     private void Worker()
     {
+        long ownerGeneration;
         lock (_gate)
         {
             // CleanUp may have claimed the scheduled callback. A stale scheduled callback must be
@@ -269,10 +279,12 @@ internal sealed class MaintenanceCoordinator : IDisposable, IThreadPoolWorkItem
                 return;
             }
 
+            ownerGeneration = unchecked(++_ownerGeneration);
+            _inlineCallbackObserved = false;
             _state = MaintenanceCoordinatorState.Running;
         }
 
-        MaintenanceCleanupResult result = RunPasses();
+        MaintenanceCleanupResult result = RunPasses(ownerGeneration);
         if (result.FallbackRequired)
         {
             // A producer may have received Accepted while the worker was still
@@ -283,7 +295,7 @@ internal sealed class MaintenanceCoordinator : IDisposable, IThreadPoolWorkItem
         }
     }
 
-    private MaintenanceCleanupResult RunPasses()
+    private MaintenanceCleanupResult RunPasses(long ownerGeneration)
     {
         MaintenanceCoordinator? previousWorker = _activeWorker;
         _activeWorker = this;
@@ -347,7 +359,7 @@ internal sealed class MaintenanceCoordinator : IDisposable, IThreadPoolWorkItem
 
                 if (rearm)
                 {
-                    return RearmAfterBudget();
+                    return RearmAfterBudget(ownerGeneration);
                 }
             }
 
@@ -359,7 +371,7 @@ internal sealed class MaintenanceCoordinator : IDisposable, IThreadPoolWorkItem
         }
     }
 
-    private MaintenanceCleanupResult RearmAfterBudget()
+    private MaintenanceCleanupResult RearmAfterBudget(long ownerGeneration)
     {
         if (TryScheduleWithoutContextCapture())
         {
@@ -368,6 +380,13 @@ internal sealed class MaintenanceCoordinator : IDisposable, IThreadPoolWorkItem
                 if (_state == MaintenanceCoordinatorState.Disposed)
                 {
                     return new MaintenanceCleanupResult(true, false, false);
+                }
+
+                if (ownerGeneration != _ownerGeneration)
+                {
+                    // Cleanup or a scheduled callback took ownership while the scheduler was
+                    // returning. Its state, inline marker, and fallback belong to that owner.
+                    return new MaintenanceCleanupResult(true, true, false);
                 }
 
                 if (_inlineCallbackObserved)
@@ -388,6 +407,11 @@ internal sealed class MaintenanceCoordinator : IDisposable, IThreadPoolWorkItem
         lock (_gate)
         {
             SaturatingIncrement(ref _scheduleRejections);
+            if (ownerGeneration != _ownerGeneration)
+            {
+                return new MaintenanceCleanupResult(true, true, false);
+            }
+
             switch (_state)
             {
                 case MaintenanceCoordinatorState.Scheduled:
