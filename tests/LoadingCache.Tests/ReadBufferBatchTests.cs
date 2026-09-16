@@ -34,7 +34,12 @@ public sealed class ReadBufferBatchTests
                 }
             }
         );
-        Task<ReadBufferOfferResult> paused = Task.Run(() => OfferOnStripe(buffer, 1, 0));
+        Task<ReadBufferOfferResult> paused = Task.Factory.StartNew(
+            () => OfferOnStripe(buffer, 1, 0),
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default
+        );
         try
         {
             await publication.Entered.WaitAsync(TestTimeout);
@@ -170,7 +175,12 @@ public sealed class ReadBufferBatchTests
             }
         );
 
-        Task<bool> paused = Task.Run(() => buffer.TryEnqueue(1));
+        Task<bool> paused = Task.Factory.StartNew(
+            () => buffer.TryEnqueue(1),
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default
+        );
         try
         {
             await publication.Entered.WaitAsync(TestTimeout);
@@ -217,7 +227,12 @@ public sealed class ReadBufferBatchTests
         await using BlockingTestHook publication = new(TestTimeout);
         WeakReference<object> queued = EnqueueCollectibleValue(buffer);
         buffer.SetHooksForTesting(null, publication.Invoke);
-        Task<bool> paused = Task.Run(() => buffer.TryEnqueue(new object()));
+        Task<bool> paused = Task.Factory.StartNew(
+            () => buffer.TryEnqueue(new object()),
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default
+        );
         try
         {
             await publication.Entered.WaitAsync(TestTimeout);

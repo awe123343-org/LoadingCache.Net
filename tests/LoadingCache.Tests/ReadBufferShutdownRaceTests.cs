@@ -17,7 +17,12 @@ public sealed class ReadBufferShutdownRaceTests
         await using BlockingTestHook reservation = new(TestTimeout);
         buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
         buffer.SetHooksForTesting(reservation.Invoke, beforePublish: null);
-        Task<ReadBufferOfferResult> producer = Task.Run(() => buffer.TryOffer(1));
+        Task<ReadBufferOfferResult> producer = Task.Factory.StartNew(
+            () => buffer.TryOffer(1),
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default
+        );
         buffer.SetShutdownHookForTesting(_ =>
         {
             reservation.Release();
@@ -59,7 +64,12 @@ public sealed class ReadBufferShutdownRaceTests
         await using BlockingTestHook publication = new(TestTimeout);
         buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
         buffer.SetHooksForTesting(reservation.Invoke, publication.Invoke);
-        Task<ReadBufferOfferResult> producer = Task.Run(() => buffer.TryOffer(1));
+        Task<ReadBufferOfferResult> producer = Task.Factory.StartNew(
+            () => buffer.TryOffer(1),
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default
+        );
         Task? competingDisposer = null;
         int snapshots = 0;
         buffer.SetShutdownHookForTesting(disposeSameRing =>
@@ -73,7 +83,12 @@ public sealed class ReadBufferShutdownRaceTests
             // before an independent disposer attempts to capture tail=2 for the same ring.
             reservation.Release();
             publication.Entered.WaitAsync(TestTimeout).GetAwaiter().GetResult();
-            competingDisposer = Task.Run(disposeSameRing);
+            competingDisposer = Task.Factory.StartNew(
+                disposeSameRing,
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default
+            );
             competingDisposer.WaitAsync(TestTimeout).GetAwaiter().GetResult();
         });
 

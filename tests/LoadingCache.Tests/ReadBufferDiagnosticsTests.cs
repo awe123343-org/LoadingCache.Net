@@ -17,8 +17,11 @@ public sealed class ReadBufferDiagnosticsTests
         buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
         buffer.TryRead(out _).Should().BeTrue();
         buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Success);
-        Task<ReadBufferStatistics> snapshot = Task.Run(() =>
-            buffer.GetStatistics(tableCaptured.Invoke)
+        Task<ReadBufferStatistics> snapshot = Task.Factory.StartNew(
+            () => buffer.GetStatistics(tableCaptured.Invoke),
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default
         );
         try
         {
