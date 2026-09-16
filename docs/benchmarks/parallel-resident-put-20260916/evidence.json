@@ -1,0 +1,846 @@
+{
+  "mainGatePassed": false,
+  "criterion": "All 100 preboxed-read/replacement runtime/configurations cost less than MemoryCache in both rounds.",
+  "mainDirections": {
+    "lower": 68,
+    "higher": 27,
+    "mixed": 5
+  },
+  "groupedDirections": {
+    "kind": {
+      "read": {
+        "lower": 39,
+        "higher": 26,
+        "mixed": 3
+      },
+      "replacement": {
+        "lower": 29,
+        "higher": 1,
+        "mixed": 2
+      }
+    },
+    "statistics": {
+      "off": {
+        "lower": 36,
+        "higher": 12,
+        "mixed": 2
+      },
+      "on": {
+        "lower": 32,
+        "higher": 15,
+        "mixed": 3
+      }
+    }
+  },
+  "matrix": {
+    "processes": 584,
+    "pairedCases": 152,
+    "measuredSamples": 2920,
+    "verified": true,
+    "sourceCommit": "a319bab02401c6f3b313de8819dd613e5f063952",
+    "traceEndResidency": {
+      "loadingcache": {
+        "median": 1.0,
+        "min": 1.0,
+        "max": 1.87109375
+      },
+      "memorycache": {
+        "median": 1.0,
+        "min": 0.9501953125,
+        "max": 1.0
+      }
+    },
+    "categories": {
+      "8": {
+        "read": {
+          "cases": 34,
+          "costRatio": {
+            "median": 0.3352695896739051,
+            "min": 0.027189670798621488,
+            "max": 2.913944281492009
+          },
+          "loadingcacheLowerCostCases": 20,
+          "roundDirectionDisagreements": 0
+        },
+        "replacement": {
+          "cases": 16,
+          "costRatio": {
+            "median": 0.19808777787138382,
+            "min": 0.016524112916389593,
+            "max": 1.4067707509642107
+          },
+          "loadingcacheLowerCostCases": 14,
+          "roundDirectionDisagreements": 2
+        }
+      },
+      "10": {
+        "read": {
+          "cases": 34,
+          "costRatio": {
+            "median": 0.3855020039867141,
+            "min": 0.025601099446537767,
+            "max": 2.967558908911654
+          },
+          "loadingcacheLowerCostCases": 21,
+          "roundDirectionDisagreements": 3
+        },
+        "replacement": {
+          "cases": 16,
+          "costRatio": {
+            "median": 0.15864766219838342,
+            "min": 0.018046042196525645,
+            "max": 0.913102348663522
+          },
+          "loadingcacheLowerCostCases": 16,
+          "roundDirectionDisagreements": 0
+        }
+      }
+    }
+  },
+  "coreSha256": "d6b99727eb98e3c8a8396e00723ca6473f6e682074a0b9d9bf0070d622fba275",
+  "validation": {
+    "path": "artifacts/validation/memorycache-goal-20260916/parallel-resident-put-final-01",
+    "tests": {
+      "LoadingCache.Tests-net8.0": 738,
+      "LoadingCache.Tests-net10.0": 738,
+      "LoadingCache.DependencyInjection.Tests-net8.0": 10,
+      "LoadingCache.DependencyInjection.Tests-net10.0": 10,
+      "LoadingCache.StressTests-net8.0": 10,
+      "LoadingCache.StressTests-net10.0": 10
+    },
+    "totalTests": 1516,
+    "consumers": 2,
+    "commands": [
+      {
+        "name": "environment",
+        "command": [
+          "dotnet",
+          "--info"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 0.2522257501259446,
+        "log": "environment.log",
+        "environment_overrides": {},
+        "test_counts": null
+      },
+      {
+        "name": "environment-net10",
+        "command": [
+          "/Users/awe123343/Dev/LoadingCache.NET/artifacts/runtime10/dotnet",
+          "--info"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 0.012487209169194102,
+        "log": "environment-net10.log",
+        "environment_overrides": {},
+        "test_counts": null
+      },
+      {
+        "name": "restore",
+        "command": [
+          "dotnet",
+          "restore",
+          "LoadingCache.slnx"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 1.6596882499288768,
+        "log": "restore.log",
+        "environment_overrides": {},
+        "test_counts": null
+      },
+      {
+        "name": "tool-restore",
+        "command": [
+          "dotnet",
+          "tool",
+          "restore"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 0.1514512919820845,
+        "log": "tool-restore.log",
+        "environment_overrides": {},
+        "test_counts": null
+      },
+      {
+        "name": "format-check",
+        "command": [
+          "dotnet",
+          "csharpier",
+          "check",
+          "."
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 6.1720394580625,
+        "log": "format-check.log",
+        "environment_overrides": {},
+        "test_counts": null
+      },
+      {
+        "name": "build",
+        "command": [
+          "dotnet",
+          "build",
+          "LoadingCache.slnx",
+          "-c",
+          "Release",
+          "--no-restore"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 3.494785208022222,
+        "log": "build.log",
+        "environment_overrides": {},
+        "test_counts": null
+      },
+      {
+        "name": "LoadingCache.Tests-net8.0",
+        "command": [
+          "dotnet",
+          "test",
+          "tests/LoadingCache.Tests/LoadingCache.Tests.csproj",
+          "-c",
+          "Release",
+          "--no-build",
+          "--no-restore",
+          "-f",
+          "net8.0",
+          "--logger",
+          "trx;LogFileName=LoadingCache.Tests-net8.0.trx",
+          "--results-directory",
+          "/Users/awe123343/Dev/LoadingCache.NET/artifacts/validation/memorycache-goal-20260916/parallel-resident-put-final-01",
+          "--",
+          "RunConfiguration.DotNetHostPath=/Users/awe123343/Dev/LoadingCache.NET/artifacts/runtime8/dotnet"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 5.185424875002354,
+        "log": "LoadingCache.Tests-net8.0.log",
+        "environment_overrides": {},
+        "test_counts": {
+          "total": 738,
+          "executed": 738,
+          "passed": 738,
+          "failed": 0,
+          "notExecuted": 0
+        }
+      },
+      {
+        "name": "LoadingCache.Tests-net10.0",
+        "command": [
+          "dotnet",
+          "test",
+          "tests/LoadingCache.Tests/LoadingCache.Tests.csproj",
+          "-c",
+          "Release",
+          "--no-build",
+          "--no-restore",
+          "-f",
+          "net10.0",
+          "--logger",
+          "trx;LogFileName=LoadingCache.Tests-net10.0.trx",
+          "--results-directory",
+          "/Users/awe123343/Dev/LoadingCache.NET/artifacts/validation/memorycache-goal-20260916/parallel-resident-put-final-01",
+          "--",
+          "RunConfiguration.DotNetHostPath=/Users/awe123343/Dev/LoadingCache.NET/artifacts/runtime10/dotnet"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 3.8959902089554816,
+        "log": "LoadingCache.Tests-net10.0.log",
+        "environment_overrides": {},
+        "test_counts": {
+          "total": 738,
+          "executed": 738,
+          "passed": 738,
+          "failed": 0,
+          "notExecuted": 0
+        }
+      },
+      {
+        "name": "LoadingCache.DependencyInjection.Tests-net8.0",
+        "command": [
+          "dotnet",
+          "test",
+          "tests/LoadingCache.DependencyInjection.Tests/LoadingCache.DependencyInjection.Tests.csproj",
+          "-c",
+          "Release",
+          "--no-build",
+          "--no-restore",
+          "-f",
+          "net8.0",
+          "--logger",
+          "trx;LogFileName=LoadingCache.DependencyInjection.Tests-net8.0.trx",
+          "--results-directory",
+          "/Users/awe123343/Dev/LoadingCache.NET/artifacts/validation/memorycache-goal-20260916/parallel-resident-put-final-01",
+          "--",
+          "RunConfiguration.DotNetHostPath=/Users/awe123343/Dev/LoadingCache.NET/artifacts/runtime8/dotnet"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 0.8934207500424236,
+        "log": "LoadingCache.DependencyInjection.Tests-net8.0.log",
+        "environment_overrides": {},
+        "test_counts": {
+          "total": 10,
+          "executed": 10,
+          "passed": 10,
+          "failed": 0,
+          "notExecuted": 0
+        }
+      },
+      {
+        "name": "LoadingCache.DependencyInjection.Tests-net10.0",
+        "command": [
+          "dotnet",
+          "test",
+          "tests/LoadingCache.DependencyInjection.Tests/LoadingCache.DependencyInjection.Tests.csproj",
+          "-c",
+          "Release",
+          "--no-build",
+          "--no-restore",
+          "-f",
+          "net10.0",
+          "--logger",
+          "trx;LogFileName=LoadingCache.DependencyInjection.Tests-net10.0.trx",
+          "--results-directory",
+          "/Users/awe123343/Dev/LoadingCache.NET/artifacts/validation/memorycache-goal-20260916/parallel-resident-put-final-01",
+          "--",
+          "RunConfiguration.DotNetHostPath=/Users/awe123343/Dev/LoadingCache.NET/artifacts/runtime10/dotnet"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 0.8635890411678702,
+        "log": "LoadingCache.DependencyInjection.Tests-net10.0.log",
+        "environment_overrides": {},
+        "test_counts": {
+          "total": 10,
+          "executed": 10,
+          "passed": 10,
+          "failed": 0,
+          "notExecuted": 0
+        }
+      },
+      {
+        "name": "LoadingCache.StressTests-net8.0",
+        "command": [
+          "dotnet",
+          "test",
+          "tests/LoadingCache.StressTests/LoadingCache.StressTests.csproj",
+          "-c",
+          "Release",
+          "--no-build",
+          "--no-restore",
+          "-f",
+          "net8.0",
+          "--logger",
+          "trx;LogFileName=LoadingCache.StressTests-net8.0.trx",
+          "--results-directory",
+          "/Users/awe123343/Dev/LoadingCache.NET/artifacts/validation/memorycache-goal-20260916/parallel-resident-put-final-01",
+          "--",
+          "RunConfiguration.DotNetHostPath=/Users/awe123343/Dev/LoadingCache.NET/artifacts/runtime8/dotnet"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 6.089271625038236,
+        "log": "LoadingCache.StressTests-net8.0.log",
+        "environment_overrides": {},
+        "test_counts": {
+          "total": 10,
+          "executed": 10,
+          "passed": 10,
+          "failed": 0,
+          "notExecuted": 0
+        }
+      },
+      {
+        "name": "LoadingCache.StressTests-net10.0",
+        "command": [
+          "dotnet",
+          "test",
+          "tests/LoadingCache.StressTests/LoadingCache.StressTests.csproj",
+          "-c",
+          "Release",
+          "--no-build",
+          "--no-restore",
+          "-f",
+          "net10.0",
+          "--logger",
+          "trx;LogFileName=LoadingCache.StressTests-net10.0.trx",
+          "--results-directory",
+          "/Users/awe123343/Dev/LoadingCache.NET/artifacts/validation/memorycache-goal-20260916/parallel-resident-put-final-01",
+          "--",
+          "RunConfiguration.DotNetHostPath=/Users/awe123343/Dev/LoadingCache.NET/artifacts/runtime10/dotnet"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 6.086104457965121,
+        "log": "LoadingCache.StressTests-net10.0.log",
+        "environment_overrides": {},
+        "test_counts": {
+          "total": 10,
+          "executed": 10,
+          "passed": 10,
+          "failed": 0,
+          "notExecuted": 0
+        }
+      },
+      {
+        "name": "consumer-net8",
+        "command": [
+          "/Users/awe123343/Dev/LoadingCache.NET/artifacts/runtime8/dotnet",
+          "/Users/awe123343/Dev/LoadingCache.NET/tests/LoadingCache.ConsumerSmoke/bin/Release/net8.0/LoadingCache.ConsumerSmoke.dll"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 0.20673720794729888,
+        "log": "consumer-net8.log",
+        "environment_overrides": {},
+        "test_counts": null
+      },
+      {
+        "name": "consumer-net10",
+        "command": [
+          "/Users/awe123343/Dev/LoadingCache.NET/artifacts/runtime10/dotnet",
+          "/Users/awe123343/Dev/LoadingCache.NET/tests/LoadingCache.ConsumerSmoke/bin/Release/net10.0/LoadingCache.ConsumerSmoke.dll"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 0.21107729081995785,
+        "log": "consumer-net10.log",
+        "environment_overrides": {},
+        "test_counts": null
+      }
+    ],
+    "binding": {
+      "coreSha256": "d6b99727eb98e3c8a8396e00723ca6473f6e682074a0b9d9bf0070d622fba275",
+      "sourceUnchanged": true,
+      "commands": 14,
+      "tests": 1516,
+      "consumers": 2,
+      "binaryBindingLimit": "Surviving outputs inspected after validation with no intervening build; test processes do not emit these hashes.",
+      "runtimeBindingLimit": "Exact hosts selected by recorded test argv; native runtime files rehashed after validation."
+    },
+    "bindingLimit": "Surviving build outputs checked after validation; not per-test-process emitted assembly hashes."
+  },
+  "soak": {
+    "path": "artifacts/validation/memorycache-goal-20260916/parallel-resident-put-soak",
+    "completed": {
+      "tests": 12,
+      "secondsPerCase": 300,
+      "runtimesSerial": true,
+      "casesParallelWithinRuntime": true,
+      "allPassed": true
+    },
+    "results": [
+      {
+        "runtime": "8.0.31",
+        "exitCode": 0,
+        "testCounts": {
+          "total": 6,
+          "executed": 6,
+          "passed": 6,
+          "failed": 0,
+          "notExecuted": 0
+        },
+        "jsonlHashes": {
+          "features-8.0.31-stats-False-65306-e2a85b5246e14bc9bcc63ec0d4a32766.jsonl": "4c4315eb053121c1b6bd78117d421408cc94ab7c53c95c3f7b0b0f4b070ea31d",
+          "features-8.0.31-stats-True-65306-d3119b00fe6d4d599c89d1cb6dcf9dfc.jsonl": "b2999164792e19daaffe95fda70b61e2d3111a892d2400e6a328ae48c8f8dffd",
+          "soak-8.0.31-stats-False-65306-3372d20bfa88432c90304a42afe62705.jsonl": "74f0a8a102426c4c1fb1146f6905d09458a567531c20216c7fb408d862e781a2",
+          "soak-8.0.31-stats-False-65306-38a89b786c4044b08e1eb9f71bb5b08d.jsonl": "adb4bc725b4f04fbf5afbe03ae5de7d04f7e645809ca6ee681082777ef4167f0",
+          "soak-8.0.31-stats-True-65306-78885624f3934774887a346d07c93c6e.jsonl": "df0a56f1ec6e69ce3faef8aa22dd520fc39a7ef34dd5fff3bd70e6c04fa820d2",
+          "soak-8.0.31-stats-True-65306-d2fdbd929d574d44a82f8e457d2e471e.jsonl": "0e2ebd0eb7922375bef2ae037804eb8433d027eb8f1983debceaf5287a2eaa8b"
+        }
+      },
+      {
+        "runtime": "10.0.12",
+        "exitCode": 0,
+        "testCounts": {
+          "total": 6,
+          "executed": 6,
+          "passed": 6,
+          "failed": 0,
+          "notExecuted": 0
+        },
+        "jsonlHashes": {
+          "features-10.0.12-stats-False-66080-1d3e1568459b426d9d9349f010653220.jsonl": "4ea7d365adf24aa478073531bca453df6e642273eceb7ddcfce4e04afdd87cb1",
+          "features-10.0.12-stats-True-66080-f0f927a05a53453b86120eb14ecdb4a9.jsonl": "2c1cb438c96cd530ae929b5fe05a5da991776b7d0850f56cedbd28eef574c0b6",
+          "soak-10.0.12-stats-False-66080-cd81d9c0744440fab501055fc1d2c157.jsonl": "a43af9e78fe99244dfdc482cc644e4162e33a7a85122d55a2c73ab267788ca2d",
+          "soak-10.0.12-stats-False-66080-f7efbeb54e02468192dff2e036ea2d64.jsonl": "7ab3c86d71537db743c930de0cb0d6d9329a0b05a03ec747eea84758e851d98c",
+          "soak-10.0.12-stats-True-66080-40bf662e65324963bce250355700860d.jsonl": "beb3889546cd5053656ab2364e5a35b10da705b258c81f079890df11c043e988",
+          "soak-10.0.12-stats-True-66080-e9431e08a7d4435aa7cfc1cc33f4d8c4.jsonl": "38ed2cee9bbb5e1f3d4a3e4f4f7a3fb41548290188301c46b2491d8193e8a267"
+        }
+      }
+    ],
+    "testNamesPerRuntime": [
+      "BulkWeakReferencesAndListenersRemainConsistent(False)",
+      "BulkWeakReferencesAndListenersRemainConsistent(True)",
+      "ContinuousAccessOnlyLifecycleMaintainsBounds(False)",
+      "ContinuousAccessOnlyLifecycleMaintainsBounds(True)",
+      "ContinuousMixedLifecycleMaintainsBounds(False)",
+      "ContinuousMixedLifecycleMaintainsBounds(True)"
+    ],
+    "limit": "Six cases run concurrently within each runtime; twelve passing cases are bounded soak evidence."
+  },
+  "paired": {
+    "write-normal-01": {
+      "path": "artifacts/benchmarks/memorycache-goal-20260916/parallel-resident-put/write-normal-01",
+      "verifiedSha256": "023b5475af1fa91130cc2ef717662aaf5d4e917626745351fa124b8cc8f0cfe9",
+      "processes": 32,
+      "measuredSamples": 224,
+      "warmupSamples": 471,
+      "summary": [
+        {
+          "runtime": "10",
+          "case": "022-replacement",
+          "ratios": [
+            0.4971293554504937,
+            0.41254536262964364
+          ],
+          "direction": "lower"
+        },
+        {
+          "runtime": "10",
+          "case": "026-replacement",
+          "ratios": [
+            0.39720255229046014,
+            0.32838017101142386
+          ],
+          "direction": "lower"
+        },
+        {
+          "runtime": "10",
+          "case": "054-replacement",
+          "ratios": [
+            0.427950816637065,
+            0.38285594326764855
+          ],
+          "direction": "lower"
+        },
+        {
+          "runtime": "10",
+          "case": "058-replacement",
+          "ratios": [
+            0.4379533832553801,
+            0.45217390906712124
+          ],
+          "direction": "lower"
+        },
+        {
+          "runtime": "8",
+          "case": "022-replacement",
+          "ratios": [
+            0.2912581982186699,
+            0.44882352836054173
+          ],
+          "direction": "lower"
+        },
+        {
+          "runtime": "8",
+          "case": "026-replacement",
+          "ratios": [
+            0.3049380827470889,
+            0.4058696775823423
+          ],
+          "direction": "lower"
+        },
+        {
+          "runtime": "8",
+          "case": "054-replacement",
+          "ratios": [
+            0.3143568479171483,
+            0.3330115956070251
+          ],
+          "direction": "lower"
+        },
+        {
+          "runtime": "8",
+          "case": "058-replacement",
+          "ratios": [
+            0.5633244438080578,
+            0.3664066546810202
+          ],
+          "direction": "lower"
+        }
+      ],
+      "counts": {
+        "lower": 8,
+        "higher": 0,
+        "mixed": 0
+      }
+    },
+    "controls-normal-01": {
+      "path": "artifacts/benchmarks/memorycache-goal-20260916/parallel-resident-put/controls-normal-01",
+      "verifiedSha256": "d9cc77c2e837679feff54b509e5a1f82c5fb707550c211756ee30f1d96661557",
+      "processes": 64,
+      "measuredSamples": 448,
+      "warmupSamples": 1424,
+      "summary": [
+        {
+          "runtime": "10",
+          "case": "000-read",
+          "ratios": [
+            1.1085157054805832,
+            1.0134773778728075
+          ],
+          "direction": "higher"
+        },
+        {
+          "runtime": "10",
+          "case": "005-read",
+          "ratios": [
+            0.975549128865989,
+            1.0470004870680405
+          ],
+          "direction": "mixed"
+        },
+        {
+          "runtime": "10",
+          "case": "021-replacement",
+          "ratios": [
+            0.7854772369973178,
+            0.7819136881587173
+          ],
+          "direction": "lower"
+        },
+        {
+          "runtime": "10",
+          "case": "025-replacement",
+          "ratios": [
+            0.41817252052584475,
+            0.7325597897082424
+          ],
+          "direction": "lower"
+        },
+        {
+          "runtime": "10",
+          "case": "032-read",
+          "ratios": [
+            0.9901740838676804,
+            0.9894060078413552
+          ],
+          "direction": "lower"
+        },
+        {
+          "runtime": "10",
+          "case": "037-read",
+          "ratios": [
+            1.005149078599259,
+            1.2692980602260404
+          ],
+          "direction": "higher"
+        },
+        {
+          "runtime": "10",
+          "case": "053-replacement",
+          "ratios": [
+            0.642527103285341,
+            0.6419505502705645
+          ],
+          "direction": "lower"
+        },
+        {
+          "runtime": "10",
+          "case": "057-replacement",
+          "ratios": [
+            0.6165033929161626,
+            0.7129148093070564
+          ],
+          "direction": "lower"
+        },
+        {
+          "runtime": "8",
+          "case": "000-read",
+          "ratios": [
+            0.9876579530654345,
+            0.9692879994443249
+          ],
+          "direction": "lower"
+        },
+        {
+          "runtime": "8",
+          "case": "005-read",
+          "ratios": [
+            0.8769743935570743,
+            0.8979211531513482
+          ],
+          "direction": "lower"
+        },
+        {
+          "runtime": "8",
+          "case": "021-replacement",
+          "ratios": [
+            0.7916359911497173,
+            0.8876884701807266
+          ],
+          "direction": "lower"
+        },
+        {
+          "runtime": "8",
+          "case": "025-replacement",
+          "ratios": [
+            1.0692910930425945,
+            0.8124182136274128
+          ],
+          "direction": "mixed"
+        },
+        {
+          "runtime": "8",
+          "case": "032-read",
+          "ratios": [
+            0.9918370777618642,
+            1.0069705741460873
+          ],
+          "direction": "mixed"
+        },
+        {
+          "runtime": "8",
+          "case": "037-read",
+          "ratios": [
+            0.9763217712785325,
+            0.8129275220643678
+          ],
+          "direction": "lower"
+        },
+        {
+          "runtime": "8",
+          "case": "053-replacement",
+          "ratios": [
+            0.4953611494991956,
+            0.6693381243738667
+          ],
+          "direction": "lower"
+        },
+        {
+          "runtime": "8",
+          "case": "057-replacement",
+          "ratios": [
+            0.5675129107129752,
+            0.6654173816309953
+          ],
+          "direction": "lower"
+        }
+      ],
+      "counts": {
+        "lower": 11,
+        "higher": 2,
+        "mixed": 3
+      }
+    },
+    "read-confirmation-01": {
+      "path": "artifacts/benchmarks/memorycache-goal-20260916/parallel-resident-put/read-confirmation-01",
+      "verifiedSha256": "29f181a26f637e5b697f7273a9845423d15a1eadf17b8a15a74e4307462133d3",
+      "processes": 16,
+      "measuredSamples": 112,
+      "warmupSamples": 80,
+      "summary": [
+        {
+          "runtime": "10",
+          "case": "000-read",
+          "ratios": [
+            0.989113771029288,
+            1.0023131469709776,
+            1.022135205638644,
+            0.9915771625825999
+          ],
+          "direction": "mixed"
+        },
+        {
+          "runtime": "10",
+          "case": "037-read",
+          "ratios": [
+            1.0281109807185471,
+            0.9318138136640055,
+            1.0058458439452276,
+            0.9220714653436152
+          ],
+          "direction": "mixed"
+        }
+      ],
+      "counts": {
+        "lower": 0,
+        "higher": 0,
+        "mixed": 2
+      }
+    }
+  },
+  "pairedNegatives": [
+    {
+      "run": "controls-normal-01",
+      "runtime": "10",
+      "case": "000-read",
+      "ratios": [
+        1.1085157054805832,
+        1.0134773778728075
+      ],
+      "direction": "higher"
+    },
+    {
+      "run": "controls-normal-01",
+      "runtime": "10",
+      "case": "005-read",
+      "ratios": [
+        0.975549128865989,
+        1.0470004870680405
+      ],
+      "direction": "mixed"
+    },
+    {
+      "run": "controls-normal-01",
+      "runtime": "10",
+      "case": "037-read",
+      "ratios": [
+        1.005149078599259,
+        1.2692980602260404
+      ],
+      "direction": "higher"
+    },
+    {
+      "run": "controls-normal-01",
+      "runtime": "8",
+      "case": "025-replacement",
+      "ratios": [
+        1.0692910930425945,
+        0.8124182136274128
+      ],
+      "direction": "mixed"
+    },
+    {
+      "run": "controls-normal-01",
+      "runtime": "8",
+      "case": "032-read",
+      "ratios": [
+        0.9918370777618642,
+        1.0069705741460873
+      ],
+      "direction": "mixed"
+    },
+    {
+      "run": "read-confirmation-01",
+      "runtime": "10",
+      "case": "000-read",
+      "ratios": [
+        0.989113771029288,
+        1.0023131469709776,
+        1.022135205638644,
+        0.9915771625825999
+      ],
+      "direction": "mixed"
+    },
+    {
+      "run": "read-confirmation-01",
+      "runtime": "10",
+      "case": "037-read",
+      "ratios": [
+        1.0281109807185471,
+        0.9318138136640055,
+        1.0058458439452276,
+        0.9220714653436152
+      ],
+      "direction": "mixed"
+    }
+  ],
+  "helperHashes": {
+    "docs/benchmarks/memorycache-20260914/analyze.py": "3379174a5cc6f51543396614e482ae209f3b45abe29307885d967bacd96bb7f8",
+    "artifacts/benchmarks/memorycache-goal-20260915/contended-controls/fixed-path.py": "8d2014630e06196fe103e011077ed7e1075cf31a6e2f7e0eaaef5a8fef5ac27f",
+    "docs/benchmarks/memorycache-20260914/run.py": "c5e37b5655fa45cec3bdcf6f8a3c14799af33eee86074319c78534230a81e697",
+    "tools/validate.py": "d4aa85115b685ac11cf35248768c5c3c2520758fa6c9e56e5761bc2093addef0",
+    "artifacts/benchmarks/memorycache-goal-20260916/parallel-resident-put/export-report.py": "533fcb460522152e77387e3376eca1f1710d8fc630097733b75f1367fb510285"
+  },
+  "limits": [
+    "Native-key reads, trace hit ratios/occupancy and fan-in backend suppression are separate outcomes.",
+    "Paired controls use unchanged historical drivers; the fresh matrix has its own exact source/binary binding.",
+    "No causal or significance claim follows from two-round signs; all negative rounds are retained.",
+    "Soak and correctness are bounded evidence, not all-platform release certification."
+  ]
+}

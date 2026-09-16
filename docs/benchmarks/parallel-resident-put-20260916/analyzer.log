@@ -1,0 +1,65 @@
+{
+  "processes": 584,
+  "pairedCases": 152,
+  "measuredSamples": 2920,
+  "verified": true,
+  "sourceCommit": "a319bab02401c6f3b313de8819dd613e5f063952",
+  "traceEndResidency": {
+    "loadingcache": {
+      "median": 1.0,
+      "min": 1.0,
+      "max": 1.87109375
+    },
+    "memorycache": {
+      "median": 1.0,
+      "min": 0.9501953125,
+      "max": 1.0
+    }
+  },
+  "categories": {
+    "8": {
+      "read": {
+        "cases": 34,
+        "costRatio": {
+          "median": 0.3352695896739051,
+          "min": 0.027189670798621488,
+          "max": 2.913944281492009
+        },
+        "loadingcacheLowerCostCases": 20,
+        "roundDirectionDisagreements": 0
+      },
+      "replacement": {
+        "cases": 16,
+        "costRatio": {
+          "median": 0.19808777787138382,
+          "min": 0.016524112916389593,
+          "max": 1.4067707509642107
+        },
+        "loadingcacheLowerCostCases": 14,
+        "roundDirectionDisagreements": 2
+      }
+    },
+    "10": {
+      "read": {
+        "cases": 34,
+        "costRatio": {
+          "median": 0.3855020039867141,
+          "min": 0.025601099446537767,
+          "max": 2.967558908911654
+        },
+        "loadingcacheLowerCostCases": 21,
+        "roundDirectionDisagreements": 3
+      },
+      "replacement": {
+        "cases": 16,
+        "costRatio": {
+          "median": 0.15864766219838342,
+          "min": 0.018046042196525645,
+          "max": 0.913102348663522
+        },
+        "loadingcacheLowerCostCases": 16,
+        "roundDirectionDisagreements": 0
+      }
+    }
+  }
+}

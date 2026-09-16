@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/Users/awe123343/.local/share/uv/python/cpython-3.14.0-macos-aarch64-none/bin/python3.14",
+    "/Users/awe123343/Dev/LoadingCache.NET/docs/benchmarks/memorycache-20260914/analyze.py",
+    "/Users/awe123343/Dev/LoadingCache.NET/artifacts/benchmarks/memorycache-goal-20260916/parallel-resident-put/memorycache-full-01",
+    "--output",
+    "/Users/awe123343/Dev/LoadingCache.NET/docs/benchmarks/parallel-resident-put-20260916"
+  ],
+  "exitCode": 0,
+  "analyzerSha256": "3379174a5cc6f51543396614e482ae209f3b45abe29307885d967bacd96bb7f8"
+}
