@@ -10,41 +10,77 @@ public sealed class ReadBufferForcedFailureTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
 
+    [TestCase(false)]
+    [TestCase(true)]
+    public void BeforeReserveCanReplacePublicationHookForTheSameOffer(bool recordStatistics)
+    {
+        using ProducerHookState state = new(recordStatistics);
+        StripedReadBuffer<int> buffer = state.Buffer;
+        List<string> trace = state.Trace;
+        buffer.SetHooksForTesting(
+            beforeReserve: state.ReplacePublicationHook,
+            beforePublish: state.RecordOriginalPublication
+        );
+
+        buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
+        trace.Should().BeEmpty();
+        buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Success);
+        buffer.TryOffer(2).Should().Be(ReadBufferOfferResult.Success);
+
+        trace.Should().Equal("reserve", "replacement", "replacement");
+        List<int> observed = [];
+        buffer.DrainTo(observed.Add, 4).Should().Be(3);
+        observed.Should().Equal(0, 1, 2);
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public void ClearingHooksDoesNotDisablePendingForcedFailures(bool recordStatistics)
+    {
+        using ProducerHookState state = new(recordStatistics);
+        StripedReadBuffer<int> buffer = state.Buffer;
+        buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
+        buffer.SetForcedCasFailuresForTesting(3);
+        buffer.SetHooksForTesting(
+            beforeReserve: state.ClearHooks,
+            beforePublish: state.RecordPublication
+        );
+
+        buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Failed);
+        buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Success);
+
+        state.Reservations.Should().Be(1);
+        state.Publications.Should().Be(0);
+        List<int> observed = [];
+        buffer.DrainTo(observed.Add, 4).Should().Be(2);
+        observed.Should().Equal(0, 1);
+        ReadBufferStatistics statistics = buffer.GetStatistics();
+        statistics.DroppedFailed.Should().Be(recordStatistics ? 1 : 0);
+        statistics.Enqueued.Should().Be(recordStatistics ? 2 : 0);
+        statistics.Dequeued.Should().Be(recordStatistics ? 2 : 0);
+        statistics.Queued.Should().Be(0);
+    }
+
     [Test]
     public void BeforeReserveCanClearForcedFailuresForTheSameOffer()
     {
-        StripedReadBuffer<int> buffer = new(1, 4);
-        try
-        {
-            buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
-            buffer.SetForcedCasFailuresForTesting(3);
-            int reservations = 0;
-            buffer.SetHooksForTesting(
-                beforeReserve: () =>
-                {
-                    reservations++;
-                    buffer.SetForcedCasFailuresForTesting(0);
-                },
-                beforePublish: null
-            );
+        using ProducerHookState state = new();
+        StripedReadBuffer<int> buffer = state.Buffer;
+        buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
+        buffer.SetForcedCasFailuresForTesting(3);
+        buffer.SetHooksForTesting(beforeReserve: state.ClearForcedFailures, beforePublish: null);
 
-            buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Success);
-            reservations.Should().Be(1);
-            ReadBufferStatistics statistics = buffer.GetStatistics();
-            statistics.DroppedFailed.Should().Be(0);
-            statistics.Enqueued.Should().Be(2);
-            statistics.Queued.Should().Be(2);
-            List<int> observed = [];
-            buffer.DrainTo(observed.Add, 4).Should().Be(2);
-            observed.Should().Equal(0, 1);
-            buffer.GetStatistics().Dequeued.Should().Be(2);
-            buffer.GetStatistics().Queued.Should().Be(0);
-        }
-        finally
-        {
-            buffer.SetHooksForTesting(null, null);
-            buffer.Dispose();
-        }
+        buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Success);
+        state.Reservations.Should().Be(1);
+        ReadBufferStatistics statistics = buffer.GetStatistics();
+        statistics.DroppedFailed.Should().Be(0);
+        statistics.Enqueued.Should().Be(2);
+        statistics.Queued.Should().Be(2);
+        List<int> observed = [];
+        buffer.DrainTo(observed.Add, 4).Should().Be(2);
+        observed.Should().Equal(0, 1);
+        buffer.GetStatistics().Dequeued.Should().Be(2);
+        buffer.GetStatistics().Queued.Should().Be(0);
     }
 
     [Test]
@@ -158,6 +194,44 @@ public sealed class ReadBufferForcedFailureTests
         finally
         {
             await completion.WaitAsync(TestTimeout);
+        }
+    }
+
+    private sealed class ProducerHookState(bool recordStatistics = true) : IDisposable
+    {
+        internal StripedReadBuffer<int> Buffer { get; } = new(1, 4, recordStatistics);
+        internal List<string> Trace { get; } = [];
+        internal int Reservations { get; private set; }
+        internal int Publications { get; private set; }
+
+        internal void ReplacePublicationHook()
+        {
+            Trace.Add("reserve");
+            Buffer.SetHooksForTesting(null, RecordReplacementPublication);
+        }
+
+        internal void RecordOriginalPublication() => Trace.Add("original");
+
+        private void RecordReplacementPublication() => Trace.Add("replacement");
+
+        internal void ClearHooks()
+        {
+            Reservations++;
+            Buffer.SetHooksForTesting(null, null);
+        }
+
+        internal void RecordPublication() => Publications++;
+
+        internal void ClearForcedFailures()
+        {
+            Reservations++;
+            Buffer.SetForcedCasFailuresForTesting(0);
+        }
+
+        public void Dispose()
+        {
+            Buffer.SetHooksForTesting(null, null);
+            Buffer.Dispose();
         }
     }
 
