@@ -196,17 +196,60 @@ public sealed class AtomicPublicationRaceTests
             fixedExpiration: true
         );
 
+    [TestCase(false)]
+    [TestCase(true)]
+    public Task AccessExpirationReferenceRefreshFailureFencesLaterSet(bool replaceBeforeFailure) =>
+        VerifyRefreshRollback(
+            new Payload(1),
+            new Payload(2),
+            new Payload(3),
+            replaceBeforeFailure,
+            fixedExpiration: false,
+            accessExpiration: true
+        );
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public Task AccessExpirationInt64RefreshFailureFencesLaterSet(bool replaceBeforeFailure) =>
+        VerifyRefreshRollback(
+            0x12345678abcdef01L,
+            0x23456789abcdef12L,
+            0x3456789abcdef123L,
+            replaceBeforeFailure,
+            fixedExpiration: false,
+            accessExpiration: true
+        );
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public Task AccessExpirationLargeStructRefreshFailureFencesLaterSet(
+        bool replaceBeforeFailure
+    ) =>
+        VerifyRefreshRollback(
+            new LargeValue(1, 2, 3, 4),
+            new LargeValue(5, 6, 7, 8),
+            new LargeValue(9, 10, 11, 12),
+            replaceBeforeFailure,
+            fixedExpiration: false,
+            accessExpiration: true
+        );
+
     private static async Task VerifyRefreshRollback<TValue>(
         TValue oldValue,
         TValue refreshedValue,
         TValue replacement,
         bool replaceBeforeFailure,
-        bool fixedExpiration
+        bool fixedExpiration,
+        bool accessExpiration = false
     )
         where TValue : notnull
     {
         await using var publication = new BlockingTestHook(Watchdog);
-        var engine = CreateEngine<TValue>(FailureHooks(publication), fixedExpiration);
+        var engine = CreateEngine<TValue>(
+            FailureHooks(publication),
+            fixedExpiration,
+            accessExpiration
+        );
         await using var cache = new AsyncLoadingCache<int, TValue>(
             engine,
             (_, _) => Task.FromResult(refreshedValue)
@@ -507,7 +550,8 @@ public sealed class AtomicPublicationRaceTests
 
     private static CacheEngine<int, TValue> CreateEngine<TValue>(
         LoadingCacheTestHooks hooks,
-        bool fixedExpiration = false
+        bool fixedExpiration = false,
+        bool accessExpiration = false
     )
         where TValue : notnull =>
         new(
@@ -518,9 +562,11 @@ public sealed class AtomicPublicationRaceTests
                 RecordStatistics = true,
                 TestHooks = hooks,
                 ExpireAfterWrite = fixedExpiration ? TimeSpan.FromMinutes(1) : null,
-                TimeProvider = fixedExpiration
-                    ? new FakeTimeProvider(DateTimeOffset.UnixEpoch)
-                    : TimeProvider.System,
+                ExpireAfterAccess = accessExpiration ? TimeSpan.FromMinutes(1) : null,
+                TimeProvider =
+                    fixedExpiration || accessExpiration
+                        ? new FakeTimeProvider(DateTimeOffset.UnixEpoch)
+                        : TimeProvider.System,
             }
         );
 
