@@ -9,10 +9,11 @@ public sealed class ReadBufferShutdownRaceTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
 
-    [Test]
-    public async Task ShutdownCountsAProducerThatFinishesAfterTheTailSnapshot()
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task ShutdownCountsAProducerThatFinishesAfterTheTailSnapshot(bool recordStatistics)
     {
-        using StripedReadBuffer<int> buffer = new(1, 4);
+        using StripedReadBuffer<int> buffer = new(1, 4, recordStatistics);
         await using BlockingTestHook reservation = new(TestTimeout);
         buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
         buffer.SetHooksForTesting(reservation.Invoke, beforePublish: null);
@@ -32,9 +33,9 @@ public sealed class ReadBufferShutdownRaceTests
                 .BeOneOf(ReadBufferOfferResult.Success, ReadBufferOfferResult.Shutdown);
 
             ReadBufferStatistics statistics = buffer.GetStatistics();
-            statistics.Enqueued.Should().Be(2);
+            statistics.Enqueued.Should().Be(recordStatistics ? 2 : 0);
             statistics.Dequeued.Should().Be(0);
-            statistics.DroppedShutdown.Should().Be(2);
+            statistics.DroppedShutdown.Should().Be(recordStatistics ? 2 : 0);
             statistics.Queued.Should().Be(0);
             reservation.TimedOut.Should().BeFalse();
         }
@@ -47,10 +48,13 @@ public sealed class ReadBufferShutdownRaceTests
         }
     }
 
-    [Test]
-    public async Task CompetingRingDisposersCannotChangeTheOwnersShutdownBoundary()
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task CompetingRingDisposersCannotChangeTheOwnersShutdownBoundary(
+        bool recordStatistics
+    )
     {
-        using StripedReadBuffer<int> buffer = new(1, 4);
+        using StripedReadBuffer<int> buffer = new(1, 4, recordStatistics);
         await using BlockingTestHook reservation = new(TestTimeout);
         await using BlockingTestHook publication = new(TestTimeout);
         buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
@@ -81,9 +85,9 @@ public sealed class ReadBufferShutdownRaceTests
             (await producer.WaitAsync(TestTimeout)).Should().Be(ReadBufferOfferResult.Shutdown);
 
             ReadBufferStatistics statistics = buffer.GetStatistics();
-            statistics.Enqueued.Should().Be(2);
+            statistics.Enqueued.Should().Be(recordStatistics ? 2 : 0);
             statistics.Dequeued.Should().Be(0);
-            statistics.DroppedShutdown.Should().Be(2);
+            statistics.DroppedShutdown.Should().Be(recordStatistics ? 2 : 0);
             statistics.DroppedFull.Should().Be(0);
             statistics.DroppedFailed.Should().Be(0);
             statistics.Queued.Should().Be(0);
@@ -104,10 +108,13 @@ public sealed class ReadBufferShutdownRaceTests
         }
     }
 
-    [Test]
-    public void ShutdownDuringTheFinalFailedReservationCountsTheRejectedOfferOnce()
+    [TestCase(false)]
+    [TestCase(true)]
+    public void ShutdownDuringTheFinalFailedReservationCountsTheRejectedOfferOnce(
+        bool recordStatistics
+    )
     {
-        using StripedReadBuffer<int> buffer = new(1, 4);
+        using StripedReadBuffer<int> buffer = new(1, 4, recordStatistics);
         buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Success);
         buffer.SetForcedCasFailuresForTesting(3);
         int reservations = 0;
@@ -126,11 +133,11 @@ public sealed class ReadBufferShutdownRaceTests
 
         reservations.Should().Be(3);
         ReadBufferStatistics statistics = buffer.GetStatistics();
-        statistics.Enqueued.Should().Be(1);
+        statistics.Enqueued.Should().Be(recordStatistics ? 1 : 0);
         statistics.Dequeued.Should().Be(0);
         statistics.DroppedFull.Should().Be(0);
         statistics.DroppedFailed.Should().Be(0);
-        statistics.DroppedShutdown.Should().Be(2);
+        statistics.DroppedShutdown.Should().Be(recordStatistics ? 2 : 0);
         statistics.Queued.Should().Be(0);
     }
 }

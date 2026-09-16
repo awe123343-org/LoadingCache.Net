@@ -207,10 +207,13 @@ public sealed class ReadBufferBatchTests
         }
     }
 
-    [Test]
-    public async Task DisposeReleasesOtherQueuedValuesWhileAProducerStillHoldsTheSlotArray()
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task DisposeReleasesOtherQueuedValuesWhileAProducerStillHoldsTheSlotArray(
+        bool recordStatistics
+    )
     {
-        using StripedReadBuffer<object> buffer = new(1, 4);
+        using StripedReadBuffer<object> buffer = new(1, 4, recordStatistics);
         await using BlockingTestHook publication = new(TestTimeout);
         WeakReference<object> queued = EnqueueCollectibleValue(buffer);
         buffer.SetHooksForTesting(null, publication.Invoke);

@@ -570,7 +570,10 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
                                     Volatile.Read(ref _beforeReserveForTesting),
                                     Volatile.Read(ref _beforePublishForTesting)
                                 );
-                                Volatile.Write(ref table[index], created);
+                                // Pair publication with the disposed recheck. Disposal may have
+                                // detached this table and already inspected its previously empty
+                                // slot; a release-only store could otherwise escape both checks.
+                                Interlocked.Exchange(ref table[index], created);
                                 if (Volatile.Read(ref _disposed) != 0)
                                 {
                                     DisposeCreatedRing(created);
@@ -989,7 +992,10 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
             {
                 SaturatingIncrement(ref _enqueued);
             }
-            Volatile.Write(ref slot.Sequence, unchecked(tail + 1));
+            // Publication must precede the disposed read with full-fence ordering. A release
+            // store followed by an acquire read can miss disposal while the publication is
+            // still buffered, after the disposer has already cleared and inspected this slot.
+            Interlocked.Exchange(ref slot.Sequence, unchecked(tail + 1));
 
             if (Volatile.Read(ref _disposed) != 0)
             {
