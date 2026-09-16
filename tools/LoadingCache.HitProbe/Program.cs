@@ -411,10 +411,12 @@ internal static class Program
         {
             ThrowIfWorkerFailed();
 
+            using Process? process = diagnostics is null ? null : Process.GetCurrentProcess();
             RequestStatistics beforeStatistics = _cache.Statistics;
             ProbeDiagnosticSnapshot? diagnosticBefore = diagnostics?.Capture();
             long allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
             long[] collectionsBefore = CollectionCounts();
+            long? cpuStarted = process?.TotalProcessorTime.Ticks;
             long wallStarted = Stopwatch.GetTimestamp();
             Volatile.Write(ref _deadline, checked(wallStarted + _durationTicks));
 
@@ -434,6 +436,8 @@ internal static class Program
             long wallFinished = Stopwatch.GetTimestamp();
             long managedAllocatedBytes = GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore;
             long[] gcCollections = CollectionDelta(collectionsBefore);
+            process?.Refresh();
+            long? processCpuTicks = process?.TotalProcessorTime.Ticks - cpuStarted;
             ThrowIfWorkerFailed();
             ProbeDiagnosticSnapshot? diagnosticAfter = diagnostics?.Capture();
 
@@ -534,6 +538,10 @@ internal static class Program
                 OperationsPerSecondIncludingCleanup: operations / (wallSeconds + cleanupSeconds),
                 ManagedAllocatedBytes: managedAllocatedBytes,
                 GcCollections: gcCollections,
+                ProcessCpuTicks: processCpuTicks,
+                ProcessCpuScope: process is null
+                    ? null
+                    : "TimeSpan ticks (10,000,000/second); aggregate CPU of all process threads including measurement-boundary overhead, excluding diagnostic captures and explicit cleanup.",
                 Diagnostics: diagnosticBefore is null || diagnosticAfter is null
                     ? null
                     : new(
@@ -1079,6 +1087,8 @@ internal static class Program
         double OperationsPerSecondIncludingCleanup,
         long ManagedAllocatedBytes,
         long[] GcCollections,
+        long? ProcessCpuTicks,
+        string? ProcessCpuScope,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
             ProbeDiagnostics? Diagnostics
     );
