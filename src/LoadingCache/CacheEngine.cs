@@ -2270,50 +2270,54 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         bool collected = false
     )
     {
-        if (!_entries.IsCurrent(entry))
+        lock (entry.Sync)
         {
-            return null;
-        }
+            if (!_entries.IsCurrent(entry))
+            {
+                return null;
+            }
 
-        RetireExpirationNodeLocked(entry);
-        _entries.TryRemoveExact(entry);
-        Volatile.Write(ref entry.Retired, true);
-        Flight? refreshFlight = entry.RefreshFlight;
-        if (refreshFlight is not null)
-        {
-            Volatile.Write(ref refreshFlight.PublishRevoked, 1);
-            entry.RefreshFlight = null;
-        }
-        if (!Volatile.Read(ref entry.IsReady))
-        {
-            return null;
-        }
+            _testHooks?.BeforeEntryMutationCommit?.Invoke(entry.Sync);
+            RetireExpirationNodeLocked(entry);
+            _entries.TryRemoveExact(entry);
+            Volatile.Write(ref entry.Retired, true);
+            Flight? refreshFlight = entry.RefreshFlight;
+            if (refreshFlight is not null)
+            {
+                Volatile.Write(ref refreshFlight.PublishRevoked, 1);
+                entry.RefreshFlight = null;
+            }
+            if (!Volatile.Read(ref entry.IsReady))
+            {
+                return null;
+            }
 
-        bool hasSynchronousEviction = QueueRemovalNotificationLocked(
-            entry,
-            cause,
-            IsEvictionCause(cause),
-            out RemovalNotification<TKey, TValue> synchronousEviction,
-            collected
-        );
+            bool hasSynchronousEviction = QueueRemovalNotificationLocked(
+                entry,
+                cause,
+                IsEvictionCause(cause),
+                out RemovalNotification<TKey, TValue> synchronousEviction,
+                collected
+            );
 
-        // Trusted ownership bookkeeping only. It may enqueue bounded work but
-        // must never invoke a user disposer on this thread or throw.
-        if (entry.TryGetValue(out TValue? retiredValue))
-        {
-            _onValueRetired?.Invoke(retiredValue);
-        }
+            // Trusted ownership bookkeeping only. It may enqueue bounded work but
+            // must never invoke a user disposer on this thread or throw.
+            if (entry.TryGetValue(out TValue? retiredValue))
+            {
+                _onValueRetired?.Invoke(retiredValue);
+            }
 
-        if (entry.PolicyDetached)
-        {
-            entry.PolicyDetached = false;
-        }
-        else
-        {
-            RemovePolicyWriteLocked(entry.PolicyToken);
-        }
+            if (entry.PolicyDetached)
+            {
+                entry.PolicyDetached = false;
+            }
+            else
+            {
+                RemovePolicyWriteLocked(entry.PolicyToken);
+            }
 
-        return hasSynchronousEviction ? synchronousEviction : null;
+            return hasSynchronousEviction ? synchronousEviction : null;
+        }
     }
 
     private void RemoveCurrentEntryLocked(Flight flight)

@@ -257,10 +257,6 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 if (
                     !_entries.TryGetValue(key, out Entry? current)
                     || !ReferenceEquals(current, expectedEntry)
-                    || current.Epoch != _epoch
-                    || current.PublicationRevision != expectedRevision
-                    || current.VariableRevision != expectedVariableRevision
-                    || !Volatile.Read(ref current.IsReady)
                 )
                 {
                     return false;
@@ -269,15 +265,18 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 lock (current.Sync)
                 {
                     if (
-                        !Volatile.Read(ref current.IsReady)
+                        current.Epoch != _epoch
+                        || current.PublicationRevision != expectedRevision
+                        || current.VariableRevision != expectedVariableRevision
+                        || !Volatile.Read(ref current.IsReady)
                         || IsExpired(current, _timeProvider.GetTimestamp())
                     )
                     {
                         return false;
                     }
+                    _testHooks?.BeforeEntryMutationCommit?.Invoke(current.Sync);
+                    PublishDictionaryEntryLocked(key, value, weight, duration);
                 }
-
-                PublishDictionaryEntryLocked(key, value, weight, duration);
             }
 
             RequestExpirationTimer();
@@ -328,9 +327,9 @@ internal sealed partial class CacheEngine<TKey, TValue>
                         value = default;
                         return false;
                     }
+                    _testHooks?.BeforeEntryMutationCommit?.Invoke(current.Sync);
+                    RemoveCurrentEntryLocked(current);
                 }
-
-                RemoveCurrentEntryLocked(current);
             }
 
             RequestExpirationTimer();
@@ -416,9 +415,6 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 if (
                     !_entries.TryGetValue(key, out Entry? current)
                     || !ReferenceEquals(current, expectedEntry)
-                    || current.Epoch != _epoch
-                    || current.PublicationRevision != expectedRevision
-                    || !Volatile.Read(ref current.IsReady)
                 )
                 {
                     return false;
@@ -427,15 +423,17 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 lock (current.Sync)
                 {
                     if (
-                        !Volatile.Read(ref current.IsReady)
+                        current.Epoch != _epoch
+                        || current.PublicationRevision != expectedRevision
+                        || !Volatile.Read(ref current.IsReady)
                         || IsExpired(current, _timeProvider.GetTimestamp())
                     )
                     {
                         return false;
                     }
+                    _testHooks?.BeforeEntryMutationCommit?.Invoke(current.Sync);
+                    RemoveCurrentEntryLocked(current);
                 }
-
-                RemoveCurrentEntryLocked(current);
             }
             RequestExpirationTimer();
             return true;

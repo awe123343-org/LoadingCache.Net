@@ -310,10 +310,12 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 retry = true;
                 return false;
             }
-            else
+            bool entryLockTaken = false;
+            try
             {
-                lock (current.Sync)
+                if (current is not null)
                 {
+                    Monitor.Enter(current.Sync, ref entryLockTaken);
                     if (
                         current.Epoch != expectedEpoch
                         || current.PublicationRevision != expectedRevision
@@ -330,28 +332,37 @@ internal sealed partial class CacheEngine<TKey, TValue>
                         retry = true;
                         return false;
                     }
+
+                    _testHooks?.BeforeEntryMutationCommit?.Invoke(current.Sync);
+                }
+
+                switch (mutation.Kind)
+                {
+                    case CacheMutationKind.Keep:
+                        return true;
+                    case CacheMutationKind.Set:
+                        PublishDictionaryEntryLocked(key, mutation.Value, weight, duration);
+                        scheduleExpiration = true;
+                        break;
+                    case CacheMutationKind.Remove:
+                        MarkDictionaryTransformMutation(key);
+                        RecordBulkMutationLocked(key);
+                        if (current is not null)
+                        {
+                            RemoveCurrentEntryLocked(current);
+                            scheduleExpiration = true;
+                        }
+                        break;
+                    default:
+                        throw new ArgumentOutOfRangeException(nameof(mutation));
                 }
             }
-
-            switch (mutation.Kind)
+            finally
             {
-                case CacheMutationKind.Keep:
-                    return true;
-                case CacheMutationKind.Set:
-                    PublishDictionaryEntryLocked(key, mutation.Value, weight, duration);
-                    scheduleExpiration = true;
-                    break;
-                case CacheMutationKind.Remove:
-                    MarkDictionaryTransformMutation(key);
-                    RecordBulkMutationLocked(key);
-                    if (current is not null)
-                    {
-                        RemoveCurrentEntryLocked(current);
-                        scheduleExpiration = true;
-                    }
-                    break;
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(mutation));
+                if (entryLockTaken)
+                {
+                    Monitor.Exit(current!.Sync);
+                }
             }
         }
 

@@ -293,23 +293,27 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
                 Entry current = candidateEntry;
 
-                if (
-                    _disposed != 0
-                    || _epoch != snapshot.Epoch
-                    || !_entries.IsCurrent(candidateEntry)
-                    || current.Epoch != snapshot.Epoch
-                    || !Volatile.Read(ref current.IsReady)
-                    || current.PublicationRevision != candidate.PublicationRevision
-                )
+                lock (current.Sync)
                 {
-                    continue;
+                    if (
+                        _disposed != 0
+                        || _epoch != snapshot.Epoch
+                        || !_entries.IsCurrent(candidateEntry)
+                        || current.Epoch != snapshot.Epoch
+                        || !Volatile.Read(ref current.IsReady)
+                        || current.PublicationRevision != candidate.PublicationRevision
+                    )
+                    {
+                        continue;
+                    }
+
+                    _testHooks?.BeforeEntryMutationCommit?.Invoke(current.Sync);
+                    RemoveCurrentEntryLocked(current, RemovalCause.MemoryPressure);
+                    RecordCounter(CacheCounterKind.Evictions);
+                    RecordCounter(CacheCounterKind.EvictedWeight, current.Weight);
+
+                    removed++;
                 }
-
-                RemoveCurrentEntryLocked(current, RemovalCause.MemoryPressure);
-                RecordCounter(CacheCounterKind.Evictions);
-                RecordCounter(CacheCounterKind.EvictedWeight, current.Weight);
-
-                removed++;
             }
         }
 
