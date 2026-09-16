@@ -22,8 +22,18 @@ public sealed class LongRunningStabilityTests
     /// <summary>Runs resident, fixed-expiration, and variable-expiration caches in one process.</summary>
     [TestCase(false)]
     [TestCase(true)]
-    public async Task ContinuousMixedLifecycleMaintainsBounds(bool statistics)
+    public Task ContinuousMixedLifecycleMaintainsBounds(bool statistics) =>
+        RunLifecycleAsync(statistics, accessOnly: false);
+
+    /// <summary>Runs resident, access-only, and variable-expiration caches in one process.</summary>
+    [TestCase(false)]
+    [TestCase(true)]
+    public Task ContinuousAccessOnlyLifecycleMaintainsBounds(bool statistics) =>
+        RunLifecycleAsync(statistics, accessOnly: true);
+
+    private static async Task RunLifecycleAsync(bool statistics, bool accessOnly)
     {
+        string scenario = accessOnly ? "access-only" : "mixed";
         string? configured = Environment.GetEnvironmentVariable("LOADINGCACHE_SOAK_SECONDS");
         int seconds = configured is null ? 5 : int.Parse(configured, CultureInfo.InvariantCulture);
         seconds.Should().BeInRange(1, 86_400);
@@ -35,7 +45,8 @@ public sealed class LongRunningStabilityTests
             directory,
             $"soak-{Environment.Version}-stats-{statistics}-{Environment.ProcessId}-{Guid.NewGuid():N}.jsonl"
         );
-        using var log = new StreamWriter(output) { AutoFlush = true };
+        using var log = new StreamWriter(output);
+        log.AutoFlush = true;
         var elapsed = Stopwatch.StartNew();
         TimeSpan rotationInterval = TimeSpan.FromSeconds(Math.Min(30, seconds / 3.0));
         TimeSpan nextRotation = rotationInterval;
@@ -48,7 +59,7 @@ public sealed class LongRunningStabilityTests
         long[] positions = new long[Workers];
         long[] outcomes = new long[3];
         var retired = new Queue<WeakReference>();
-        SoakCache[] caches = CreateCaches(statistics, cycle: 0);
+        SoakCache[] caches = CreateCaches(statistics, cycle: 0, accessOnly: accessOnly);
         Task[] jobs = [];
         int batch = 0;
         int cycle = 0;
@@ -57,6 +68,7 @@ public sealed class LongRunningStabilityTests
             new
             {
                 Event = "start",
+                Scenario = scenario,
                 Seed,
                 Workers,
                 OperationsPerBatch,
@@ -137,6 +149,7 @@ public sealed class LongRunningStabilityTests
                     WriteProgress(
                         log,
                         "progress",
+                        scenario,
                         elapsed,
                         batch,
                         cycle,
@@ -158,7 +171,7 @@ public sealed class LongRunningStabilityTests
                             retired.Dequeue();
                         }
                     }
-                    caches = CreateCaches(statistics, ++cycle);
+                    caches = CreateCaches(statistics, ++cycle, accessOnly);
                     jobs = [];
                     GC.Collect(
                         GC.MaxGeneration,
@@ -170,6 +183,7 @@ public sealed class LongRunningStabilityTests
                     WriteProgress(
                         log,
                         "recreated",
+                        scenario,
                         elapsed,
                         batch,
                         cycle,
@@ -184,6 +198,7 @@ public sealed class LongRunningStabilityTests
             WriteProgress(
                 log,
                 "workload-complete",
+                scenario,
                 elapsed,
                 batch,
                 cycle,
@@ -200,6 +215,7 @@ public sealed class LongRunningStabilityTests
                 new
                 {
                     Event = "failed",
+                    Scenario = scenario,
                     batch,
                     cycle,
                     ElapsedSeconds = elapsed.Elapsed.TotalSeconds,
@@ -210,7 +226,7 @@ public sealed class LongRunningStabilityTests
             );
             await TestContext
                 .Error.WriteLineAsync(
-                    $"seed={Seed}; failure and final 128 operations per worker: {output}"
+                    $"scenario={scenario}; seed={Seed}; failure and final 128 operations per worker: {output}"
                 )
                 .ConfigureAwait(false);
             throw;
@@ -234,6 +250,7 @@ public sealed class LongRunningStabilityTests
             new
             {
                 Event = "passed",
+                Scenario = scenario,
                 batch,
                 cycle,
                 ElapsedSeconds = elapsed.Elapsed.TotalSeconds,
@@ -241,13 +258,16 @@ public sealed class LongRunningStabilityTests
         );
         await TestContext
             .Progress.WriteLineAsync(
-                $"soak stats={statistics}; batches={batch}; cycles={cycle}; output={output}"
+                $"soak scenario={scenario}; stats={statistics}; batches={batch}; cycles={cycle}; output={output}"
             )
             .ConfigureAwait(false);
     }
 
-    private static SoakCache[] CreateCaches(bool statistics, int cycle) =>
-        Enumerable.Range(0, 3).Select(mode => new SoakCache(mode, cycle, statistics)).ToArray();
+    private static SoakCache[] CreateCaches(bool statistics, int cycle, bool accessOnly) =>
+        Enumerable
+            .Range(0, 3)
+            .Select(mode => new SoakCache(mode, cycle, statistics, accessOnly))
+            .ToArray();
 
     private static async Task OperateAsync(SoakCache state, int key, int kind, Random random)
     {
@@ -322,6 +342,7 @@ public sealed class LongRunningStabilityTests
     private static void WriteProgress(
         StreamWriter log,
         string eventName,
+        string scenario,
         Stopwatch elapsed,
         int batch,
         int cycle,
@@ -338,6 +359,7 @@ public sealed class LongRunningStabilityTests
             new
             {
                 Event = eventName,
+                Scenario = scenario,
                 ElapsedSeconds = elapsed.Elapsed.TotalSeconds,
                 batch,
                 cycle,
@@ -392,7 +414,7 @@ public sealed class LongRunningStabilityTests
         private int _peak;
         private long _invocations;
 
-        internal SoakCache(int mode, int cycle, bool statistics)
+        internal SoakCache(int mode, int cycle, bool statistics, bool accessOnly)
         {
             Mode = mode;
             Instance = cycle * 3 + mode;
@@ -407,9 +429,13 @@ public sealed class LongRunningStabilityTests
                     MaxConcurrentLoads = LoadLimit,
                     RecordStatistics = statistics,
                     TimeProvider = Clock,
-                    ExpireAfterWrite = mode == 1 ? TimeSpan.FromMilliseconds(250) : null,
+                    ExpireAfterWrite =
+                        mode == 1 && !accessOnly ? TimeSpan.FromMilliseconds(250) : null,
                     ExpireAfterAccess = mode == 1 ? TimeSpan.FromMilliseconds(125) : null,
-                    RefreshAfterWrite = mode == 0 ? null : TimeSpan.FromMilliseconds(50),
+                    RefreshAfterWrite =
+                        mode == 2 || (mode == 1 && !accessOnly)
+                            ? TimeSpan.FromMilliseconds(50)
+                            : null,
                     Expiry = mode == 2 ? new VariableExpiry() : null,
                 }
             );
