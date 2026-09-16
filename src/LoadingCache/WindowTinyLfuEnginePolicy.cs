@@ -297,9 +297,10 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
         lock (_policyGate)
         {
             _beforeMaintenance?.Invoke();
+            // Replay published resident accesses before queued writes select eviction victims.
+            DrainAccessesLocked(MaximumReadDrainPerPass);
             DrainWritesLocked(MaximumWriteDrainPerPass);
             bool writesRemain = _pendingWrites.Queued != 0;
-            DrainAccessesLocked(MaximumReadDrainPerPass);
             IReadOnlyList<PolicyNode<object>> maintained;
             try
             {
