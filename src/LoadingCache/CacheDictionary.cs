@@ -229,8 +229,9 @@ public class CacheDictionary<TKey, TValue>
     /// Computes a value from an explicit present-or-missing state. Returning
     /// <c>CacheMutation.Remove&lt;TValue&gt;()</c> removes the mapping without
     /// using <see langword="null"/> as a deletion sentinel. A missing snapshot
-    /// is fenced by the cache's explicit-mutation revision, so an unrelated
-    /// explicit mutation may cause the callback to run again.
+    /// is fenced against structural removals and explicit invalidation intent.
+    /// Unrelated changes may cause the callback to run again; changes to an
+    /// existing value need not do so.
     /// </summary>
     public CacheMutation<TValue> Compute(
         TKey key,

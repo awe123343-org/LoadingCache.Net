@@ -103,7 +103,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             }
         }
 
-        internal void TryRemoveExact(Entry entry)
+        internal bool TryRemoveExact(Entry entry)
         {
             ArgumentNullException.ThrowIfNull(entry);
             if (_weakKeys)
@@ -111,20 +111,20 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 ReferenceKey<TKey>? key = entry.WeakKey;
                 if (key is not null)
                 {
-                    ((ICollection<KeyValuePair<object, Entry>>)_weak!).Remove(
+                    return ((ICollection<KeyValuePair<object, Entry>>)_weak!).Remove(
                         new KeyValuePair<object, Entry>(key, entry)
                     );
                 }
 
-                return;
+                return false;
             }
 
             if (!entry.TryGetKey(out TKey? strongKey))
             {
-                return;
+                return false;
             }
 
-            ((ICollection<KeyValuePair<TKey, Entry>>)_strong!).Remove(
+            return ((ICollection<KeyValuePair<TKey, Entry>>)_strong!).Remove(
                 new KeyValuePair<TKey, Entry>(strongKey, entry)
             );
         }

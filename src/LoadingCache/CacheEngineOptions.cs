@@ -18,6 +18,9 @@ internal sealed class CacheEngineOptions<TKey, TValue>
     internal int MaxConcurrentLoads { get; init; }
     internal int? MaxPendingLoadKeys { get; init; }
     internal int? MaximumBulkKeys { get; init; }
+
+    // Direct/internal engines remain conservative unless their facade rules out bulk loaders.
+    internal bool SupportsBulkLoading { get; init; } = true;
     internal bool WeakKeys { get; init; }
     internal bool WeakValues { get; init; }
     internal TimeSpan? ExpireAfterWrite { get; init; }

@@ -170,6 +170,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         // rollback fencing.  This prevents a late failure from an earlier
         // refresh from restoring over a newer refresh that has already
         // started and then failed without publishing a value.
+        _testHooks?.BeforeEntryPublicationCommit?.Invoke(entry.Sync);
         entry.PublicationRevision++;
         entry.RefreshFlight = flight;
         _activeFlights.Add(flight);
@@ -194,6 +195,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             RefreshEntry = entry,
             PreviousVariableDuration = oldDuration,
         };
+        _testHooks?.BeforeEntryPublicationCommit?.Invoke(entry.Sync);
         entry.PublicationRevision++;
         entry.RefreshFlight = flight;
         _activeFlights.Add(flight);
@@ -526,6 +528,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
                             {
                                 previousSnapshot = new RefreshPublicationSnapshot(entry);
                                 previousSnapshotCaptured = true;
+                                entry.PublicationPending = true;
                                 if (_useFixedWriteSnapshots)
                                 {
                                     entry.PrepareWriteSnapshotUpdate();
@@ -551,16 +554,18 @@ internal sealed partial class CacheEngine<TKey, TValue>
                                 }
                                 published = true;
                             }
-                        }
 
-                        if (published)
-                        {
-                            PublishPolicyWriteLocked(entry.PolicyToken, entry.Weight);
-                            if (_expirationWheel is not null)
+                            if (published)
                             {
-                                ulong normalizedNow = GetExpirationNowLocked();
-                                AdvanceExpirationLocked(normalizedNow);
-                                ScheduleExpirationNodeLocked(entry, normalizedNow);
+                                _testHooks?.BeforeEntryPublicationCommit?.Invoke(entry.Sync);
+                                PublishPolicyWriteLocked(entry.PolicyToken, entry.Weight);
+                                if (_expirationWheel is not null)
+                                {
+                                    ulong normalizedNow = GetExpirationNowLocked();
+                                    AdvanceExpirationLocked(normalizedNow);
+                                    ScheduleExpirationNodeLocked(entry, normalizedNow);
+                                }
+                                entry.PublicationPending = false;
                             }
                         }
                     }
@@ -657,6 +662,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
                         && entry.RefreshFlight is null
                     )
                     {
+                        entry.PublicationPending = true;
                         previousSnapshot.Restore(entry, _testHooks?.BeforeRefreshSnapshotRestored);
                         restored = true;
                     }
@@ -679,61 +685,62 @@ internal sealed partial class CacheEngine<TKey, TValue>
                             entry.HasRefreshFailure = false;
                         }
                     }
-                }
 
-                if (restored)
-                {
-                    bool policyRestored = RestoreRefreshPolicyLocked(entry, previousSnapshot);
-                    if (!policyRestored)
+                    if (restored)
                     {
-                        // A policy exception must not leave a resident value
-                        // with an untracked node.  Remove this exact entry;
-                        // the shared promise is completed below regardless of
-                        // any infrastructure exception.
+                        _testHooks?.BeforeEntryPublicationCommit?.Invoke(entry.Sync);
+                        bool policyRestored = RestoreRefreshPolicyLocked(entry, previousSnapshot);
+                        if (!policyRestored)
+                        {
+                            // A policy exception must not leave a resident value
+                            // with an untracked node. Remove this exact entry;
+                            // the shared promise is completed below regardless of
+                            // any infrastructure exception.
+                            try
+                            {
+                                RemoveCurrentEntryLocked(entry);
+                            }
+                            catch
+                            {
+                                RetireExpirationNodeLocked(entry);
+                                if (_entries.TryRemoveExact(entry))
+                                {
+                                    RecordDictionaryMutationLocked();
+                                }
+
+                                Volatile.Write(ref entry.Retired, true);
+                                entry.RefreshFlight = null;
+                            }
+                        }
                         try
                         {
-                            RemoveCurrentEntryLocked(entry);
+                            bool expired = IsExpired(entry, _timeProvider.GetTimestamp());
+
+                            if (expired)
+                            {
+                                RemoveExpiredEntryLocked(entry);
+                            }
+                            else if (
+                                policyRestored
+                                && _expirationWheel is not null
+                                && _entries.IsCurrent(entry)
+                            )
+                            {
+                                ulong normalizedNow = GetExpirationNowLocked();
+                                AdvanceExpirationLocked(normalizedNow);
+                                ScheduleExpirationNodeLocked(entry, normalizedNow);
+                                requestTimer = true;
+                            }
+                            if (policyRestored)
+                            {
+                                entry.PublicationPending = false;
+                            }
                         }
                         catch
                         {
-                            RetireExpirationNodeLocked(entry);
-                            if (_entries.IsCurrent(entry))
-                            {
-                                _entries.TryRemoveExact(entry);
-                            }
-
-                            Volatile.Write(ref entry.Retired, true);
-                            entry.RefreshFlight = null;
+                            // Freshness is rechecked by the next lookup. Do not
+                            // let a secondary clock failure strand the promise.
                         }
-                    }
-                    try
-                    {
-                        bool expired;
-                        lock (entry.Sync)
-                        {
-                            expired = IsExpired(entry, _timeProvider.GetTimestamp());
-                        }
-
-                        if (expired)
-                        {
-                            RemoveExpiredEntryLocked(entry);
-                        }
-                        else if (
-                            policyRestored
-                            && _expirationWheel is not null
-                            && _entries.IsCurrent(entry)
-                        )
-                        {
-                            ulong normalizedNow = GetExpirationNowLocked();
-                            AdvanceExpirationLocked(normalizedNow);
-                            ScheduleExpirationNodeLocked(entry, normalizedNow);
-                            requestTimer = true;
-                        }
-                    }
-                    catch
-                    {
-                        // Freshness is rechecked by the next lookup.  Do not
-                        // let a secondary clock failure strand the promise.
                     }
                 }
             }

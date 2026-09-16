@@ -23,7 +23,8 @@ public sealed class AtomicPublicationRaceTests
             .CreateEngine(
                 new LoadingCacheTestHooks { BeforeResidentValuePublished = publication.Invoke },
                 hasFixedLoader: true,
-                isAsync: true
+                isAsync: true,
+                supportsBulkLoading: false
             );
         await using var cache = new AsyncLoadingCache<int, string>(
             engine,
@@ -407,6 +408,7 @@ public sealed class AtomicPublicationRaceTests
                 MaxConcurrentLoads = 2,
                 TimeProvider = clock,
                 Expiry = new BlockingReadExpiry(readExpiry),
+                SupportsBulkLoading = false,
                 TestHooks = new LoadingCacheTestHooks
                 {
                     AfterRefreshPublished = () =>
@@ -488,6 +490,7 @@ public sealed class AtomicPublicationRaceTests
                 MaximumSize = 2,
                 MaxConcurrentLoads = 2,
                 Policy = policy,
+                SupportsBulkLoading = false,
             }
         );
         using var cache = new Cache<int, string>(engine);
@@ -532,6 +535,7 @@ public sealed class AtomicPublicationRaceTests
                 MaxConcurrentLoads = 2,
                 RecordStatistics = true,
                 MaintenanceScheduler = scheduler,
+                SupportsBulkLoading = false,
                 MaintenanceReadStripeCount = 1,
                 MaintenanceReadStripeCapacity = 16,
             }
@@ -561,6 +565,7 @@ public sealed class AtomicPublicationRaceTests
                 MaxConcurrentLoads = 2,
                 RecordStatistics = true,
                 TestHooks = hooks,
+                SupportsBulkLoading = false,
                 ExpireAfterWrite = fixedExpiration ? TimeSpan.FromMinutes(1) : null,
                 ExpireAfterAccess = accessExpiration ? TimeSpan.FromMinutes(1) : null,
                 TimeProvider =

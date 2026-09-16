@@ -225,6 +225,12 @@ internal sealed partial class CacheEngine<TKey, TValue>
             return fallback;
         }
 
+        if (!_supportsBulkLoading)
+        {
+            throw new InvalidOperationException(
+                "This cache was constructed without a bulk loader capability."
+            );
+        }
         BulkPlan plan = InstallSyncBulk(requested, bulkLoader);
         ApplyBulkReadyReadsSafely(plan, reloadFactory);
         StartPendingSyncFlights(plan);
@@ -327,6 +333,12 @@ internal sealed partial class CacheEngine<TKey, TValue>
             return fallback;
         }
 
+        if (!_supportsBulkLoading)
+        {
+            throw new InvalidOperationException(
+                "This cache was constructed without a bulk loader capability."
+            );
+        }
         BulkPlan plan = InstallAsyncBulk(requested, bulkLoader);
         ApplyBulkReadyReadsSafely(plan, reloadFactory);
         StartPendingAsyncFlights(plan);
@@ -919,6 +931,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         long timestamp = _timeProvider.GetTimestamp();
         lock (entry.Sync)
         {
+            entry.PublicationPending = true;
             entry.SetValue(publication.Value, _weakValues);
             entry.Weight = publication.Weight;
             entry.WriteTimestamp = timestamp;
@@ -943,17 +956,17 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 entry.PublishInitialWriteSnapshot(publication.Value, timestamp);
             }
             Volatile.Write(ref entry.IsReady, true);
-        }
 
-        PublishPolicyWriteLocked(entry.PolicyToken, entry.Weight);
-        if (_expirationWheel is null)
-        {
-            return;
+            _testHooks?.BeforeEntryPublicationCommit?.Invoke(entry.Sync);
+            PublishPolicyWriteLocked(entry.PolicyToken, entry.Weight);
+            if (_expirationWheel is not null)
+            {
+                ulong normalizedNow = GetExpirationNowLocked();
+                AdvanceExpirationLocked(normalizedNow);
+                ScheduleExpirationNodeLocked(entry, normalizedNow);
+            }
+            entry.PublicationPending = false;
         }
-
-        ulong normalizedNow = GetExpirationNowLocked();
-        AdvanceExpirationLocked(normalizedNow);
-        ScheduleExpirationNodeLocked(entry, normalizedNow);
     }
 
     private void PublishBulkPrefetchLocked(BulkPublication publication)
@@ -974,16 +987,20 @@ internal sealed partial class CacheEngine<TKey, TValue>
             entry,
             GetPolicyHash(publication.Key)
         );
-        _entries[publication.Key] = entry;
-        PublishPolicyWriteLocked(entry.PolicyToken, entry.Weight);
-        if (_expirationWheel is null)
+        lock (entry.Sync)
         {
-            return;
+            entry.PublicationPending = true;
+            _entries[publication.Key] = entry;
+            _testHooks?.BeforeEntryPublicationCommit?.Invoke(entry.Sync);
+            PublishPolicyWriteLocked(entry.PolicyToken, entry.Weight);
+            if (_expirationWheel is not null)
+            {
+                ulong normalizedNow = GetExpirationNowLocked();
+                AdvanceExpirationLocked(normalizedNow);
+                ScheduleExpirationNodeLocked(entry, normalizedNow);
+            }
+            entry.PublicationPending = false;
         }
-
-        ulong normalizedNow = GetExpirationNowLocked();
-        AdvanceExpirationLocked(normalizedNow);
-        ScheduleExpirationNodeLocked(entry, normalizedNow);
     }
 
     private static void CompleteBulkResults(BulkGroup group, TValue leaderValue)
@@ -1055,25 +1072,33 @@ internal sealed partial class CacheEngine<TKey, TValue>
         {
             foreach (TKey key in group.OwnedKeys)
             {
-                if (
-                    _entries.TryGetValue(key, out Entry? entry)
-                    && entry.Epoch == group.Epoch
-                    && entry.Generation == group.Owner.Generation
-                    && (
-                        ReferenceEquals(entry.Flight, group.Owner)
-                        || (
-                            group.Prepared is { } prepared
-                            && prepared.Publications.TryGetValue(
-                                key,
-                                out BulkPublication? publication
+                if (!_entries.TryGetValue(key, out Entry? entry))
+                {
+                    continue;
+                }
+
+                lock (entry.Sync)
+                {
+                    if (
+                        entry.Epoch == group.Epoch
+                        && entry.Generation == group.Owner.Generation
+                        && (
+                            ReferenceEquals(entry.Flight, group.Owner)
+                            || (
+                                group.Prepared is { } prepared
+                                && prepared.Publications.TryGetValue(
+                                    key,
+                                    out BulkPublication? publication
+                                )
+                                && ReferenceEquals(publication.PublishedEntry, entry)
+                                && publication.PublishedRevision == entry.PublicationRevision
                             )
-                            && ReferenceEquals(publication.PublishedEntry, entry)
-                            && publication.PublishedRevision == entry.PublicationRevision
                         )
                     )
-                )
-                {
-                    RemoveCurrentEntryLocked(entry);
+                    {
+                        _testHooks?.BeforeEntryPublicationCommit?.Invoke(entry.Sync);
+                        RemoveCurrentEntryLocked(entry);
+                    }
                 }
             }
         }

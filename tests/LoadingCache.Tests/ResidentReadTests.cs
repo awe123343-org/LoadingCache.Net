@@ -34,7 +34,8 @@ public sealed class ResidentReadTests
             .MaxConcurrentLoads(2)
             .RecordStatistics()
             .CreateEngine(
-                new LoadingCacheTestHooks { BeforeResidentValuePublished = publicationGate.Invoke }
+                new LoadingCacheTestHooks { BeforeResidentValuePublished = publicationGate.Invoke },
+                supportsBulkLoading: false
             );
         using var cache = new Cache<int, TValue>(engine);
         await VerifyReadDuringResidentPublication(cache, publicationGate, first, second);
@@ -53,7 +54,7 @@ public sealed class ResidentReadTests
         Task<TValue>? reader = null;
         try
         {
-            // The replacement pauses before publishing with engine and entry locks held.
+            // The replacement pauses before publishing while holding the entry lock.
             // A plain resident hit must finish before that writer is released.
             await publicationGate.Entered.WaitAsync(Watchdog);
             reader = Task.Run(() =>

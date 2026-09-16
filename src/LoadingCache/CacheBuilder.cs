@@ -304,7 +304,8 @@ public sealed class CacheBuilder<TKey, TValue>
     }
 
     /// <summary>Builds a manual synchronous cache.</summary>
-    public ICache<TKey, TValue> Build() => new Cache<TKey, TValue>(CreateEngine());
+    public ICache<TKey, TValue> Build() =>
+        new Cache<TKey, TValue>(CreateEngine(supportsBulkLoading: false));
 
     /// <summary>Builds a synchronous loading cache.</summary>
     public ILoadingCache<TKey, TValue> BuildLoading(Func<TKey, TValue> loader)
@@ -320,7 +321,7 @@ public sealed class CacheBuilder<TKey, TValue>
         var bulkLoader = loader as IBulkSyncCacheLoader<TKey, TValue>;
         ValidateBulkCapability(bulkLoader is not null);
         return new LoadingCache<TKey, TValue>(
-            CreateEngine(hasFixedLoader: true),
+            CreateEngine(hasFixedLoader: true, supportsBulkLoading: bulkLoader is not null),
             loader.Load,
             loader.Reload,
             bulkLoader is null ? null : bulkLoader.LoadAll
@@ -329,7 +330,7 @@ public sealed class CacheBuilder<TKey, TValue>
 
     /// <summary>Builds a manual asynchronous cache.</summary>
     public IAsyncCache<TKey, TValue> BuildAsync() =>
-        new AsyncCache<TKey, TValue>(CreateEngine(isAsync: true));
+        new AsyncCache<TKey, TValue>(CreateEngine(isAsync: true, supportsBulkLoading: false));
 
     /// <summary>Builds an asynchronous loading cache.</summary>
     public IAsyncLoadingCache<TKey, TValue> BuildAsyncLoading(
@@ -349,7 +350,11 @@ public sealed class CacheBuilder<TKey, TValue>
         var bulkLoader = loader as IBulkAsyncCacheLoader<TKey, TValue>;
         ValidateBulkCapability(bulkLoader is not null);
         return new AsyncLoadingCache<TKey, TValue>(
-            CreateEngine(hasFixedLoader: true, isAsync: true),
+            CreateEngine(
+                hasFixedLoader: true,
+                isAsync: true,
+                supportsBulkLoading: bulkLoader is not null
+            ),
             loader.LoadAsync,
             loader.ReloadAsync,
             bulkLoader is null ? null : bulkLoader.LoadAllAsync
@@ -359,7 +364,8 @@ public sealed class CacheBuilder<TKey, TValue>
     internal CacheEngine<TKey, TValue> CreateEngine(
         LoadingCacheTestHooks? testHooks = null,
         bool hasFixedLoader = false,
-        bool isAsync = false
+        bool isAsync = false,
+        bool supportsBulkLoading = true
     )
     {
         ValidateBuild(hasFixedLoader);
@@ -379,6 +385,7 @@ public sealed class CacheBuilder<TKey, TValue>
                 MaxConcurrentLoads = _maxConcurrentLoads,
                 MaxPendingLoadKeys = _maxPendingLoadKeys,
                 MaximumBulkKeys = _maximumBulkKeys,
+                SupportsBulkLoading = supportsBulkLoading,
                 WeakKeys = _weakKeys,
                 WeakValues = _weakValues,
                 ExpireAfterWrite = _expireAfterWrite,

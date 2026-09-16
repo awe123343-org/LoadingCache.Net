@@ -427,6 +427,9 @@ public sealed class LongRunningStabilityTests
                     MaximumResidentCount = mode == 0 ? null : MaximumResidents,
                     Weigher = mode == 0 ? null : static (_, value) => value.Weight,
                     MaxConcurrentLoads = LoadLimit,
+                    // This fixture has only a single-key loader; the resident mode also
+                    // exercises entry-only Put commits while expiration modes stay coordinated.
+                    SupportsBulkLoading = false,
                     RecordStatistics = statistics,
                     TimeProvider = Clock,
                     ExpireAfterWrite =

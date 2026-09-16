@@ -33,6 +33,7 @@ internal sealed class LoadingCacheImpl<TKey, TValue> : AsyncLoadingCache<TKey, T
             new CacheEngineOptions<TKey, TValue>
             {
                 MaximumSize = options.MaximumSize,
+                SupportsBulkLoading = false,
                 MaxConcurrentLoads = options.MaxConcurrentLoads,
                 ExpireAfterWrite = options.ExpireAfterWrite,
                 ExpireAfterAccess = options.ExpireAfterAccess,

@@ -230,6 +230,10 @@ internal sealed partial class CacheEngine<TKey, TValue>
         internal bool IsReady;
         internal bool Retired;
         internal bool PolicyDetached;
+
+        // Protected by Sync. Ready/map visibility may precede policy finalization; a failed
+        // publication stays closed to resident replacement until repaired or retired.
+        internal bool PublicationPending;
         internal bool RemovalNotified;
         private TValue _strongValue = default!;
         internal FixedWritePublication? PublishedWrite;

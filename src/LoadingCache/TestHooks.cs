@@ -18,6 +18,10 @@ internal sealed class LoadingCacheTestHooks
     // retirement. The argument is the exact entry monitor; no entry identity is exposed.
     internal Action<object>? BeforeEntryMutationCommit { get; init; }
 
+    // Publication/rollback has reached its final entry-owned boundary, before policy
+    // finalization, refresh reservation, or exact failed-publication retirement.
+    internal Action<object>? BeforeEntryPublicationCommit { get; init; }
+
     // A read observed expiry and released entry.Sync, before physical cleanup
     // acquires the engine gate. No hook is invoked on a resident hit.
     internal Action? BeforeExpiredReadCleanup { get; init; }

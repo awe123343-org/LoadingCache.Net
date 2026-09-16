@@ -22,6 +22,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     private readonly Func<TKey, TValue, long>? _weigher;
     private readonly Action<TValue>? _onValueRetired;
     private readonly int _maxConcurrentLoads;
+    private readonly bool _supportsBulkLoading;
     private long _expireAfterWriteTicks;
     private long _expireAfterAccessTicks;
     private long _refreshAfterWriteTicks;
@@ -31,6 +32,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     private readonly TimeProvider _timeProvider;
     private readonly bool _requiresReadTime;
     private readonly bool _useAtomicResidentReads;
+    private readonly bool _useConcurrentResidentWrites;
     private readonly bool _useFixedWriteSnapshots;
     private readonly bool _recordStatistics;
     private readonly bool _enableExpirationScheduler;
@@ -203,6 +205,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         _weigher = options.Weigher;
         _onValueRetired = options.OnValueRetired;
         _maxConcurrentLoads = options.MaxConcurrentLoads;
+        _supportsBulkLoading = options.SupportsBulkLoading;
         ConfigureBulkLimits(options.MaxPendingLoadKeys, options.MaximumBulkKeys);
         _expireAfterWriteTicks = options.ExpireAfterWrite?.Ticks ?? -1;
         _expireAfterAccessTicks = options.ExpireAfterAccess?.Ticks ?? -1;
@@ -224,6 +227,15 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             && !options.WeakValues
             && options.OnValueRetired is null
             && Entry.SupportsAtomicStrongValue;
+        _useConcurrentResidentWrites =
+            options.Policy is null
+            && !options.SupportsBulkLoading
+            && !_requiresReadTime
+            && !options.WeakKeys
+            && !options.WeakValues
+            && options.OnValueRetired is null
+            && options.RemovalListener is null
+            && options.EvictionListener is null;
         _useFixedWriteSnapshots =
             options.ExpireAfterWrite.HasValue
             && !options.ExpireAfterAccess.HasValue
@@ -909,6 +921,15 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
 
         using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
         object? replacementPolicyToken;
+        if (
+            _useConcurrentResidentWrites
+            && TryReplaceResidentValueWithoutGate(key, value, weight, out replacementPolicyToken)
+        )
+        {
+            _policy.OnAccess(replacementPolicyToken);
+            evictionScope.Dispatch();
+            return;
+        }
         bool replacedResidentValue;
         lock (_gate)
         {
@@ -940,13 +961,19 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                     entry,
                     GetPolicyHash(key)
                 );
-                ReplaceCurrentLocked(key, entry);
-                PublishPolicyWriteLocked(entry.PolicyToken, entry.Weight);
-                if (_expirationWheel is not null)
+                lock (entry.Sync)
                 {
-                    ulong normalizedNow = GetExpirationNowLocked();
-                    AdvanceExpirationLocked(normalizedNow);
-                    ScheduleExpirationNodeLocked(entry, normalizedNow);
+                    entry.PublicationPending = true;
+                    ReplaceCurrentLocked(key, entry);
+                    _testHooks?.BeforeEntryPublicationCommit?.Invoke(entry.Sync);
+                    PublishPolicyWriteLocked(entry.PolicyToken, entry.Weight);
+                    if (_expirationWheel is not null)
+                    {
+                        ulong normalizedNow = GetExpirationNowLocked();
+                        AdvanceExpirationLocked(normalizedNow);
+                        ScheduleExpirationNodeLocked(entry, normalizedNow);
+                    }
+                    entry.PublicationPending = false;
                 }
             }
         }
@@ -1698,6 +1725,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                     long timestamp = _timeProvider.GetTimestamp();
                     lock (entry.Sync)
                     {
+                        entry.PublicationPending = true;
                         entry.SetValue(value, _weakValues);
                         entry.Weight = weight;
                         entry.WriteTimestamp = timestamp;
@@ -1724,16 +1752,18 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                         // acquire read, so they cannot observe IsReady before
                         // PolicyToken/SharedTask and timestamps are initialized.
                         Volatile.Write(ref entry.IsReady, true);
-                    }
 
-                    publishedEntry = entry;
+                        publishedEntry = entry;
 
-                    PublishPolicyWriteLocked(entry.PolicyToken, entry.Weight);
-                    if (_expirationWheel is not null)
-                    {
-                        ulong normalizedNow = GetExpirationNowLocked();
-                        AdvanceExpirationLocked(normalizedNow);
-                        ScheduleExpirationNodeLocked(entry, normalizedNow);
+                        _testHooks?.BeforeEntryPublicationCommit?.Invoke(entry.Sync);
+                        PublishPolicyWriteLocked(entry.PolicyToken, entry.Weight);
+                        if (_expirationWheel is not null)
+                        {
+                            ulong normalizedNow = GetExpirationNowLocked();
+                            AdvanceExpirationLocked(normalizedNow);
+                            ScheduleExpirationNodeLocked(entry, normalizedNow);
+                        }
+                        entry.PublicationPending = false;
                     }
                 }
 
@@ -1862,36 +1892,37 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         // identity/revision and must survive this late failure.
         lock (_gate)
         {
-            if (
-                publishedEntry is not null
-                && publishedEntry.Epoch == _epoch
-                && publishedEntry.Generation == flight.Generation
-                && publishedEntry.PublicationRevision == publishedRevision
-                && _entries.TryGetValue(flight.Key, out Entry? current)
-                && ReferenceEquals(current, publishedEntry)
-            )
+            bool removedPublication = false;
+            if (publishedEntry is not null)
             {
-                RemoveCurrentEntryLocked(publishedEntry);
-            }
-            else
-            {
-                if (
-                    publishedEntry is not null
-                    && flight is AsyncFlight asyncFlight
-                    && publishedEntry.Epoch == _epoch
-                    && _entries.TryGetValue(flight.Key, out Entry? candidate)
-                    && ReferenceEquals(candidate, publishedEntry)
-                )
+                lock (publishedEntry.Sync)
                 {
-                    // A newer refresh may have fenced this cold flight from
-                    // rollback while the entry still points at the cold
-                    // completion task.  The ready value is authoritative at
-                    // this point, so replace only that exact failed promise
-                    // with a completed snapshot task.  Normal successful
-                    // publication and the stable Task identity contract are
-                    // unchanged.
-                    lock (publishedEntry.Sync)
+                    if (
+                        publishedEntry.Epoch == _epoch
+                        && publishedEntry.Generation == flight.Generation
+                        && publishedEntry.PublicationRevision == publishedRevision
+                        && _entries.TryGetValue(flight.Key, out Entry? current)
+                        && ReferenceEquals(current, publishedEntry)
+                    )
                     {
+                        _testHooks?.BeforeEntryPublicationCommit?.Invoke(publishedEntry.Sync);
+                        RemoveCurrentEntryLocked(publishedEntry);
+                        removedPublication = true;
+                    }
+                    else if (
+                        flight is AsyncFlight asyncFlight
+                        && publishedEntry.Epoch == _epoch
+                        && _entries.TryGetValue(flight.Key, out Entry? candidate)
+                        && ReferenceEquals(candidate, publishedEntry)
+                    )
+                    {
+                        // A newer refresh may have fenced this cold flight from
+                        // rollback while the entry still points at the cold
+                        // completion task. The ready value is authoritative at
+                        // this point, so replace only that exact failed promise
+                        // with a completed snapshot task. Normal successful
+                        // publication and the stable Task identity contract are
+                        // unchanged.
                         if (
                             Volatile.Read(ref publishedEntry.IsReady)
                             && publishedEntry.Flight is null
@@ -1908,7 +1939,10 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                         }
                     }
                 }
+            }
 
+            if (!removedPublication)
+            {
                 RemoveCurrentEntryLocked(flight);
             }
         }
@@ -2173,6 +2207,55 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         _entries[key] = replacement;
     }
 
+    // This partition has no time/reference/listener/ownership or bulk-ledger work. Only
+    // this entry is owned while committing; policy transport and counters run after release.
+    private bool TryReplaceResidentValueWithoutGate(
+        TKey key,
+        TValue value,
+        long weight,
+        out object? policyToken
+    )
+    {
+        policyToken = null;
+        if (!_entries.TryGetValue(key, out Entry? entry) || !Volatile.Read(ref entry.IsReady))
+        {
+            return false;
+        }
+
+        lock (entry.Sync)
+        {
+            if (
+                Volatile.Read(ref _disposed) != 0
+                || entry.Epoch != Volatile.Read(ref _epoch)
+                || !Volatile.Read(ref entry.IsReady)
+                || entry.Retired
+                || entry.PolicyDetached
+                || entry.PublicationPending
+                || entry.Flight is not null
+                || entry.RefreshFlight is not null
+                || entry.PolicyToken is null
+                || entry.Weight != weight
+                || !_entries.IsCurrent(entry)
+            )
+            {
+                return false;
+            }
+
+            // Missing snapshots are fenced by structural-removal history. Preserve
+            // logical same-key mutation detection without a global sequence write.
+            MarkDictionaryTransformScopeMutation(key);
+            InvokeHook(_testHooks?.BeforeResidentValuePublished);
+            entry.SetValue(value, weak: false);
+            entry.VariableRevision++;
+            entry.PublicationRevision++;
+            entry.SharedTask = null;
+            policyToken = entry.PolicyToken;
+        }
+
+        RecordRemovalCounter(RemovalCause.Replaced);
+        return true;
+    }
+
     /// <summary>
     /// Replaces a stable, strong resident value in place when no policy metadata needs to be
     /// rebuilt. The entry and policy token remain the authoritative identity; the publication
@@ -2221,6 +2304,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 !Volatile.Read(ref entry.IsReady)
                 || entry.Retired
                 || entry.PolicyDetached
+                || entry.PublicationPending
                 || entry.Flight is not null
                 || entry.RefreshFlight is not null
                 || entry.Weight != weight
@@ -2279,7 +2363,10 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
 
             _testHooks?.BeforeEntryMutationCommit?.Invoke(entry.Sync);
             RetireExpirationNodeLocked(entry);
-            _entries.TryRemoveExact(entry);
+            if (_entries.TryRemoveExact(entry))
+            {
+                RecordDictionaryMutationLocked();
+            }
             Volatile.Write(ref entry.Retired, true);
             Flight? refreshFlight = entry.RefreshFlight;
             if (refreshFlight is not null)

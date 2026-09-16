@@ -485,13 +485,19 @@ internal sealed partial class CacheEngine<TKey, TValue>
             entry,
             GetPolicyHash(key)
         );
-        ReplaceCurrentLocked(key, entry);
-        PublishPolicyWriteLocked(entry.PolicyToken, entry.Weight);
-        if (_expirationWheel is not null)
+        lock (entry.Sync)
         {
-            ulong normalizedNow = GetExpirationNowLocked();
-            AdvanceExpirationLocked(normalizedNow);
-            ScheduleExpirationNodeLocked(entry, normalizedNow);
+            entry.PublicationPending = true;
+            ReplaceCurrentLocked(key, entry);
+            _testHooks?.BeforeEntryPublicationCommit?.Invoke(entry.Sync);
+            PublishPolicyWriteLocked(entry.PolicyToken, entry.Weight);
+            if (_expirationWheel is not null)
+            {
+                ulong normalizedNow = GetExpirationNowLocked();
+                AdvanceExpirationLocked(normalizedNow);
+                ScheduleExpirationNodeLocked(entry, normalizedNow);
+            }
+            entry.PublicationPending = false;
         }
     }
 

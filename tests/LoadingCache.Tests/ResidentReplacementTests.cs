@@ -229,7 +229,7 @@ public sealed class ResidentReplacementTests
             .MaximumSize(8)
             .MaxConcurrentLoads(2)
             .MemoryPressureEviction(TimeSpan.FromSeconds(1), trimFraction: 1, maximumTrimCount: 1)
-            .CreateEngine();
+            .CreateEngine(supportsBulkLoading: false);
         using var cache = new Cache<int, string>(engine);
 
         cache.Put(1, "old");
@@ -332,6 +332,7 @@ public sealed class ResidentReplacementTests
                 MaximumSize = 8,
                 MaxConcurrentLoads = 2,
                 TestHooks = hooks,
+                SupportsBulkLoading = false,
             }
         );
         var loader = new TaskCompletionSource<string>(

@@ -242,12 +242,16 @@ internal sealed partial class CacheEngine<TKey, TValue>
                     }
 
                     RemoveCurrentEntryLocked(current, RemovalCause.Expired);
+                    expectedMutationSequence = _dictionaryMutationSequence;
+                    expectedMutationEra = _dictionaryMutationEra;
                     return DictionaryTransformState.Missing;
                 }
 
                 if (!current.TryGetValue(out TValue? liveValue))
                 {
                     RemoveCurrentEntryLocked(current, collected: true);
+                    expectedMutationSequence = _dictionaryMutationSequence;
+                    expectedMutationEra = _dictionaryMutationEra;
                     return DictionaryTransformState.Missing;
                 }
 
@@ -414,6 +418,11 @@ internal sealed partial class CacheEngine<TKey, TValue>
     private void MarkDictionaryTransformMutation(TKey key)
     {
         RecordDictionaryMutationLocked();
+        MarkDictionaryTransformScopeMutation(key);
+    }
+
+    private void MarkDictionaryTransformScopeMutation(TKey key)
+    {
         for (
             DictionaryTransformNode? node = TransformContext.Value;
             node is not null;
@@ -435,12 +444,20 @@ internal sealed partial class CacheEngine<TKey, TValue>
     {
         if (_dictionaryMutationSequence == long.MaxValue)
         {
-            _dictionaryMutationSequence = 0;
             _dictionaryMutationEra = new object();
+            _dictionaryMutationSequence = 0;
             return;
         }
 
         _dictionaryMutationSequence++;
+    }
+
+    internal void SetDictionaryMutationSequenceForTesting(long sequence)
+    {
+        lock (_gate)
+        {
+            _dictionaryMutationSequence = sequence;
+        }
     }
 
     private void MarkAllDictionaryTransformsMutated()
