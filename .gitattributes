@@ -1,0 +1,7 @@
+# Match .editorconfig on every checkout, including Windows runners.
+* text=auto eol=lf
+
+# Archived evidence must retain its original bytes and hashes.
+docs/benchmarks/** -text
+docs/research-evidence/** -text
+tools/LoadingCache.Simulator/results/** -text
