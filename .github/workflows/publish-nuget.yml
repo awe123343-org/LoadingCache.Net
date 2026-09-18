@@ -1,3 +1,5 @@
+# Each package has one net8.0 asset; CI exercises .NET 8 and .NET 10 consumers.
+# Core and DI are separate capabilities, not runtime-specific releases.
 name: NuGet release
 
 on:
