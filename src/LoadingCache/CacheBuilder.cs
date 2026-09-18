@@ -23,7 +23,7 @@ public sealed class CacheBuilder<TKey, TValue>
     private long? _maximumWeight;
     private int? _maximumResidentCount;
     private Func<TKey, TValue, long>? _weigher;
-    private int _maxConcurrentLoads;
+    private int? _maxConcurrentLoads;
     private int? _maxPendingLoadKeys;
     private int? _maximumBulkKeys;
     private bool _weakKeys;
@@ -85,7 +85,12 @@ public sealed class CacheBuilder<TKey, TValue>
         return this;
     }
 
-    /// <summary>Sets the maximum number of distinct load flights.</summary>
+    /// <summary>Opts into a maximum number of distinct load flights.</summary>
+    /// <remarks>
+    /// No load concurrency limit is configured by default. When configured, a new
+    /// flight is rejected immediately if the limit is reached; existing flights
+    /// can still be joined. Retired flights retain their reservation until completion.
+    /// </remarks>
     public CacheBuilder<TKey, TValue> MaxConcurrentLoads(int maximumConcurrentLoads)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumConcurrentLoads);
@@ -94,6 +99,11 @@ public sealed class CacheBuilder<TKey, TValue>
     }
 
     /// <summary>Bounds pending key generations, including retired loads still running.</summary>
+    /// <remarks>
+    /// When omitted, uses the configured load concurrency limit, raised to
+    /// MaximumBulkKeys if larger; without a concurrency limit, no pending key bound
+    /// is configured. Bulk loaders require an explicit pending key bound.
+    /// </remarks>
     public CacheBuilder<TKey, TValue> MaxPendingLoadKeys(int maximumPendingLoadKeys)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumPendingLoadKeys);
@@ -457,13 +467,6 @@ public sealed class CacheBuilder<TKey, TValue>
         {
             throw new InvalidOperationException(
                 "Variable expiration cannot be combined with fixed expiration."
-            );
-        }
-
-        if (_maxConcurrentLoads <= 0)
-        {
-            throw new InvalidOperationException(
-                "Configure MaxConcurrentLoads with a positive value before Build."
             );
         }
 

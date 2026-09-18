@@ -167,7 +167,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             );
         }
 
-        if (options.MaxConcurrentLoads <= 0)
+        if (options.MaxConcurrentLoads is <= 0)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(options),
@@ -204,7 +204,9 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
 
         _weigher = options.Weigher;
         _onValueRetired = options.OnValueRetired;
-        _maxConcurrentLoads = options.MaxConcurrentLoads;
+        // Unset limits use the counter's representational ceiling, not a configured quota.
+        // No storage is allocated from this value.
+        _maxConcurrentLoads = options.MaxConcurrentLoads ?? int.MaxValue;
         _supportsBulkLoading = options.SupportsBulkLoading;
         ConfigureBulkLimits(options.MaxPendingLoadKeys, options.MaximumBulkKeys);
         _expireAfterWriteTicks = options.ExpireAfterWrite?.Ticks ?? -1;

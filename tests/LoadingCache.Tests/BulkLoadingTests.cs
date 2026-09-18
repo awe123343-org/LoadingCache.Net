@@ -15,7 +15,6 @@ public sealed class BulkLoadingTests
         using ILoadingCache<int, int> cache = CacheBuilder
             .Create<int, int>()
             .MaximumSize(16)
-            .MaxConcurrentLoads(1)
             .MaxPendingLoadKeys(4)
             .MaximumBulkKeys(4)
             .BuildLoading(loader);
@@ -122,29 +121,37 @@ public sealed class BulkLoadingTests
         await using IAsyncLoadingCache<int, int> cache = CacheBuilder
             .Create<int, int>()
             .MaximumSize(16)
-            .MaxConcurrentLoads(1)
             .MaxPendingLoadKeys(4)
             .MaximumBulkKeys(4)
             .BuildAsyncLoading(loader);
 
+        var values = new Dictionary<int, int>
+        {
+            [1] = 10,
+            [2] = 20,
+            [99] = 990,
+        };
         Task<IReadOnlyDictionary<int, int>> all = cache.GetAllAsync([1, 2]).AsTask();
-        await loader.Started.Task.WaitAsync(TestTimeout);
-        Task<int> keyTwo = cache.GetAsync(2).AsTask();
+        Task<int>? keyTwo = null;
+        try
+        {
+            await loader.Started.Task.WaitAsync(TestTimeout);
+            keyTwo = cache.GetAsync(2).AsTask();
+            loader.Release.TrySetResult(values);
 
-        loader.Release.TrySetResult(
-            new Dictionary<int, int>
-            {
-                [1] = 10,
-                [2] = 20,
-                [99] = 990,
-            }
-        );
-
-        (await all).Should().Equal(new Dictionary<int, int> { [1] = 10, [2] = 20 });
-        (await keyTwo).Should().Be(20);
-        loader.BulkCalls.Should().Be(1);
-        cache.TryGet(99, out int prefetched).Should().BeTrue();
-        prefetched.Should().Be(990);
+            (await all.WaitAsync(TestTimeout))
+                .Should()
+                .Equal(new Dictionary<int, int> { [1] = 10, [2] = 20 });
+            (await keyTwo.WaitAsync(TestTimeout)).Should().Be(20);
+            loader.BulkCalls.Should().Be(1);
+            cache.TryGet(99, out int prefetched).Should().BeTrue();
+            prefetched.Should().Be(990);
+        }
+        finally
+        {
+            loader.Release.TrySetResult(values);
+            await Task.WhenAll(all, keyTwo ?? Task.CompletedTask).WaitAsync(TestTimeout);
+        }
     }
 
     [Test]

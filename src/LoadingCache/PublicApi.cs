@@ -66,11 +66,12 @@ public sealed class LoadingCacheOptions
     public int MaximumSize { get; init; }
 
     /// <summary>
-    /// Gets or sets the maximum number of load flights, including retired epochs.
-    /// This must be positive.
+    /// Gets or sets an optional maximum number of load flights, including retired epochs.
+    /// Null (the default) disables load concurrency limiting. An explicit limit must
+    /// be positive; a new flight is rejected immediately when the limit is reached.
     /// </summary>
     [PublicAPI]
-    public int MaxConcurrentLoads { get; init; }
+    public int? MaxConcurrentLoads { get; init; }
 
     /// <summary>
     /// Gets or sets the duration from a successful publication until the value expires.

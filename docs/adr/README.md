@@ -20,7 +20,7 @@ Do not force-add those notes. For mixed documents, keep the durable decision her
 move execution instructions into the local directory. Published documentation must
 remain understandable without local notes and must not link to excluded handoff files.
 
-ADRs 0001–0014 are maintainer-facing decisions. Superseded implementation choices
+ADRs 0001–0015 are maintainer-facing decisions. Superseded implementation choices
 remain useful history; identify their replacement rather than treating them as agent
 notes. Current feature and validation status lives in the
 [feature matrix](../feature-matrix.md) and [release readiness](../release-readiness.md).

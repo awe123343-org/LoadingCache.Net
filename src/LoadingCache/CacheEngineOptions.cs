@@ -15,7 +15,7 @@ internal sealed class CacheEngineOptions<TKey, TValue>
     // Used exclusively by the manual lease-owning facade. This callback only
     // retires its internal ownership token; it never executes user code.
     internal Action<TValue>? OnValueRetired { get; init; }
-    internal int MaxConcurrentLoads { get; init; }
+    internal int? MaxConcurrentLoads { get; init; }
     internal int? MaxPendingLoadKeys { get; init; }
     internal int? MaximumBulkKeys { get; init; }
 

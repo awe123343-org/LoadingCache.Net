@@ -7,7 +7,6 @@ internal static class LoaderContractSmoke
         using ILoadingCache<ConfigKey, Config> sync = CacheBuilder
             .Create<ConfigKey, Config>()
             .MaximumSize(16)
-            .MaxConcurrentLoads(4)
             .BuildLoading(new SyncLoader());
         var key = new ConfigKey("tenant-a", "routing");
         Config first = sync.Get(key);
@@ -18,7 +17,6 @@ internal static class LoaderContractSmoke
         await using IAsyncLoadingCache<ConfigKey, Config> asyncCache = CacheBuilder
             .Create<ConfigKey, Config>()
             .MaximumSize(16)
-            .MaxConcurrentLoads(4)
             .RefreshAfterWrite(TimeSpan.FromMinutes(1))
             .BuildAsyncLoading(new AsyncLoader());
         first = await asyncCache.GetAsync(key);
