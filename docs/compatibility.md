@@ -5,6 +5,13 @@ assembly. Tests and the source consumer target `net8.0` and `net10.0`; actual
 runtime and platform results are recorded in [release readiness](release-readiness.md).
 The repository build uses the .NET 10 SDK pinned in `global.json` and C# 12.
 
+The same managed NuGet package serves .NET 8 and .NET 10 applications; consumers
+do not need a runtime-specific package. Core and the optional DI integration are
+separate packages. Normal package CI runs on Windows and Linux with both runtimes.
+As agreed on 2026-09-18, Native AOT platform qualification is tracked separately
+from the initial managed NuGet release. Existing AOT analyzers and smoke samples
+remain; untested AOT platforms are not advertised as verified.
+
 The API is experimental and may change before a stable release. The
 [public API baseline and versioning policy](api-compatibility.md) define review
 and mechanical checks; they do not certify V1 compatibility or readiness.

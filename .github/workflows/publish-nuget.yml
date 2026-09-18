@@ -52,9 +52,12 @@ jobs:
           dotnet-quality: ga
       - name: Build package inputs
         run: dotnet build LoadingCache.slnx -c Release
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        with:
+          version: "0.9.11"
       - name: Pack and inspect packages
         run: |
-          python3 tools/pack-release.py \
+          uv run --no-project python tools/pack-release.py \
             --output artifacts/nuget \
             --version "$RELEASE_VERSION" \
             --core-id "$NUGET_CORE_PACKAGE_ID" \
@@ -64,12 +67,23 @@ jobs:
             --repository-commit "$REPOSITORY_COMMIT"
       - name: Restore and run package consumers
         run: |
-          python3 tools/package-consumers.py \
+          uv run --no-project python tools/package-consumers.py \
             --feed artifacts/nuget/packages \
             --output artifacts/nuget-consumers \
             --core-id "$NUGET_CORE_PACKAGE_ID" \
             --di-id "$NUGET_DI_PACKAGE_ID" \
             --version "$RELEASE_VERSION"
+      - name: Preserve packaging diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nuget-validation-${{ inputs.version }}
+          path: |
+            artifacts/nuget/*.log
+            artifacts/nuget/results.json
+            artifacts/nuget-consumers/*.log
+            artifacts/nuget-consumers/results.json
+          if-no-files-found: warn
       - name: Preserve release artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -123,12 +137,15 @@ jobs:
         with:
           name: nuget-release-${{ inputs.version }}
           path: artifacts/nuget
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        with:
+          version: "0.9.11"
       - name: Verify immutable release manifest
         id: verify-artifact
         env:
           ARTIFACT_ROOT: artifacts/nuget
         run: |
-          python3 - <<'PY'
+          uv run --no-project python - <<'PY'
           import hashlib
           import json
           import os

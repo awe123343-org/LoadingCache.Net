@@ -40,7 +40,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -52,6 +52,10 @@ jobs:
             8.0.x
             10.0.x
           dotnet-quality: ga
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        with:
+          version: "0.9.11"
+          enable-cache: false
       - name: Record actual environment
         run: dotnet --info
       - run: dotnet restore LoadingCache.slnx
@@ -81,12 +85,65 @@ jobs:
         run: dotnet samples/LoadingCache.Grpc/bin/Release/net10.0/LoadingCache.Grpc.dll --smoke
       - name: Worker host smoke
         run: dotnet samples/LoadingCache.Worker/bin/Release/net10.0/LoadingCache.Worker.dll --smoke
+      - name: Build API baseline tool
+        run: dotnet build tools/LoadingCache.ApiBaseline/LoadingCache.ApiBaseline.csproj -c Release
+      - name: Verify public API baseline against resolved compile references
+        shell: bash
+        run: |
+          uv run --no-project python - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          project = "src/LoadingCache.Extensions.DependencyInjection/LoadingCache.Extensions.DependencyInjection.csproj"
+          resolved = subprocess.check_output([
+              "dotnet", "msbuild", project, "-t:ResolveReferences",
+              "-p:Configuration=Release", "-getItem:ReferencePath",
+          ], text=True)
+          directories = sorted({
+              str(Path(item.get("ReferenceAssembly") or item["FullPath"]).parent)
+              for item in json.loads(resolved)["Items"]["ReferencePath"]
+          })
+          references = [argument for directory in directories for argument in ("--reference-directory", directory)]
+          tool = ["dotnet", "tools/LoadingCache.ApiBaseline/bin/Release/net10.0/LoadingCache.ApiBaseline.dll"]
+          subprocess.run([*tool, "self-test", *references], check=True)
+          subprocess.run([
+              *tool, "check", *references,
+              "--assembly", "src/LoadingCache/obj/Release/net8.0/ref/LoadingCache.dll",
+              "--assembly", "src/LoadingCache.Extensions.DependencyInjection/obj/Release/net8.0/ref/LoadingCache.Extensions.DependencyInjection.dll",
+              "--baseline-directory", "tools/LoadingCache.ApiBaseline/baselines",
+              "--evidence", "artifacts/api-baseline/check.json",
+          ], check=True)
+          PY
+      - name: Pack and inspect local NuGet packages
+        run: uv run --no-project python tools/pack-release.py --local-validation --output artifacts/nuget-ci
+      - name: Run core and DI PackageReference consumers on .NET 8 and .NET 10
+        run: >-
+          uv run --no-project python tools/package-consumers.py
+          --feed artifacts/nuget-ci/packages
+          --output artifacts/nuget-ci-consumers
+          --core-id LoadingCache.LocalValidation
+          --di-id LoadingCache.Extensions.DependencyInjection.LocalValidation
+          --version 0.1.0-alpha.localvalidation
       - name: Preserve test evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-results-${{ matrix.os }}
           path: artifacts/test-results
+          if-no-files-found: warn
+      - name: Preserve package and API evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: package-api-results-${{ matrix.os }}
+          path: |
+            artifacts/api-baseline
+            artifacts/nuget-ci/results.json
+            artifacts/nuget-ci/*.log
+            artifacts/nuget-ci/packages
+            artifacts/nuget-ci-consumers/results.json
+            artifacts/nuget-ci-consumers/*.log
           if-no-files-found: warn
 
   benchmark-smoke:
