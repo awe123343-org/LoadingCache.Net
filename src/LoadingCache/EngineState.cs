@@ -345,13 +345,13 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
         internal bool TryGetKey([MaybeNullWhen(false)] out TKey key)
         {
-            if (WeakKey is null)
+            if (WeakKey is not null)
             {
-                key = _strongKey!;
-                return true;
+                return WeakKey.TryGetTarget(out key);
             }
 
-            return WeakKey.TryGetTarget(out key);
+            key = _strongKey!;
+            return true;
         }
 
         internal bool TryGetValue([MaybeNullWhen(false)] out TValue value)
@@ -414,13 +414,15 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 return Unsafe.As<int, TValue>(ref value);
             }
 
-            if (typeof(TValue) == typeof(long))
+            if (typeof(TValue) != typeof(long))
             {
-                long value = Volatile.Read(ref Unsafe.As<TValue, long>(ref _strongValue));
-                return Unsafe.As<long, TValue>(ref value);
+                throw new InvalidOperationException(
+                    "The value type requires a locked resident read."
+                );
             }
 
-            throw new InvalidOperationException("The value type requires a locked resident read.");
+            long longValue = Volatile.Read(ref Unsafe.As<TValue, long>(ref _strongValue));
+            return Unsafe.As<long, TValue>(ref longValue);
         }
 
         /// <summary>

@@ -17,6 +17,7 @@ public sealed class ProbeCleanupTests
     {
         var scheduler = new ControlledScheduler();
         await using var hook = new BlockingTestHook(Watchdog);
+        Action releaseHook = hook.Release;
         var engine = CreateEngine(scheduler, hook, statistics);
         using var cache = new ObservedCache(
             engine,
@@ -24,7 +25,7 @@ public sealed class ProbeCleanupTests
             {
                 if (pass == 257)
                 {
-                    hook.Release();
+                    releaseHook();
                 }
             }
         );
@@ -41,7 +42,13 @@ public sealed class ProbeCleanupTests
                 .State.Should()
                 .Be(MaintenanceCoordinatorState.Running);
 
-            drain = Task.Run(() => ProbeCleanup.Drain(cache, Watchdog), CancellationToken.None);
+            drain = Task.Factory.StartNew(
+                static state => ProbeCleanup.Drain((ObservedCache)state!, Watchdog),
+                cache,
+                CancellationToken.None,
+                TaskCreationOptions.DenyChildAttach,
+                TaskScheduler.Default
+            );
             int passes = await drain.WaitAsync(Watchdog, CancellationToken.None);
 
             passes.Should().BeGreaterThan(256);
@@ -51,11 +58,8 @@ public sealed class ProbeCleanupTests
         finally
         {
             hook.Release();
-            await worker.WaitAsync(Watchdog, CancellationToken.None);
-            if (drain is { IsCompleted: false })
-            {
-                await drain.WaitAsync(Watchdog, CancellationToken.None);
-            }
+            await Task.WhenAll(worker, drain ?? Task.CompletedTask)
+                .WaitAsync(Watchdog, CancellationToken.None);
         }
 
         hook.TimedOut.Should().BeFalse();
@@ -72,6 +76,7 @@ public sealed class ProbeCleanupTests
         using var cache = new ObservedCache(engine);
         cache.Put(1, "ready");
         Task worker = Task.Run(scheduler.RunNext, CancellationToken.None);
+        Task<int>? drain = null;
         try
         {
             await hook.Entered.WaitAsync(Watchdog, CancellationToken.None);
@@ -79,21 +84,34 @@ public sealed class ProbeCleanupTests
             engine.GetPolicyReadBufferStatistics().Queued.Should().Be(1);
 
             TimeSpan deadline = TimeSpan.FromMilliseconds(100);
-            TimeSpan elapsed = default;
-            Task<int> drain = Task.Run(
-                () =>
+            var elapsed = new System.Runtime.CompilerServices.StrongBox<TimeSpan>(TimeSpan.Zero);
+            drain = Task.Factory.StartNew(
+                static state =>
                 {
+                    (
+                        ObservedCache current,
+                        TimeSpan timeout,
+                        System.Runtime.CompilerServices.StrongBox<TimeSpan> duration
+                    ) = ((
+                        ObservedCache,
+                        TimeSpan,
+                        System.Runtime.CompilerServices.StrongBox<TimeSpan>
+                    ))
+                        state!;
                     long started = Stopwatch.GetTimestamp();
                     try
                     {
-                        return ProbeCleanup.Drain(cache, deadline);
+                        return ProbeCleanup.Drain(current, timeout);
                     }
                     finally
                     {
-                        elapsed = Stopwatch.GetElapsedTime(started);
+                        duration.Value = Stopwatch.GetElapsedTime(started);
                     }
                 },
-                CancellationToken.None
+                (cache, deadline, elapsed),
+                CancellationToken.None,
+                TaskCreationOptions.DenyChildAttach,
+                TaskScheduler.Default
             );
             Func<Task> result = async () => await drain.WaitAsync(Watchdog, CancellationToken.None);
 
@@ -101,7 +119,7 @@ public sealed class ProbeCleanupTests
                 .Should()
                 .ThrowAsync<InvalidOperationException>()
                 .WithMessage("LoadingCache cleanup did not converge*");
-            elapsed.Should().BeGreaterOrEqualTo(deadline);
+            elapsed.Value.Should().BeGreaterOrEqualTo(deadline);
             cache.CleanupCalls.Should().BeGreaterThan(0);
             hook.Returned.IsCompleted.Should().BeFalse();
             cache.Statistics.MaintenanceBacklog.Should().Be(1);
@@ -109,7 +127,20 @@ public sealed class ProbeCleanupTests
         finally
         {
             hook.Release();
-            await worker.WaitAsync(Watchdog, CancellationToken.None);
+            try
+            {
+                await Task.WhenAll(worker, drain ?? Task.CompletedTask)
+                    .WaitAsync(Watchdog, CancellationToken.None);
+            }
+            catch (InvalidOperationException exception)
+                when (exception.Message.StartsWith(
+                        "LoadingCache cleanup did not converge",
+                        StringComparison.Ordinal
+                    )
+                )
+            {
+                // The test above requires this controlled watchdog failure.
+            }
         }
 
         ProbeCleanup.Drain(cache, Watchdog).Should().BeGreaterThan(0);

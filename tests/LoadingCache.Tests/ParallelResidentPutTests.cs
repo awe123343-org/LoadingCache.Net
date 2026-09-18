@@ -46,24 +46,26 @@ public sealed class ParallelResidentPutTests
     [Parallelizable(ParallelScope.All)]
     public async Task OptOutCannotInstallAnActualBulkLoader(bool asynchronous)
     {
-        using CacheEngine<int, string> engine = CacheBuilder
+        await using CacheEngine<int, string> engine = CacheBuilder
             .Create<int, string>()
             .MaximumSize(8)
             .MaxConcurrentLoads(2)
             .CreateEngine(supportsBulkLoading: false);
         if (asynchronous)
         {
-            await FluentActions
-                .Awaiting(async () =>
-                    await engine.GetAllAsync(
-                        static (_, _) =>
-                            throw new AssertionException("Single loader must not execute."),
-                        null,
-                        static (_, _) =>
-                            throw new AssertionException("Bulk loader must not execute."),
-                        [1],
-                        CancellationToken.None
-                    )
+            await engine
+                .Awaiting(static current =>
+                    current
+                        .GetAllAsync(
+                            static (_, _) =>
+                                throw new AssertionException("Single loader must not execute."),
+                            null,
+                            static (_, _) =>
+                                throw new AssertionException("Bulk loader must not execute."),
+                            [1],
+                            CancellationToken.None
+                        )
+                        .AsTask()
                 )
                 .Should()
                 .ThrowExactlyAsync<InvalidOperationException>();

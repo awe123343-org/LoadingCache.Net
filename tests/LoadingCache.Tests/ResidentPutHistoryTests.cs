@@ -152,11 +152,13 @@ public sealed class ResidentPutHistoryTests
             key.Should().Be(1);
             current.HasValue.Should().BeFalse();
             Calls++;
-            if (Calls == 1)
+            if (Calls != 1)
             {
-                Entered.TrySetResult();
-                Release.Task.GetAwaiter().GetResult();
+                return CacheMutation.Set(Calls == 1 ? "stale" : "retried");
             }
+
+            Entered.TrySetResult();
+            Release.Task.GetAwaiter().GetResult();
             return CacheMutation.Set(Calls == 1 ? "stale" : "retried");
         }
     }

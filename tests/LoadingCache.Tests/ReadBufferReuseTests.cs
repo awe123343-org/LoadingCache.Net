@@ -47,43 +47,58 @@ public sealed class ReadBufferReuseTests
         long[] failed = new long[producerCount];
         using Barrier start = new(producerCount + 1);
         using CancellationTokenSource stop = new();
-        int remaining = producerCount;
+        var remaining = new System.Runtime.CompilerServices.StrongBox<int>(producerCount);
+        var workload = new ReuseState(
+            buffer,
+            start,
+            expected,
+            accepted,
+            observed,
+            full,
+            failed,
+            remaining,
+            stop.Token
+        );
         Task[] workers = new Task[producerCount + 1];
         for (int producer = 0; producer < producerCount; producer++)
         {
             int producerId = producer;
             workers[producer] = Task.Factory.StartNew(
-                () =>
+                static state =>
                 {
+                    (ReuseState work, int producerIndex) = ((ReuseState, int))state!;
                     try
                     {
-                        MeetPeers(start);
+                        MeetPeers(work.Start);
                         for (int sequence = 0; sequence < eventsPerProducer; sequence++)
                         {
-                            int id = producerId * eventsPerProducer + sequence;
+                            int id = producerIndex * eventsPerProducer + sequence;
                             while (true)
                             {
-                                stop.Token.ThrowIfCancellationRequested();
-                                ReadBufferOfferResult result = buffer.TryOffer(expected[id]);
+                                work.Cancellation.ThrowIfCancellationRequested();
+                                ReadBufferOfferResult result = work.Buffer.TryOffer(
+                                    work.Expected[id]
+                                );
                                 if (result == ReadBufferOfferResult.Success)
                                 {
-                                    accepted[id] = true;
+                                    work.Accepted[id] = true;
                                     break;
                                 }
 
-                                if (result == ReadBufferOfferResult.Full)
+                                switch (result)
                                 {
-                                    full[producerId]++;
-                                }
-                                else if (result == ReadBufferOfferResult.Failed)
-                                {
-                                    failed[producerId]++;
-                                }
-                                else
-                                {
-                                    throw new InvalidOperationException(
-                                        "The live buffer shut down."
-                                    );
+                                    case ReadBufferOfferResult.Full:
+                                        work.Full[producerIndex]++;
+                                        break;
+                                    case ReadBufferOfferResult.Failed:
+                                        work.Failed[producerIndex]++;
+                                        break;
+                                    case ReadBufferOfferResult.Success:
+                                    case ReadBufferOfferResult.Shutdown:
+                                    default:
+                                        throw new InvalidOperationException(
+                                            "The live buffer shut down."
+                                        );
                                 }
                                 Thread.Yield();
                             }
@@ -91,9 +106,10 @@ public sealed class ReadBufferReuseTests
                     }
                     finally
                     {
-                        Interlocked.Decrement(ref remaining);
+                        Interlocked.Decrement(ref work.Remaining.Value);
                     }
                 },
+                (workload, producerId),
                 CancellationToken.None,
                 TaskCreationOptions.LongRunning,
                 TaskScheduler.Default
@@ -101,20 +117,21 @@ public sealed class ReadBufferReuseTests
         }
 
         workers[producerCount] = Task.Factory.StartNew(
-            () =>
+            static state =>
             {
-                MeetPeers(start);
-                while (Volatile.Read(ref remaining) != 0 || buffer.HasPublished)
+                ReuseState work = (ReuseState)state!;
+                MeetPeers(work.Start);
+                while (Volatile.Read(ref work.Remaining.Value) != 0 || work.Buffer.HasPublished)
                 {
-                    stop.Token.ThrowIfCancellationRequested();
+                    work.Cancellation.ThrowIfCancellationRequested();
                     if (
-                        buffer.DrainTo(
+                        work.Buffer.DrainTo(
                             payload =>
                             {
                                 if (
-                                    (uint)payload.Id >= (uint)expected.Length
-                                    || payload != expected[payload.Id]
-                                    || ++observed[payload.Id] != 1
+                                    (uint)payload.Id >= (uint)work.Expected.Length
+                                    || payload != work.Expected[payload.Id]
+                                    || ++work.Observed[payload.Id] != 1
                                 )
                                 {
                                     throw new InvalidOperationException(
@@ -130,6 +147,7 @@ public sealed class ReadBufferReuseTests
                     }
                 }
             },
+            workload,
             CancellationToken.None,
             TaskCreationOptions.LongRunning,
             TaskScheduler.Default
@@ -137,7 +155,7 @@ public sealed class ReadBufferReuseTests
 
         try
         {
-            await Task.WhenAll(workers).WaitAsync(TestTimeout);
+            await Task.WhenAll(workers).WaitAsync(TestTimeout, CancellationToken.None);
             accepted.Should().OnlyContain(static value => value);
             observed.Should().OnlyContain(static count => count == 1);
             buffer.HasPublished.Should().BeFalse();
@@ -151,14 +169,26 @@ public sealed class ReadBufferReuseTests
         }
         finally
         {
-            stop.Cancel();
+            await stop.CancelAsync();
             try
             {
-                await Task.WhenAll(workers).WaitAsync(TestTimeout);
+                await Task.WhenAll(workers).WaitAsync(TestTimeout, CancellationToken.None);
             }
             catch (Exception) when (workers.All(static worker => worker.IsCompleted)) { }
         }
     }
+
+    private sealed record ReuseState(
+        StripedReadBuffer<ReadPayload> Buffer,
+        Barrier Start,
+        ReadPayload[] Expected,
+        bool[] Accepted,
+        int[] Observed,
+        long[] Full,
+        long[] Failed,
+        System.Runtime.CompilerServices.StrongBox<int> Remaining,
+        CancellationToken Cancellation
+    );
 
     private static void MeetPeers(Barrier start)
     {

@@ -189,15 +189,15 @@ public sealed class ResidentReplacementTests
                 (_, current) =>
                 {
                     int call = Interlocked.Increment(ref callbackCalls);
-                    if (call == 1)
+                    if (call != 1)
                     {
-                        current.Value.Should().Be(1);
-                        callbackEntered.TrySetResult(null);
-                        releaseCallback.Task.GetAwaiter().GetResult();
-                        return CacheMutation.Set(2);
+                        return CacheMutation.Keep<int>();
                     }
 
-                    return CacheMutation.Keep<int>();
+                    current.Value.Should().Be(1);
+                    callbackEntered.TrySetResult(null);
+                    releaseCallback.Task.GetAwaiter().GetResult();
+                    return CacheMutation.Set(2);
                 }
             )
         );

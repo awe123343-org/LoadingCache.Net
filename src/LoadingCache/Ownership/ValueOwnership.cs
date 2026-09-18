@@ -98,7 +98,7 @@ internal sealed class ValueOwnership<TValue> : IDisposable
             Value = value;
         }
 
-        internal TValue Value { get; private set; }
+        internal TValue? Value { get; private set; }
 
         internal int CacheReferences;
 
@@ -114,7 +114,7 @@ internal sealed class ValueOwnership<TValue> : IDisposable
 
         internal void ClearValue()
         {
-            Value = default!;
+            Value = null;
         }
     }
 
@@ -240,7 +240,7 @@ internal sealed class ValueOwnership<TValue> : IDisposable
             }
 
             state.CacheReferences--;
-            if (state.CacheReferences == 0 && state.LeaseReferences == 0)
+            if (state is { CacheReferences: 0, LeaseReferences: 0 })
             {
                 state.DisposalStarted = 1;
                 stateToDispose = state;
@@ -273,7 +273,7 @@ internal sealed class ValueOwnership<TValue> : IDisposable
             }
 
             state.LeaseReferences--;
-            if (state.CacheReferences == 0 && state.LeaseReferences == 0)
+            if (state is { CacheReferences: 0, LeaseReferences: 0 })
             {
                 state.DisposalStarted = 1;
                 stateToDispose = state;
@@ -297,11 +297,13 @@ internal sealed class ValueOwnership<TValue> : IDisposable
             foreach (LeaseState state in _activeStates)
             {
                 state.CacheReferences = 0;
-                if (state.LeaseReferences == 0 && state.DisposalStarted == 0)
+                if (state is not { LeaseReferences: 0, DisposalStarted: 0 })
                 {
-                    state.DisposalStarted = 1;
-                    (statesToDispose ??= []).Add(state);
+                    continue;
                 }
+
+                state.DisposalStarted = 1;
+                (statesToDispose ??= []).Add(state);
             }
         }
 
@@ -340,13 +342,13 @@ internal sealed class ValueOwnership<TValue> : IDisposable
         LeaseState[] pending;
         lock (_gate)
         {
-            pending = _activeStates
-                .Where(static state =>
-                    state.DisposalPending
-                    && !state.DisposalScheduled
-                    && state.DisposalCompleted == 0
-                )
-                .ToArray();
+            pending =
+            [
+                .. _activeStates.Where(static state =>
+                    state
+                        is { DisposalPending: true, DisposalScheduled: false, DisposalCompleted: 0 }
+                ),
+            ];
         }
         int accepted = 0;
         foreach (LeaseState state in pending)
@@ -397,11 +399,11 @@ internal sealed class ValueOwnership<TValue> : IDisposable
         {
             if (_disposeValue is not null)
             {
-                _disposeValue(state.Value);
+                _disposeValue(state.Value!);
             }
             else
             {
-                await _disposeValueAsync!(state.Value).ConfigureAwait(false);
+                await _disposeValueAsync!(state.Value!).ConfigureAwait(false);
             }
         }
         catch (Exception exception)
@@ -423,7 +425,7 @@ internal sealed class ValueOwnership<TValue> : IDisposable
                 return;
             }
 
-            TValue value = state.Value;
+            TValue value = state.Value!;
             _terminalStates.GetValue(value, static _ => new TerminalMarker());
             _states.Remove(value);
             _activeStates.Remove(state);
@@ -506,7 +508,7 @@ internal sealed class ValueOwnership<TValue> : IDisposable
         return state;
     }
 
-    private sealed class TerminalMarker { }
+    private sealed class TerminalMarker;
 }
 
 internal sealed class ValueOwnershipCapacityException : InvalidOperationException

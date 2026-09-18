@@ -61,7 +61,10 @@ public sealed class BulkLoadingTests
             .MaximumBulkKeys(4)
             .BuildLoading(loader);
 
-        Action first = () => cache.GetAll([1, 2]);
+        Action first = cache.Invoking(static current =>
+        {
+            current.GetAll([1, 2]);
+        });
         first.Should().Throw<InvalidOperationException>();
         cache.TryGet(1, out _).Should().BeFalse();
 
@@ -79,7 +82,10 @@ public sealed class BulkLoadingTests
             .MaximumBulkKeys(2)
             .BuildLoading(static key => key * 10);
 
-        Action operation = () => cache.GetAll([1, 2, 3]);
+        Action operation = cache.Invoking(static current =>
+        {
+            current.GetAll([1, 2, 3]);
+        });
 
         operation.Should().ThrowExactly<ArgumentOutOfRangeException>();
     }
@@ -157,8 +163,8 @@ public sealed class BulkLoadingTests
         Task<IReadOnlyDictionary<int, int>> canceled = cache
             .GetAllAsync([1, 2], cancellation.Token)
             .AsTask();
-        await loader.Started.Task.WaitAsync(TestTimeout);
-        Task<int> surviving = cache.GetAsync(2).AsTask();
+        await loader.Started.Task.WaitAsync(TestTimeout, CancellationToken.None);
+        Task<int> surviving = cache.GetAsync(2, CancellationToken.None).AsTask();
 
         await cancellation.CancelAsync();
         Func<Task> waitCanceled = async () => await canceled;
@@ -184,7 +190,7 @@ public sealed class BulkLoadingTests
         Task<int> single = cache.GetAsync(99).AsTask();
         await loader.Started.Task.WaitAsync(TestTimeout);
 
-        Func<Task> bulk = async () => await cache.GetAllAsync([1, 2, 3]);
+        Func<Task> bulk = cache.Awaiting(static current => current.GetAllAsync([1, 2, 3]).AsTask());
         await bulk.Should().ThrowAsync<CacheLoadRejectedException>();
 
         loader.Release.TrySetResult(new Dictionary<int, int> { [99] = 990 });

@@ -1,3 +1,4 @@
+using JetBrains.Annotations;
 using LoadingCache.Diagnostics;
 
 namespace LoadingCache;
@@ -165,6 +166,7 @@ internal sealed class MemoryPressureController<TKey, TValue> : IDisposable
         }
     }
 
+    [AssertionMethod]
     internal static void ValidateOptions(
         TimeSpan samplingInterval,
         double pressureThreshold,
@@ -204,9 +206,6 @@ internal sealed partial class CacheEngine<TKey, TValue>
     internal bool IsMemoryPressureEpochCurrent(long sampledEpoch) =>
         Volatile.Read(ref _disposed) == 0 && Volatile.Read(ref _epoch) == sampledEpoch;
 
-    internal MemoryPressureDiagnostics GetMemoryPressureDiagnostics() =>
-        _memoryPressureController?.GetDiagnostics() ?? default;
-
     private MemoryPressureStatistics? GetPublicMemoryPressureStatistics()
     {
         ThrowIfDisposed();
@@ -236,14 +235,13 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 return null;
             }
 
-            var policy = _policy;
-            int residentCount = policy.ResidentCount;
+            int residentCount = _policy.ResidentCount;
             int trimCount = Math.Min(
                 (int)Math.Ceiling(residentCount * trimFraction),
                 maximumTrimCount
             );
             var selected = new List<MemoryPressureCandidate>(trimCount);
-            foreach (var candidate in policy.Snapshot(hottest: false, trimCount))
+            foreach (object candidate in _policy.Snapshot(hottest: false, trimCount))
             {
                 if (
                     candidate is not Entry entry
@@ -286,19 +284,17 @@ internal sealed partial class CacheEngine<TKey, TValue>
             for (int index = 0; index < candidates.Count; index++)
             {
                 MemoryPressureCandidate candidate = candidates[index];
-                if (candidate.Entry is not Entry candidateEntry)
+                if (candidate.Entry is not Entry current)
                 {
                     continue;
                 }
-
-                Entry current = candidateEntry;
 
                 lock (current.Sync)
                 {
                     if (
                         _disposed != 0
                         || _epoch != snapshot.Epoch
-                        || !_entries.IsCurrent(candidateEntry)
+                        || !_entries.IsCurrent(current)
                         || current.Epoch != snapshot.Epoch
                         || !Volatile.Read(ref current.IsReady)
                         || current.PublicationRevision != candidate.PublicationRevision

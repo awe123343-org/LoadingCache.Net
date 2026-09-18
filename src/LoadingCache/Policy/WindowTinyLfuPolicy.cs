@@ -88,11 +88,7 @@ internal sealed class WindowTinyLfuPolicy<T>
             throw new InvalidOperationException("Policy resident count is inconsistent.");
         }
 
-        long weightedSize = 0;
-        foreach (PolicyNode<T> node in nodes)
-        {
-            weightedSize = checked(weightedSize + node.Weight);
-        }
+        long weightedSize = nodes.Sum(static node => node.Weight);
 
         if (weightedSize != WeightedSize)
         {

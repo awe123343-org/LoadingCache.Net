@@ -223,27 +223,31 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             || options.RefreshAfterWrite.HasValue;
         _useAtomicResidentReads =
             !_requiresReadTime
-            && !options.WeakKeys
-            && !options.WeakValues
-            && options.OnValueRetired is null
+            && options is { WeakKeys: false, WeakValues: false, OnValueRetired: null }
             && Entry.SupportsAtomicStrongValue;
         _useConcurrentResidentWrites =
             options.Policy is null
             && !options.SupportsBulkLoading
             && !_requiresReadTime
-            && !options.WeakKeys
-            && !options.WeakValues
-            && options.OnValueRetired is null
-            && options.RemovalListener is null
-            && options.EvictionListener is null;
+            && options
+                is {
+                    WeakKeys: false,
+                    WeakValues: false,
+                    OnValueRetired: null,
+                    RemovalListener: null,
+                    EvictionListener: null,
+                };
         _useFixedWriteSnapshots =
-            options.ExpireAfterWrite.HasValue
-            && !options.ExpireAfterAccess.HasValue
-            && !options.RefreshAfterWrite.HasValue
-            && options.Expiry is null
-            && !options.WeakKeys
-            && !options.WeakValues
-            && options.OnValueRetired is null;
+            options
+                is {
+                    ExpireAfterWrite: not null,
+                    ExpireAfterAccess: null,
+                    RefreshAfterWrite: null,
+                    Expiry: null,
+                    WeakKeys: false,
+                    WeakValues: false,
+                    OnValueRetired: null,
+                };
         _recordStatistics = options.RecordStatistics;
         _enableExpirationScheduler = options.EnableExpirationScheduler;
         _testHooks = options.TestHooks;
@@ -361,26 +365,29 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     }
 
     private static bool CanUseColdStartPolicy(CacheEngineOptions<TKey, TValue> options) =>
-        options.Policy is null
-        && options.MaximumSize.HasValue
-        && !options.MaximumWeight.HasValue
-        && !options.WeakKeys
-        && !options.WeakValues
-        && !options.ExpireAfterWrite.HasValue
-        && !options.ExpireAfterAccess.HasValue
-        && options.Expiry is null
-        && !options.RefreshAfterWrite.HasValue;
+        options
+            is {
+                Policy: null,
+                MaximumSize: not null,
+                MaximumWeight: null,
+                WeakKeys: false,
+                WeakValues: false,
+                ExpireAfterWrite: null,
+                ExpireAfterAccess: null,
+                Expiry: null,
+                RefreshAfterWrite: null,
+            };
 
     private static int DefaultMaintenanceReadStripeCount()
     {
         int processorCount = Math.Max(1, Environment.ProcessorCount);
         int powerOfTwo = 1;
-        while (powerOfTwo < processorCount && powerOfTwo <= (1 << 28))
+        while (powerOfTwo < processorCount && powerOfTwo <= 1 << 28)
         {
             powerOfTwo <<= 1;
         }
 
-        return powerOfTwo > (int.MaxValue >> 2) ? 1 << 30 : powerOfTwo << 2;
+        return powerOfTwo > int.MaxValue >> 2 ? 1 << 30 : powerOfTwo << 2;
     }
 
     internal long EstimatedCount
@@ -407,8 +414,6 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         Monitor.IsEntered(_gate) || Monitor.IsEntered(_expirationTimerGate);
 
     internal IEqualityComparer<TKey> Comparer { get; }
-
-    internal void EnsureUsable() => ThrowIfDisposed();
 
     internal CacheStatistics GetStatistics()
     {
@@ -920,10 +925,14 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             );
 
         using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
-        object? replacementPolicyToken;
         if (
             _useConcurrentResidentWrites
-            && TryReplaceResidentValueWithoutGate(key, value, weight, out replacementPolicyToken)
+            && TryReplaceResidentValueWithoutGate(
+                key,
+                value,
+                weight,
+                out object? replacementPolicyToken
+            )
         )
         {
             _policy.OnAccess(replacementPolicyToken);
@@ -1339,7 +1348,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                             entry.PolicyToken
                                 is not WindowTinyLfuEnginePolicy.EngineEntryToken
                                 {
-                                    Node.IsAlive: true
+                                    Node.IsAlive: true,
                                 } token
                             || !ReferenceEquals(token.Entry, entry)
                         )
@@ -2131,16 +2140,18 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
 
         try
         {
-            if (cleanupOwner)
+            if (!cleanupOwner)
             {
-                try
-                {
-                    DisposeFlightTimeoutTimer(timeoutTimer);
-                }
-                finally
-                {
-                    workCancellation?.Dispose();
-                }
+                return;
+            }
+
+            try
+            {
+                DisposeFlightTimeoutTimer(timeoutTimer);
+            }
+            finally
+            {
+                workCancellation?.Dispose();
             }
         }
         finally
@@ -2184,17 +2195,17 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         _reservedLoads--;
         flight.RefreshEntry = null;
         if (
-            _disposed != 0
-            && _shutdownCancellationCompleted != 0
-            && _activeFlights.Count == 0
-            && _shutdownSourceDisposed == 0
+            _disposed == 0
+            || _shutdownCancellationCompleted == 0
+            || _activeFlights.Count != 0
+            || _shutdownSourceDisposed != 0
         )
         {
-            _shutdownSourceDisposed = 1;
-            return true;
+            return false;
         }
 
-        return false;
+        _shutdownSourceDisposed = 1;
+        return true;
     }
 
     private void ReplaceCurrentLocked(TKey key, Entry replacement)
@@ -2482,50 +2493,60 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             return true;
         }
 
-        if (_useFixedWriteSnapshots && !materializeSharedTask)
+        if (!_useFixedWriteSnapshots || materializeSharedTask)
         {
-            FixedWritePublication? publication = Volatile.Read(ref entry.PublishedWrite);
-            long duration = Volatile.Read(ref _expireAfterWriteTicks);
-            TValue snapshotValue;
-            long writeTimestamp;
-            if (publication is null)
-            {
-                snapshotValue = entry.ReadStrongValueAtomic();
-                writeTimestamp = Volatile.Read(ref entry.WriteTimestamp);
-            }
-            else
-            {
-                snapshotValue = publication.Value;
-                writeTimestamp = publication.Timestamp;
-            }
-            long now = _timeProvider.GetTimestamp();
-            if (
-                GetElapsedTime(writeTimestamp, now) < TimeSpan.FromTicks(duration)
-                && ReferenceEquals(publication, Volatile.Read(ref entry.PublishedWrite))
-                && !Volatile.Read(ref entry.Retired)
-            )
-            {
-                // Duration was observed while this publication was current. Sampling time
-                // afterwards is conservative; revalidation prevents combining an old value
-                // with a duration extended only after refresh/replacement. Rollback always
-                // publishes a new reference, so it cannot conceal an intervening version.
-                value = snapshotValue;
-                readyEntry = entry;
-                RecordHit();
-                _policy.OnAccess(entry.PolicyToken);
-                return true;
-            }
+            return TryReadReadyLocked(
+                entry,
+                key,
+                out value,
+                out sharedTask,
+                out readyEntry,
+                out refreshEligible,
+                materializeSharedTask
+            );
         }
 
-        return TryReadReadyLocked(
-            entry,
-            key,
-            out value,
-            out sharedTask,
-            out readyEntry,
-            out refreshEligible,
-            materializeSharedTask
-        );
+        FixedWritePublication? publication = Volatile.Read(ref entry.PublishedWrite);
+        long duration = Volatile.Read(ref _expireAfterWriteTicks);
+        TValue snapshotValue;
+        long writeTimestamp;
+        if (publication is null)
+        {
+            snapshotValue = entry.ReadStrongValueAtomic();
+            writeTimestamp = Volatile.Read(ref entry.WriteTimestamp);
+        }
+        else
+        {
+            snapshotValue = publication.Value;
+            writeTimestamp = publication.Timestamp;
+        }
+        long now = _timeProvider.GetTimestamp();
+        if (
+            GetElapsedTime(writeTimestamp, now) >= TimeSpan.FromTicks(duration)
+            || !ReferenceEquals(publication, Volatile.Read(ref entry.PublishedWrite))
+            || Volatile.Read(ref entry.Retired)
+        )
+        {
+            return TryReadReadyLocked(
+                entry,
+                key,
+                out value,
+                out sharedTask,
+                out readyEntry,
+                out refreshEligible,
+                materializeSharedTask
+            );
+        }
+
+        // Duration was observed while this publication was current. Sampling time
+        // afterwards is conservative; revalidation prevents combining an old value
+        // with a duration extended only after refresh/replacement. Rollback always
+        // publishes a new reference, so it cannot conceal an intervening version.
+        value = snapshotValue;
+        readyEntry = entry;
+        RecordHit();
+        _policy.OnAccess(entry.PolicyToken);
+        return true;
     }
 
     private bool TryReadReadyLocked(
@@ -2653,14 +2674,16 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                         && _entries.IsCurrent(entry)
                     )
                     {
-                        if (valueCollected && !entry.TryGetValue(out _))
+                        evictionNotification = valueCollected switch
                         {
-                            evictionNotification = RemoveCurrentEntryLocked(entry, collected: true);
-                        }
-                        else if (!valueCollected && IsExpired(entry, _timeProvider.GetTimestamp()))
-                        {
-                            evictionNotification = RemoveExpiredEntryLocked(entry);
-                        }
+                            true when !entry.TryGetValue(out _) => RemoveCurrentEntryLocked(
+                                entry,
+                                collected: true
+                            ),
+                            false when IsExpired(entry, _timeProvider.GetTimestamp()) =>
+                                RemoveExpiredEntryLocked(entry),
+                            _ => null,
+                        };
                     }
                 }
             }

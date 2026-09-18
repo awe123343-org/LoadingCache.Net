@@ -58,10 +58,11 @@ internal static class NativePolicySmoke
                 disposed.TrySetResult(true);
             }
         );
-        using var lease = owned.PutAndLease("stream", new MemoryStream());
-        owned.Invalidate("stream");
-        Require(lease.Value.CanRead && !disposed.Task.IsCompleted, "lease survives eviction");
-        lease.Dispose();
+        await using (var lease = owned.PutAndLease("stream", new MemoryStream()))
+        {
+            owned.Invalidate("stream");
+            Require(lease.Value.CanRead && !disposed.Task.IsCompleted, "lease survives eviction");
+        }
         Require(
             await disposed.Task.WaitAsync(TimeSpan.FromSeconds(10)),
             "automatic owned-value disposal"
@@ -160,28 +161,38 @@ internal static class NativePolicySmoke
 
     private static void SynchronousEvictionSmoke()
     {
-        int calls = 0;
+        EvictionCounter counter = new();
         using var cache = CacheBuilder
             .Create<int, int>()
             .MaximumWeight(1)
             .MaximumResidentCount(8)
             .MaxConcurrentLoads(4)
             .Weigher(static (_, _) => 2)
-            .EvictionListener(notification =>
-            {
-                Require(notification.Cause == RemovalCause.Weight, "weighted eviction cause");
-                Interlocked.Increment(ref calls);
-            })
+            .EvictionListener(counter.OnEviction)
             .Build();
         cache.Put(1, 1);
         cache.CleanUp();
-        Require(
-            Volatile.Read(ref calls) == 1,
-            "synchronous eviction delivered once before cleanup returns"
-        );
+        Require(counter.Calls == 1, "synchronous eviction delivered once before cleanup returns");
     }
 
-    private sealed record ReferenceToken(int Number);
+    // Generated record equality uses the value component alongside reference identity checks.
+    private sealed record ReferenceToken(
+        // ReSharper disable once NotAccessedPositionalProperty.Local
+        int Number
+    );
+
+    private sealed class EvictionCounter
+    {
+        private int _calls;
+
+        internal int Calls => Volatile.Read(ref _calls);
+
+        internal void OnEviction(RemovalNotification<int, int> notification)
+        {
+            Require(notification.Cause == RemovalCause.Weight, "weighted eviction cause");
+            Interlocked.Increment(ref _calls);
+        }
+    }
 
     private static async Task ListenerSmokeAsync()
     {
@@ -201,7 +212,7 @@ internal static class NativePolicySmoke
         cache.Invalidate(1);
         var notification = await removed.Task.WaitAsync(TimeSpan.FromSeconds(10));
         Require(
-            notification.Cause == RemovalCause.Explicit && notification.Value == "one",
+            notification is { Cause: RemovalCause.Explicit, Value: "one" },
             "removal notification"
         );
     }

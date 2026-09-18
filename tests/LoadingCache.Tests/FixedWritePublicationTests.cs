@@ -519,12 +519,13 @@ public sealed class FixedWritePublicationTests
 
         public override long GetTimestamp()
         {
-            if (_pauseNextTimestamp.Value)
+            if (!_pauseNextTimestamp.Value)
             {
-                _pauseNextTimestamp.Value = false;
-                timestamp.Invoke();
+                return _clock.GetTimestamp();
             }
 
+            _pauseNextTimestamp.Value = false;
+            timestamp.Invoke();
             return _clock.GetTimestamp();
         }
 

@@ -297,48 +297,56 @@ public sealed class AdversarialRegressionTests
     [Test]
     public async Task ComparerEqualReentrancyIsDetected()
     {
-        // The loader intentionally captures the cache to exercise same-key reentrancy.
-        IAsyncLoadingCache<string, int>? cache = null;
-        int calls = 0;
-        cache = Create<string, int>(
-            async (key, _) =>
-            {
-                Interlocked.Increment(ref calls);
-                return await Get(cache!, key.ToLowerInvariant(), CancellationToken.None);
-            },
+        var loader = new DependentLoader();
+        await using var cache = Create<string, int>(
+            loader.LoadComparerEqualAsync,
             comparer: StringComparer.OrdinalIgnoreCase
         );
+        loader.Cache = cache;
 
-        await using (cache)
-        {
-            await ((Func<Task>)(() => AwaitWithTestTimeout(Get(cache, "KEY").AsTask())))
-                .Should()
-                .ThrowExactlyAsync<LoadingCacheReentrancyException>();
-            calls.Should().Be(1);
-        }
+        await cache
+            .Awaiting(static current => AwaitWithTestTimeout(Get(current, "KEY").AsTask()))
+            .Should()
+            .ThrowExactlyAsync<LoadingCacheReentrancyException>();
+        loader.Calls.Should().Be(1);
     }
 
     [Test]
     public async Task DifferentKeyDependencyIsAllowedAndScopeIsRestored()
     {
-        // The loader intentionally captures the cache to verify scope restoration after K -> J.
-        IAsyncLoadingCache<string, int>? cache = null;
-        cache = Create<string, int>(
-            async (key, _) =>
-            {
-                if (key == "K")
-                {
-                    return await Get(cache!, "J", CancellationToken.None) + 1;
-                }
+        var loader = new DependentLoader();
+        await using var cache = Create<string, int>(loader.LoadDifferentKeyAsync);
+        loader.Cache = cache;
+        (await Get(cache, "K")).Should().Be(141);
+        (await Get(cache, "J")).Should().Be(140);
+    }
 
-                return 140;
-            }
-        );
+    private sealed class DependentLoader
+    {
+        private int _calls;
+        internal int Calls => Volatile.Read(ref _calls);
+        internal IAsyncLoadingCache<string, int> Cache { private get; set; } = null!;
 
-        await using (cache)
+        internal async Task<int> LoadComparerEqualAsync(
+            string key,
+            CancellationToken cancellationToken
+        )
         {
-            (await Get(cache, "K")).Should().Be(141);
-            (await Get(cache, "J")).Should().Be(140);
+            Interlocked.Increment(ref _calls);
+            return await Get(Cache, key.ToLowerInvariant(), CancellationToken.None);
+        }
+
+        internal async Task<int> LoadDifferentKeyAsync(
+            string key,
+            CancellationToken cancellationToken
+        )
+        {
+            if (key == "K")
+            {
+                return await Get(Cache, "J", CancellationToken.None) + 1;
+            }
+
+            return 140;
         }
     }
 

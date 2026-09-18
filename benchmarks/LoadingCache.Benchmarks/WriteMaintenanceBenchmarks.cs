@@ -154,6 +154,7 @@ public class WriteMaintenanceHitBenchmarks : IDisposable
     private int _residentKey;
 
     /// <summary>Gets or sets the number of resident entries before the timed lookup.</summary>
+    [UsedImplicitly]
     [Params(1, 1024)]
     public int ResidentEntries { get; set; }
 

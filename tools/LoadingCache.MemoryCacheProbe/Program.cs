@@ -57,7 +57,7 @@ internal static class Program
             );
             if (!warmup)
                 measured++;
-            Console.Error.WriteLine(
+            await Console.Error.WriteLineAsync(
                 $"{options.Backend}/{options.Scenario} sample={index} validated"
             );
         }
@@ -75,7 +75,7 @@ internal static class Program
         else
         {
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(options.Output))!);
-            File.WriteAllText(options.Output, json);
+            await File.WriteAllTextAsync(options.Output, json);
         }
     }
 
@@ -168,9 +168,8 @@ internal static class Program
         long checksum = 0;
         for (int index = 0; index < resident; index++)
         {
-            Payload? value;
             bool found = loading is null
-                ? memory!.TryGetValue(keys[index], out value)
+                ? memory!.TryGetValue(keys[index], out Payload? value)
                 : loading.Policy.TryGetQuietly(keys[index], out value);
             Check(found && ReferenceEquals(value, expected[index]), "replacement final value");
             checksum += value!.KeyId * 2L + value.Version;
@@ -200,7 +199,7 @@ internal static class Program
     {
         int[] original = CreateTrace(options);
         var mapping = new Dictionary<int, int>();
-        var trace = new int[original.Length];
+        int[] trace = new int[original.Length];
         for (int index = 0; index < original.Length; index++)
         {
             if (!mapping.TryGetValue(original[index], out int id))
@@ -381,13 +380,15 @@ internal static class Program
             string raw = File.ReadAllText(options.TraceFile);
             int[] loaded = raw.TrimStart().StartsWith('[')
                 ? JsonSerializer.Deserialize<int[]>(raw)!
-                : raw.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
-                    .Select(line => int.Parse(line, CultureInfo.InvariantCulture))
-                    .ToArray();
+                :
+                [
+                    .. raw.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+                        .Select(line => int.Parse(line, CultureInfo.InvariantCulture)),
+                ];
             Check(loaded.Length > 0, "empty trace");
             return loaded;
         }
-        var trace = new int[options.Operations];
+        int[] trace = new int[options.Operations];
         int capacity = options.Capacity;
         int universe = checked(capacity * 4);
         uint state = (uint)options.Seed;
@@ -747,14 +748,6 @@ internal static class Program
                 map.Keys.All(key => allowed.Contains(key, StringComparer.Ordinal)),
                 "unknown option"
             );
-            int Number(string key, int fallback, int min, int max)
-            {
-                int value = map.TryGetValue(key, out var raw)
-                    ? int.Parse(raw, CultureInfo.InvariantCulture)
-                    : fallback;
-                Check(value >= min && value <= max, $"{key} out of range");
-                return value;
-            }
             string backend = map.GetValueOrDefault("--backend", "loadingcache");
             string mode = map.GetValueOrDefault("--value-mode", "changed");
             string statistics = map.GetValueOrDefault("--statistics", "off");
@@ -788,6 +781,15 @@ internal static class Program
                 "--trace-file requires trace scenario"
             );
             return options;
+
+            int Number(string key, int fallback, int min, int max)
+            {
+                int value = map.TryGetValue(key, out string? raw)
+                    ? int.Parse(raw, CultureInfo.InvariantCulture)
+                    : fallback;
+                Check(value >= min && value <= max, $"{key} out of range");
+                return value;
+            }
         }
     }
 }

@@ -177,24 +177,26 @@ public sealed class ResidentReadTests
                 cache.Put(1, createValue(version));
             }
         });
-        Task[] readers = Enumerable
-            .Range(0, 3)
-            .Select(_ =>
-                Task.Run(async () =>
-                {
-                    await start.Task;
-                    for (int iteration = 0; iteration < iterations; iteration++)
+        Task[] readers =
+        [
+            .. Enumerable
+                .Range(0, 3)
+                .Select(_ =>
+                    Task.Run(async () =>
                     {
-                        if (!cache.TryGet(1, out TValue? value) || !isConsistent(value))
+                        await start.Task;
+                        for (int iteration = 0; iteration < iterations; iteration++)
                         {
-                            throw new InvalidOperationException(
-                                "A resident publication was torn or lost."
-                            );
+                            if (!cache.TryGet(1, out TValue? value) || !isConsistent(value))
+                            {
+                                throw new InvalidOperationException(
+                                    "A resident publication was torn or lost."
+                                );
+                            }
                         }
-                    }
-                })
-            )
-            .ToArray();
+                    })
+                ),
+        ];
         start.SetResult();
         await Task.WhenAll(readers.Append(writer)).WaitAsync(Watchdog);
         cache.TryGet(1, out TValue? final).Should().BeTrue();

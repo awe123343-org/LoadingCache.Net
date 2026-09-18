@@ -15,6 +15,7 @@ public sealed class ReadBufferBatchTests
     {
         using StripedReadBuffer<int> buffer = new(2, 4);
         await using BlockingTestHook publication = new(TestTimeout);
+        Action pausePublication = publication.Invoke;
         buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
         buffer.SetForcedCasFailuresForTesting(3);
         buffer.TryOffer(-1).Should().Be(ReadBufferOfferResult.Failed);
@@ -30,12 +31,13 @@ public sealed class ReadBufferBatchTests
             {
                 if (Interlocked.Increment(ref publications) == 1)
                 {
-                    publication.Invoke();
+                    pausePublication();
                 }
             }
         );
         Task<ReadBufferOfferResult> paused = Task.Factory.StartNew(
-            () => OfferOnStripe(buffer, 1, 0),
+            static state => OfferOnStripe((StripedReadBuffer<int>)state!, 1, 0),
+            buffer,
             CancellationToken.None,
             TaskCreationOptions.LongRunning,
             TaskScheduler.Default
@@ -131,8 +133,9 @@ public sealed class ReadBufferBatchTests
         }
 
         List<int> observed = [];
-        Action drain = () =>
-            buffer.DrainTo(
+        Action drain = buffer.Invoking(current =>
+        {
+            current.DrainTo(
                 value =>
                 {
                     observed.Add(value);
@@ -143,6 +146,7 @@ public sealed class ReadBufferBatchTests
                 },
                 4
             );
+        });
         drain.Should().Throw<InvalidOperationException>();
 
         ReadBufferStatistics interrupted = buffer.GetStatistics();
@@ -162,6 +166,7 @@ public sealed class ReadBufferBatchTests
     {
         using StripedReadBuffer<int> buffer = new(1, 4);
         await using BlockingTestHook publication = new(TestTimeout);
+        Action pausePublication = publication.Invoke;
         buffer.TryEnqueue(0).Should().BeTrue();
         int publishCalls = 0;
         buffer.SetHooksForTesting(
@@ -170,13 +175,14 @@ public sealed class ReadBufferBatchTests
             {
                 if (Interlocked.Increment(ref publishCalls) == 1)
                 {
-                    publication.Invoke();
+                    pausePublication();
                 }
             }
         );
 
         Task<bool> paused = Task.Factory.StartNew(
-            () => buffer.TryEnqueue(1),
+            static state => ((StripedReadBuffer<int>)state!).TryEnqueue(1),
+            buffer,
             CancellationToken.None,
             TaskCreationOptions.LongRunning,
             TaskScheduler.Default
@@ -223,44 +229,52 @@ public sealed class ReadBufferBatchTests
         bool recordStatistics
     )
     {
-        using StripedReadBuffer<object> buffer = new(1, 4, recordStatistics);
-        await using BlockingTestHook publication = new(TestTimeout);
-        WeakReference<object> queued = EnqueueCollectibleValue(buffer);
-        buffer.SetHooksForTesting(null, publication.Invoke);
-        Task<bool> paused = Task.Factory.StartNew(
-            () => buffer.TryEnqueue(new object()),
-            CancellationToken.None,
-            TaskCreationOptions.LongRunning,
-            TaskScheduler.Default
-        );
+        StripedReadBuffer<object> buffer = new(1, 4, recordStatistics);
         try
         {
-            await publication.Entered.WaitAsync(TestTimeout);
-            buffer.Dispose();
-
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            GC.Collect();
-            queued.TryGetTarget(out _).Should().BeFalse();
-            paused.IsCompleted.Should().BeFalse();
-
-            publication.Release();
-            (await paused.WaitAsync(TestTimeout)).Should().BeFalse();
-            buffer.GetStatistics().Queued.Should().Be(0);
-            publication.TimedOut.Should().BeFalse();
-            GC.KeepAlive(buffer);
-        }
-        finally
-        {
-            publication.Release();
+            await using BlockingTestHook publication = new(TestTimeout);
+            WeakReference<object> queued = EnqueueCollectibleValue(buffer);
+            buffer.SetHooksForTesting(null, publication.Invoke);
+            Task<bool> paused = Task.Factory.StartNew(
+                static state => ((StripedReadBuffer<object>)state!).TryEnqueue(new object()),
+                buffer,
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default
+            );
             try
             {
-                await paused.WaitAsync(TestTimeout);
+                await publication.Entered.WaitAsync(TestTimeout);
+                buffer.Dispose();
+
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+                queued.TryGetTarget(out _).Should().BeFalse();
+                paused.IsCompleted.Should().BeFalse();
+
+                publication.Release();
+                (await paused.WaitAsync(TestTimeout)).Should().BeFalse();
+                buffer.GetStatistics().Queued.Should().Be(0);
+                publication.TimedOut.Should().BeFalse();
+                GC.KeepAlive(buffer);
             }
             finally
             {
-                buffer.SetHooksForTesting(null, null);
+                publication.Release();
+                try
+                {
+                    await paused.WaitAsync(TestTimeout);
+                }
+                finally
+                {
+                    buffer.SetHooksForTesting(null, null);
+                }
             }
+        }
+        finally
+        {
+            buffer.Dispose();
         }
     }
 

@@ -20,6 +20,12 @@
             Link="ProbeCleanup.cs"
         />
         <ProjectReference Include="../../src/LoadingCache/LoadingCache.csproj" />
+        <!-- IDE-only annotations document generated record equality. -->
+        <PackageReference
+            Include="JetBrains.Annotations"
+            PrivateAssets="all"
+            IncludeAssets="compile"
+        />
         <PackageReference Include="Microsoft.NET.Test.Sdk" PrivateAssets="all" />
         <PackageReference Include="NUnit" PrivateAssets="all" />
         <PackageReference Include="NUnit3TestAdapter" PrivateAssets="all" />

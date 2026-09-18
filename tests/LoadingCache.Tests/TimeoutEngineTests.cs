@@ -15,11 +15,11 @@ public sealed class TimeoutEngineTests
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
         var entered = NewSignal();
         var releaseLate = NewSignal<string>();
-        int loads = 0;
+        var loads = new System.Runtime.CompilerServices.StrongBox<int>();
         var loader = new TestLoader(
             (_, _) =>
             {
-                int call = Interlocked.Increment(ref loads);
+                int call = Interlocked.Increment(ref loads.Value);
                 if (call != 1)
                 {
                     return Task.FromResult("fresh");
@@ -63,7 +63,7 @@ public sealed class TimeoutEngineTests
         cache.TryGet(1, out _).Should().BeFalse();
 
         (await cache.GetAsync(1)).Should().Be("fresh");
-        Volatile.Read(ref loads).Should().Be(2);
+        Volatile.Read(ref loads.Value).Should().Be(2);
     }
 
     [Test]
@@ -72,12 +72,12 @@ public sealed class TimeoutEngineTests
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
         var reloadEntered = NewSignal();
         var releaseLate = NewSignal<string>();
-        int reloads = 0;
+        var reloads = new System.Runtime.CompilerServices.StrongBox<int>();
         var loader = new TestLoader(
             (_, _) => Task.FromResult("old"),
             (_, _, _) =>
             {
-                int call = Interlocked.Increment(ref reloads);
+                int call = Interlocked.Increment(ref reloads.Value);
                 if (call != 1)
                 {
                     return Task.FromResult("new");
@@ -120,7 +120,7 @@ public sealed class TimeoutEngineTests
         releaseLate.SetResult("late");
         await Eventually(() => cache.GetStatistics().InFlightLoads == 0);
         (await cache.RefreshAsync(1).AsTask().WaitAsync(Watchdog)).Should().Be("new");
-        Volatile.Read(ref reloads).Should().Be(2);
+        Volatile.Read(ref reloads.Value).Should().Be(2);
     }
 
     [Test]
@@ -162,7 +162,7 @@ public sealed class TimeoutEngineTests
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
         var reloadEntered = NewSignal();
         var releaseReload = NewSignal<string>();
-        int reloads = 0;
+        var reloads = new System.Runtime.CompilerServices.StrongBox<int>();
         var policy = new ThrowingPublishPolicy();
         var engine = new CacheEngine<int, string>(
             new CacheEngineOptions<int, string>
@@ -179,7 +179,7 @@ public sealed class TimeoutEngineTests
             (_, _) => Task.FromResult("old"),
             (_, _, _) =>
             {
-                if (Interlocked.Increment(ref reloads) != 1)
+                if (Interlocked.Increment(ref reloads.Value) != 1)
                 {
                     return Task.FromResult("retry");
                 }
@@ -206,7 +206,7 @@ public sealed class TimeoutEngineTests
         oldValue.Should().Be("old");
         cache.TryGetTask(1, out Task<string>? rolledBackTask).Should().BeTrue();
         rolledBackTask.Should().BeSameAs(oldTask);
-        (await rolledBackTask!).Should().Be("old");
+        (await rolledBackTask).Should().Be("old");
 
         Task<string> retry = cache.RefreshAsync(1).AsTask();
         (await retry.WaitAsync(Watchdog)).Should().Be("retry");
@@ -214,8 +214,8 @@ public sealed class TimeoutEngineTests
         retriedValue.Should().Be("retry");
         cache.TryGetTask(1, out Task<string>? retriedTask).Should().BeTrue();
         retriedTask.Should().NotBeSameAs(oldTask);
-        (await retriedTask!).Should().Be("retry");
-        Volatile.Read(ref reloads).Should().Be(2);
+        (await retriedTask).Should().Be("retry");
+        Volatile.Read(ref reloads.Value).Should().Be(2);
     }
 
     [Test]
@@ -274,6 +274,7 @@ public sealed class TimeoutEngineTests
         var coldTimerArmEntered = NewSignal();
         var reloadEntered = NewSignal();
         ManualResetEventSlim releaseColdTimerArm = new(false);
+        Func<TimeSpan, bool> waitForColdTimerArmRelease = releaseColdTimerArm.Wait;
         int timerArms = 0;
         var hooks = new LoadingCacheTestHooks
         {
@@ -286,7 +287,7 @@ public sealed class TimeoutEngineTests
                 }
 
                 coldTimerArmEntered.TrySetResult(true);
-                if (!releaseColdTimerArm.Wait(Watchdog))
+                if (!waitForColdTimerArmRelease(Watchdog))
                 {
                     throw new TimeoutException("The cold timer arm was not released.");
                 }
@@ -315,14 +316,31 @@ public sealed class TimeoutEngineTests
                     return Task.FromResult("new");
                 }
             );
-            Task<string> cold = Task.Run(() => cache.GetAsync(1).AsTask());
+            Task<string> cold = Task
+                .Factory.StartNew(
+                    static state => ((IAsyncLoadingCache<int, string>)state!).GetAsync(1).AsTask(),
+                    cache,
+                    CancellationToken.None,
+                    TaskCreationOptions.DenyChildAttach,
+                    TaskScheduler.Default
+                )
+                .Unwrap();
             Task<string>? refresh = null;
             try
             {
                 coldResult.SetResult("old");
                 await coldTimerArmEntered.Task.WaitAsync(Watchdog);
 
-                refresh = Task.Run(() => cache.RefreshAsync(1).AsTask());
+                refresh = Task
+                    .Factory.StartNew(
+                        static state =>
+                            ((IAsyncLoadingCache<int, string>)state!).RefreshAsync(1).AsTask(),
+                        cache,
+                        CancellationToken.None,
+                        TaskCreationOptions.DenyChildAttach,
+                        TaskScheduler.Default
+                    )
+                    .Unwrap();
                 await reloadEntered.Task.WaitAsync(Watchdog);
 
                 releaseColdTimerArm.Set();

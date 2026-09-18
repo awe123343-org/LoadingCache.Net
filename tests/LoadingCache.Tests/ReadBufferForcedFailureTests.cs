@@ -145,6 +145,8 @@ public sealed class ReadBufferForcedFailureTests
                             case ReadBufferOfferResult.Failed:
                                 failed++;
                                 break;
+                            case ReadBufferOfferResult.Full:
+                            case ReadBufferOfferResult.Shutdown:
                             default:
                                 unexpected++;
                                 break;
@@ -165,7 +167,7 @@ public sealed class ReadBufferForcedFailureTests
             start.SignalAndWait(TestTimeout).Should().BeTrue();
             WorkerResult[] results = await completion.WaitAsync(TestTimeout);
             int failed = results.Sum(static result => result.Failed);
-            List<int> accepted = results.SelectMany(static result => result.Accepted).ToList();
+            List<int> accepted = [.. results.SelectMany(static result => result.Accepted)];
             results.Sum(static result => result.Unexpected).Should().Be(0);
             failed.Should().BeGreaterThan(0);
             accepted.Should().NotBeEmpty();

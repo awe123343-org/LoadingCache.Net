@@ -94,7 +94,7 @@ internal static class AllocationTestProcess
     {
         if (args is not ["--allocation-check", var scenario])
         {
-            Console.Error.WriteLine(
+            await Console.Error.WriteLineAsync(
                 "Use dotnet test for the suite, or --allocation-check <scenario>."
             );
             return 2;
@@ -162,7 +162,7 @@ internal static class AllocationTestProcess
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine(exception.ToString());
+            await Console.Error.WriteLineAsync(exception.ToString());
             Console.WriteLine(
                 JsonSerializer.Serialize(
                     new Report(scenario, Environment.Version.ToString(), false)

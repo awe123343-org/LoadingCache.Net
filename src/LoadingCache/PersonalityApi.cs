@@ -144,10 +144,6 @@ public class Cache<TKey, TValue> : ICache<TKey, TValue>
         Engine = engine;
     }
 
-    internal IEqualityComparer<TKey> KeyComparer => Engine.Comparer;
-
-    internal void EnsureUsable() => Engine.EnsureUsable();
-
     /// <summary>Attempts to read a resident value.</summary>
     public bool TryGet(TKey key, [MaybeNullWhen(false)] out TValue value) =>
         Engine.TryGet(key, out value);

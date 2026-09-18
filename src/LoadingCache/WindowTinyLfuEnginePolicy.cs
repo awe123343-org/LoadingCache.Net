@@ -320,10 +320,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
     /// <summary>
     /// Returns whether correctness-relevant policy writes are waiting for the owner.
     /// </summary>
-    public bool HasPendingWrites
-    {
-        get => _pendingWrites.Queued != 0;
-    }
+    public bool HasPendingWrites => _pendingWrites.Queued != 0;
 
     /// <summary>
     /// Drains one bounded snapshot of queued writes.  The caller must invoke this only at an engine
@@ -393,12 +390,11 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
                 }
             }
 
-            foreach (KeyValuePair<EngineEntryToken, int> pair in observedPendingWrites)
+            if (
+                observedPendingWrites.Any(static pair => pair.Key.PendingPolicyWrites != pair.Value)
+            )
             {
-                if (pair.Key.PendingPolicyWrites != pair.Value)
-                {
-                    throw new InvalidOperationException("Policy pending-write metadata is stale.");
-                }
+                throw new InvalidOperationException("Policy pending-write metadata is stale.");
             }
 
             if (_nodes.Count != _policy.ResidentCount)
@@ -415,9 +411,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
                     throw new InvalidOperationException("A policy node has an invalid token.");
                 }
 
-                int observedCount = observedPendingWrites.TryGetValue(token, out int count)
-                    ? count
-                    : 0;
+                int observedCount = observedPendingWrites.GetValueOrDefault(token);
                 if (
                     !node.IsAlive
                     || !ReferenceEquals(token.Node, node)
@@ -475,17 +469,19 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
 
             // A write may never be dropped. Removing a bounded older batch creates a slot, and
             // applying it before retrying preserves the FIFO order of events already accepted.
-            if (DrainWritesLocked(MaximumWriteDrainPerPass) == 0)
+            if (DrainWritesLocked(MaximumWriteDrainPerPass) != 0)
             {
-                if (_pendingWrites.IsDisposed)
-                {
-                    return;
-                }
-
-                throw new InvalidOperationException(
-                    "The reliable policy write buffer rejected an event without reporting a queued event."
-                );
+                continue;
             }
+
+            if (_pendingWrites.IsDisposed)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                "The reliable policy write buffer rejected an event without reporting a queued event."
+            );
         }
     }
 
@@ -501,23 +497,25 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
 
     private long NextWriteSequenceLocked()
     {
-        if (_nextWriteSequence == long.MaxValue)
+        if (_nextWriteSequence != long.MaxValue)
         {
-            // Sequence comparisons are only meaningful while an old sequence remains live. A
-            // quiescent flush and reset make the wrap explicit instead of allowing a signed
-            // overflow to turn a stale event into a newer one.
-            FlushWritesLocked();
-            foreach (PolicyNode<object> node in _nodes)
-            {
-                node.AppliedPolicyWriteSequence = 0;
-                if (node.Value is EngineEntryToken token)
-                {
-                    token.LastPolicyWriteSequence = 0;
-                }
-            }
-
-            _nextWriteSequence = 0;
+            return ++_nextWriteSequence;
         }
+
+        // Sequence comparisons are only meaningful while an old sequence remains live. A
+        // quiescent flush and reset make the wrap explicit instead of allowing a signed
+        // overflow to turn a stale event into a newer one.
+        FlushWritesLocked();
+        foreach (PolicyNode<object> node in _nodes)
+        {
+            node.AppliedPolicyWriteSequence = 0;
+            if (node.Value is EngineEntryToken token)
+            {
+                token.LastPolicyWriteSequence = 0;
+            }
+        }
+
+        _nextWriteSequence = 0;
 
         return ++_nextWriteSequence;
     }
@@ -527,11 +525,13 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
         int batchSize = Math.Min(_pendingWrites.Queued, budget);
         if (batchSize == 0)
         {
-            if (_evictionPending)
+            if (!_evictionPending)
             {
-                Process(_policy.EvictEntries());
-                _evictionPending = false;
+                return 0;
             }
+
+            Process(_policy.EvictEntries());
+            _evictionPending = false;
 
             return 0;
         }
@@ -620,8 +620,10 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
             return;
         }
 
-        node = new PolicyNode<object>(token, write.Weight, token.Hash);
-        node.AppliedPolicyWriteSequence = write.Sequence;
+        node = new PolicyNode<object>(token, write.Weight, token.Hash)
+        {
+            AppliedPolicyWriteSequence = write.Sequence,
+        };
         token.Node = node;
         _nodes.Add(node);
         IReadOnlyList<PolicyNode<object>> added;
@@ -760,16 +762,18 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
             }
 
             _nodes.Remove(node);
-            if (node.AppliedPolicyWriteSequence >= token.LastPolicyWriteSequence)
+            if (node.AppliedPolicyWriteSequence < token.LastPolicyWriteSequence)
             {
-                try
-                {
-                    _evicted(token.Entry);
-                }
-                catch (Exception exception)
-                {
-                    firstFailure ??= exception;
-                }
+                continue;
+            }
+
+            try
+            {
+                _evicted(token.Entry);
+            }
+            catch (Exception exception)
+            {
+                firstFailure ??= exception;
             }
         }
 

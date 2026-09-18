@@ -21,31 +21,14 @@ if (scenario is not ("resident" or "mixed" or "fan-in"))
 
 using var callerSource = new CancellationTokenSource();
 CancellationToken callerToken = cancelable ? callerSource.Token : CancellationToken.None;
-long loaderInvocations = 0;
-TaskCompletionSource<bool>? releaseLoad = null;
+LoaderState loader = new(scenario);
 var builder = CacheBuilder.Create<int, int>().MaximumSize(capacity).MaxConcurrentLoads(concurrency);
 if (statistics)
 {
     builder.RecordStatistics();
 }
 
-IAsyncLoadingCache<int, int> cache = builder.BuildAsyncLoading(
-    async (key, _) =>
-    {
-        Interlocked.Increment(ref loaderInvocations);
-        if (scenario == "fan-in")
-        {
-            await Volatile.Read(ref releaseLoad)!.Task.ConfigureAwait(false);
-        }
-        else
-        {
-            // A genuine asynchronous completion without external network latency.
-            // It models scheduler work, not an RPC service or cache-only overhead.
-            await Task.Yield();
-        }
-        return key;
-    }
-);
+IAsyncLoadingCache<int, int> cache = builder.BuildAsyncLoading(loader.LoadAsync);
 
 long[] durations = new long[operations];
 TaskCompletionSource<bool>? startGate = null;
@@ -75,7 +58,7 @@ try
         {
             cache.Invalidate(0);
             Volatile.Write(
-                ref releaseLoad,
+                ref loader.ReleaseLoad,
                 new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously)
             );
             int count = Math.Min(concurrency, operations - start);
@@ -88,7 +71,7 @@ try
                 requests[index] = Measure(cache, callerToken, durations, start + index, 0);
             }
             TaskCompletionSource<bool> release =
-                Volatile.Read(ref releaseLoad)
+                Volatile.Read(ref loader.ReleaseLoad)
                 ?? throw new InvalidOperationException("Fan-in loader gate was not installed.");
             release.TrySetResult(true);
             await Task.WhenAll(requests).WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
@@ -129,7 +112,7 @@ try
             .Select(generation => GC.CollectionCount(generation) - collectionsBefore[generation]),
     ];
     cache.CleanUp();
-    long actualLoads = Interlocked.Read(ref loaderInvocations);
+    long actualLoads = Interlocked.Read(ref loader.Invocations);
     long? expectedLoads = scenario switch
     {
         "resident" => 0,
@@ -203,7 +186,7 @@ try
 finally
 {
     startGate?.TrySetResult(true);
-    Volatile.Read(ref releaseLoad)?.TrySetResult(true);
+    Volatile.Read(ref loader.ReleaseLoad)?.TrySetResult(true);
     try
     {
         if (pendingRequests.Length > 0)
@@ -280,4 +263,25 @@ int ReadInt(string option, int fallback, int minimum, int maximum)
         );
     }
     return value;
+}
+
+internal sealed class LoaderState(string scenario)
+{
+    internal long Invocations;
+    internal TaskCompletionSource<bool>? ReleaseLoad;
+
+    internal async Task<int> LoadAsync(int key, CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref Invocations);
+        if (scenario == "fan-in")
+        {
+            await Volatile.Read(ref ReleaseLoad)!.Task.ConfigureAwait(false);
+        }
+        else
+        {
+            // Model scheduler work, not an RPC service or cache-only overhead.
+            await Task.Yield();
+        }
+        return key;
+    }
 }

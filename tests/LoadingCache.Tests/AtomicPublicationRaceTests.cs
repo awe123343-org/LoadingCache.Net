@@ -1,4 +1,5 @@
 using FluentAssertions;
+using JetBrains.Annotations;
 using LoadingCache.Maintenance;
 using Microsoft.Extensions.Time.Testing;
 using NUnit.Framework;
@@ -84,7 +85,7 @@ public sealed class AtomicPublicationRaceTests
     [TestCase(false)]
     [TestCase(true)]
     public Task ExplicitReferenceRefreshPublicationSurvivesLaterSet(bool fixedExpiration) =>
-        VerifyRefreshPublication(new Payload(1), new Payload(2), new Payload(3), fixedExpiration);
+        VerifyRefreshPublication(new Payload(), new Payload(), new Payload(), fixedExpiration);
 
     [TestCase(false)]
     [TestCase(true)]
@@ -124,7 +125,16 @@ public sealed class AtomicPublicationRaceTests
         );
         cache.Set(1, oldValue);
         cache.TryGetTask(1, out Task<TValue>? oldTask).Should().BeTrue();
-        Task<TValue> refresh = Task.Run(async () => await cache.RefreshAsync(1));
+        Task<TValue> refresh = Task
+            .Factory.StartNew(
+                static async state =>
+                    await ((AsyncLoadingCache<int, TValue>)state!).RefreshAsync(1),
+                cache,
+                CancellationToken.None,
+                TaskCreationOptions.DenyChildAttach,
+                TaskScheduler.Default
+            )
+            .Unwrap();
         try
         {
             await completion.Entered.WaitAsync(Watchdog);
@@ -163,9 +173,9 @@ public sealed class AtomicPublicationRaceTests
         bool fixedExpiration
     ) =>
         VerifyRefreshRollback(
-            new Payload(1),
-            new Payload(2),
-            new Payload(3),
+            new Payload(),
+            new Payload(),
+            new Payload(),
             replaceBeforeFailure,
             fixedExpiration
         );
@@ -201,9 +211,9 @@ public sealed class AtomicPublicationRaceTests
     [TestCase(true)]
     public Task AccessExpirationReferenceRefreshFailureFencesLaterSet(bool replaceBeforeFailure) =>
         VerifyRefreshRollback(
-            new Payload(1),
-            new Payload(2),
-            new Payload(3),
+            new Payload(),
+            new Payload(),
+            new Payload(),
             replaceBeforeFailure,
             fixedExpiration: false,
             accessExpiration: true
@@ -257,8 +267,17 @@ public sealed class AtomicPublicationRaceTests
         );
         cache.Set(1, oldValue);
         cache.TryGetTask(1, out Task<TValue>? oldTask).Should().BeTrue();
-        Task<TValue> refresh = Task.Run(async () => await cache.RefreshAsync(1));
-        Task<TValue>? publishedTask = null;
+        Task<TValue> refresh = Task
+            .Factory.StartNew(
+                static async state =>
+                    await ((AsyncLoadingCache<int, TValue>)state!).RefreshAsync(1),
+                cache,
+                CancellationToken.None,
+                TaskCreationOptions.DenyChildAttach,
+                TaskScheduler.Default
+            )
+            .Unwrap();
+        Task<TValue>? publishedTask;
         try
         {
             await publication.Entered.WaitAsync(Watchdog);
@@ -289,7 +308,7 @@ public sealed class AtomicPublicationRaceTests
         }
 
         (await oldTask!).Should().Be(oldValue);
-        (await publishedTask!).Should().Be(refreshedValue);
+        (await publishedTask).Should().Be(refreshedValue);
         cache.TryGet(1, out TValue? final).Should().BeTrue();
         final.Should().Be(replacement);
         cache.CleanUp();
@@ -307,14 +326,23 @@ public sealed class AtomicPublicationRaceTests
             static (_, _) => Task.FromResult("refresh")
         );
         cache.Set(1, "old");
-        Task<string> refresh = Task.Run(async () => await cache.RefreshAsync(1));
-        MemoryPressureSnapshot? stale = null;
+        Task<string> refresh = Task
+            .Factory.StartNew(
+                static async state =>
+                    await ((AsyncLoadingCache<int, string>)state!).RefreshAsync(1),
+                cache,
+                CancellationToken.None,
+                TaskCreationOptions.DenyChildAttach,
+                TaskScheduler.Default
+            )
+            .Unwrap();
+        MemoryPressureSnapshot? stale;
         try
         {
             await publication.Entered.WaitAsync(Watchdog);
             stale = engine.CaptureMemoryPressureSnapshot(1, 1);
             stale.Should().NotBeNull();
-            stale!.Candidates.Should().ContainSingle();
+            stale.Candidates.Should().ContainSingle();
             cache.TryGet(1, out string? value).Should().BeTrue();
             value.Should().Be("refresh");
         }
@@ -328,7 +356,7 @@ public sealed class AtomicPublicationRaceTests
         cache.TryGet(1, out string? restored).Should().BeTrue();
         restored.Should().Be("old");
         cache.Set(1, "new");
-        engine.TrimForMemoryPressure(stale!).Should().Be(0);
+        engine.TrimForMemoryPressure(stale).Should().Be(0);
         cache.TryGet(1, out string? current).Should().BeTrue();
         current.Should().Be("new");
     }
@@ -338,6 +366,7 @@ public sealed class AtomicPublicationRaceTests
     {
         await using var publication = new BlockingTestHook(Watchdog);
         await using var transform = new BlockingTestHook(Watchdog);
+        Action pauseTransform = transform.Invoke;
         var engine = CreateEngine<string>(FailureHooks(publication));
         await using var cache = new AsyncLoadingCache<int, string>(
             engine,
@@ -346,7 +375,16 @@ public sealed class AtomicPublicationRaceTests
         using var manual = new Cache<int, string>(engine);
         SyncCacheDictionary<int, string> dictionary = manual.AsDictionary();
         cache.Set(1, "old");
-        Task<string> refresh = Task.Run(async () => await cache.RefreshAsync(1));
+        Task<string> refresh = Task
+            .Factory.StartNew(
+                static async state =>
+                    await ((AsyncLoadingCache<int, string>)state!).RefreshAsync(1),
+                cache,
+                CancellationToken.None,
+                TaskCreationOptions.DenyChildAttach,
+                TaskScheduler.Default
+            )
+            .Unwrap();
         Task<CacheMutation<string>>? compute = null;
         int callbacks = 0;
         try
@@ -360,7 +398,7 @@ public sealed class AtomicPublicationRaceTests
                         if (Interlocked.Increment(ref callbacks) == 1)
                         {
                             current.Value.Should().Be("refresh");
-                            transform.Invoke();
+                            pauseTransform();
                             return CacheMutation.Set("stale transform");
                         }
 
@@ -382,11 +420,8 @@ public sealed class AtomicPublicationRaceTests
         {
             publication.Release();
             transform.Release();
-            await ObserveControlledFailure(refresh);
-            if (compute is not null)
-            {
-                await compute.WaitAsync(Watchdog);
-            }
+            await Task.WhenAll(ObserveControlledFailure(refresh), compute ?? Task.CompletedTask)
+                .WaitAsync(Watchdog);
         }
 
         publication.TimedOut.Should().BeFalse();
@@ -399,6 +434,7 @@ public sealed class AtomicPublicationRaceTests
         await using var publication = new BlockingTestHook(Watchdog);
         await using var readExpiry = new BlockingTestHook(Watchdog);
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        Action pausePublication = publication.Invoke;
         int publications = 0;
         int reloads = 0;
         var engine = new CacheEngine<int, string>(
@@ -413,11 +449,13 @@ public sealed class AtomicPublicationRaceTests
                 {
                     AfterRefreshPublished = () =>
                     {
-                        if (Interlocked.Increment(ref publications) == 1)
+                        if (Interlocked.Increment(ref publications) != 1)
                         {
-                            publication.Invoke();
-                            throw new ControlledPublicationFailure();
+                            return;
                         }
+
+                        pausePublication();
+                        throw new ControlledPublicationFailure();
                     },
                 },
             }
@@ -431,17 +469,35 @@ public sealed class AtomicPublicationRaceTests
         );
         cache.Set(1, "old");
         long timestamp = clock.GetTimestamp();
-        Task<string> refresh = Task.Run(async () => await cache.RefreshAsync(1));
+        Task<string> refresh = Task
+            .Factory.StartNew(
+                static async state =>
+                    await ((AsyncLoadingCache<int, string>)state!).RefreshAsync(1),
+                cache,
+                CancellationToken.None,
+                TaskCreationOptions.DenyChildAttach,
+                TaskScheduler.Default
+            )
+            .Unwrap();
         Task<string>? reader = null;
         Task<string>? retry = null;
         try
         {
             await publication.Entered.WaitAsync(Watchdog);
-            reader = Task.Run(() =>
-            {
-                cache.TryGet(1, out string? value).Should().BeTrue();
-                return value!;
-            });
+            reader = Task.Factory.StartNew(
+                static state =>
+                {
+                    ((AsyncLoadingCache<int, string>)state!)
+                        .TryGet(1, out string? value)
+                        .Should()
+                        .BeTrue();
+                    return value!;
+                },
+                cache,
+                CancellationToken.None,
+                TaskCreationOptions.DenyChildAttach,
+                TaskScheduler.Default
+            );
             await readExpiry.Entered.WaitAsync(Watchdog);
             publication.Release();
             await ObserveControlledFailure(refresh);
@@ -463,15 +519,12 @@ public sealed class AtomicPublicationRaceTests
         {
             publication.Release();
             readExpiry.Release();
-            await ObserveControlledFailure(refresh);
-            if (reader is not null)
-            {
-                await reader.WaitAsync(Watchdog);
-            }
-            if (retry is not null)
-            {
-                await retry.WaitAsync(Watchdog);
-            }
+            await Task.WhenAll(
+                    ObserveControlledFailure(refresh),
+                    reader ?? Task.CompletedTask,
+                    retry ?? Task.CompletedTask
+                )
+                .WaitAsync(Watchdog);
         }
 
         publication.TimedOut.Should().BeFalse();
@@ -497,11 +550,17 @@ public sealed class AtomicPublicationRaceTests
         cache.Put(1, "old");
         cache.CleanUp();
         policy.BlockNextAccess();
-        Task<string> reader = Task.Run(() =>
-        {
-            cache.TryGet(1, out string? value).Should().BeTrue();
-            return value!;
-        });
+        Task<string> reader = Task.Factory.StartNew(
+            static state =>
+            {
+                ((Cache<int, string>)state!).TryGet(1, out string? value).Should().BeTrue();
+                return value!;
+            },
+            cache,
+            CancellationToken.None,
+            TaskCreationOptions.DenyChildAttach,
+            TaskScheduler.Default
+        );
         try
         {
             await access.Entered.WaitAsync(Watchdog);
@@ -621,13 +680,14 @@ public sealed class AtomicPublicationRaceTests
 
     private readonly record struct TaskObservation<TValue>(Task<TValue> Task);
 
-    private readonly record struct LargeValue(long First, long Second, long Third, long Fourth);
+    private readonly record struct LargeValue(
+        [property: UsedImplicitly] long First,
+        [property: UsedImplicitly] long Second,
+        [property: UsedImplicitly] long Third,
+        [property: UsedImplicitly] long Fourth
+    );
 
-    private sealed class Payload(int version)
-    {
-        public int Version { get; } = version;
-        public int Complement { get; } = ~version;
-    }
+    private sealed class Payload;
 
     private sealed class ControlledPublicationFailure : Exception;
 
@@ -641,13 +701,13 @@ public sealed class AtomicPublicationRaceTests
 
         public TimeSpan ExpireAfterRead(int key, string value, TimeSpan currentDuration)
         {
-            if (value == "failed refresh")
+            if (value != "failed refresh")
             {
-                readExpiry.Invoke();
-                return TimeSpan.Zero;
+                return currentDuration;
             }
 
-            return currentDuration;
+            readExpiry.Invoke();
+            return TimeSpan.Zero;
         }
     }
 

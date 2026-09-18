@@ -11,46 +11,56 @@ public sealed class ValueOwnershipTests
     [TestCase(true)]
     public void RejectedDisposalRemainsBoundedAndCanBeRetriedAfterShutdown(bool throws)
     {
-        bool reject = true;
+        var reject = new System.Runtime.CompilerServices.StrongBox<bool>(true);
         Action? scheduled = null;
         var value = new DisposableValue();
-        using var ownership = new ValueOwnership<DisposableValue>(
+        var ownership = new ValueOwnership<DisposableValue>(
             1,
             static item => item.Dispose(),
             scheduleDisposal: work =>
             {
-                if (reject)
+                if (reject.Value)
                 {
-                    if (throws)
-                        throw new InvalidOperationException("controlled rejection");
-                    return false;
+                    return throws
+                        ? throw new InvalidOperationException("controlled rejection")
+                        : false;
                 }
                 scheduled = work;
                 return true;
             }
         );
-        var token = ownership.Publish(value);
-        ownership.Retire(token);
-        ownership.GetStatistics().ActiveValueCount.Should().Be(1);
-        ownership.GetStatistics().PendingDisposals.Should().Be(1);
-        ownership.GetStatistics().LastDisposalError.Should().BeOfType<InvalidOperationException>();
-        value.DisposeCount.Should().Be(0);
-        FluentActions
-            .Invoking(() => ownership.Publish(new DisposableValue()))
-            .Should()
-            .Throw<ValueOwnershipCapacityException>();
-        ownership.Dispose();
+        try
+        {
+            var token = ownership.Publish(value);
+            ownership.Retire(token);
+            ownership.GetStatistics().ActiveValueCount.Should().Be(1);
+            ownership.GetStatistics().PendingDisposals.Should().Be(1);
+            ownership
+                .GetStatistics()
+                .LastDisposalError.Should()
+                .BeOfType<InvalidOperationException>();
+            value.DisposeCount.Should().Be(0);
+            ownership
+                .Invoking(static current => current.Publish(new DisposableValue()))
+                .Should()
+                .Throw<ValueOwnershipCapacityException>();
+            ownership.Dispose();
 
-        reject = false;
-        ownership.RetryPendingDisposals().Should().Be(1);
-        ownership.RetryPendingDisposals().Should().Be(0);
-        scheduled.Should().NotBeNull();
-        scheduled!();
+            reject.Value = false;
+            ownership.RetryPendingDisposals().Should().Be(1);
+            ownership.RetryPendingDisposals().Should().Be(0);
+            scheduled.Should().NotBeNull();
+            scheduled!();
 
-        value.DisposeCount.Should().Be(1);
-        ownership.GetStatistics().PendingDisposals.Should().Be(0);
-        ownership.GetStatistics().ActiveValueCount.Should().Be(0);
-        ownership.RetryPendingDisposals().Should().Be(0);
+            value.DisposeCount.Should().Be(1);
+            ownership.GetStatistics().PendingDisposals.Should().Be(0);
+            ownership.GetStatistics().ActiveValueCount.Should().Be(0);
+            ownership.RetryPendingDisposals().Should().Be(0);
+        }
+        finally
+        {
+            ownership.Dispose();
+        }
     }
 
     [Test]
@@ -126,17 +136,43 @@ public sealed class ValueOwnershipTests
         );
         ValueOwnership<DisposableValue>.Token token = ownership.Publish(value);
 
-        Task retire = Task.Run(() => ownership.Retire(token));
+        Task retire = Task.Factory.StartNew(
+            static state =>
+            {
+                (
+                    ValueOwnership<DisposableValue> current,
+                    ValueOwnership<DisposableValue>.Token retired
+                ) = ((ValueOwnership<DisposableValue>, ValueOwnership<DisposableValue>.Token))
+                    state!;
+                current.Retire(retired);
+            },
+            (ownership, token),
+            CancellationToken.None,
+            TaskCreationOptions.DenyChildAttach,
+            TaskScheduler.Default
+        );
 
-        await callbackEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        await retire.WaitAsync(TimeSpan.FromSeconds(2));
-        value.DisposeCount.Should().Be(0);
-        releaseCallback.SetResult(null);
-        SpinWait
-            .SpinUntil(() => value.DisposeCount == 1, TimeSpan.FromSeconds(2))
-            .Should()
-            .BeTrue();
-        value.DisposeCount.Should().Be(1);
+        try
+        {
+            await callbackEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            await retire.WaitAsync(TimeSpan.FromSeconds(2));
+            value.DisposeCount.Should().Be(0);
+            releaseCallback.SetResult(null);
+            SpinWait
+                .SpinUntil(() => value.DisposeCount == 1, TimeSpan.FromSeconds(2))
+                .Should()
+                .BeTrue();
+            value.DisposeCount.Should().Be(1);
+        }
+        finally
+        {
+            releaseCallback.TrySetResult(null);
+            await retire.WaitAsync(TimeSpan.FromSeconds(2));
+            SpinWait
+                .SpinUntil(() => value.DisposeCount == 1, TimeSpan.FromSeconds(2))
+                .Should()
+                .BeTrue();
+        }
     }
 
     [Test]
@@ -229,7 +265,10 @@ public sealed class ValueOwnershipTests
         ownership.Retire(token);
 
         await disposed.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Action republish = () => ownership.Publish(value);
+        Action republish = ownership.Invoking(current =>
+        {
+            current.Publish(value);
+        });
         republish.Should().Throw<ValueOwnershipCapacityException>();
     }
 

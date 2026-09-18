@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using FluentAssertions;
+using JetBrains.Annotations;
 using LoadingCache.Maintenance;
 using NUnit.Framework;
 
@@ -369,17 +370,29 @@ public sealed class MaintenanceTests
             {
                 int producerId = producer;
                 producers.Add(
-                    Task.Run(() =>
-                    {
-                        for (int sequence = 0; sequence < eventsPerProducer; sequence++)
+                    Task.Factory.StartNew(
+                        static state =>
                         {
-                            ReadEvent value = new(producerId, sequence);
-                            if (buffer.TryEnqueue(value))
+                            (
+                                StripedReadBuffer<ReadEvent> current,
+                                ConcurrentBag<ReadEvent> results,
+                                int workerId
+                            ) = ((StripedReadBuffer<ReadEvent>, ConcurrentBag<ReadEvent>, int))
+                                state!;
+                            for (int sequence = 0; sequence < eventsPerProducer; sequence++)
                             {
-                                accepted.Add(value);
+                                ReadEvent value = new(workerId, sequence);
+                                if (current.TryEnqueue(value))
+                                {
+                                    results.Add(value);
+                                }
                             }
-                        }
-                    })
+                        },
+                        (buffer, accepted, producerId),
+                        CancellationToken.None,
+                        TaskCreationOptions.DenyChildAttach,
+                        TaskScheduler.Default
+                    )
                 );
             }
 
@@ -441,7 +454,13 @@ public sealed class MaintenanceTests
                     Task.Factory.StartNew(
                         static state =>
                         {
-                            var (buffer, start, producerId, eventsPerProducer, timeout) = ((
+                            (
+                                StripedReadBuffer<int> buffer,
+                                Barrier start,
+                                int producerId,
+                                int eventsPerProducer,
+                                TimeSpan timeout
+                            ) = ((
                                 StripedReadBuffer<int> Buffer,
                                 Barrier Start,
                                 int ProducerId,
@@ -472,7 +491,7 @@ public sealed class MaintenanceTests
                 Task.Factory.StartNew(
                     static state =>
                     {
-                        var (buffer, start, timeout) = ((
+                        (StripedReadBuffer<int> buffer, Barrier start, TimeSpan timeout) = ((
                             StripedReadBuffer<int> Buffer,
                             Barrier Start,
                             TimeSpan Timeout
@@ -553,29 +572,53 @@ public sealed class MaintenanceTests
             Task? disposer = null;
             try
             {
-                consumer = Task.Run(() =>
-                {
-                    if (!start.SignalAndWait(TestTimeout))
+                consumer = Task.Factory.StartNew(
+                    static state =>
                     {
-                        throw new TimeoutException(
-                            "The maintenance consumer did not meet its peer."
-                        );
-                    }
+                        (StripedReadBuffer<int> current, Barrier gate) = ((
+                            StripedReadBuffer<int>,
+                            Barrier
+                        ))
+                            state!;
+                        if (!gate.SignalAndWait(TestTimeout))
+                        {
+                            throw new TimeoutException(
+                                "The maintenance consumer did not meet its peer."
+                            );
+                        }
 
-                    while (buffer.TryRead(out _))
+                        while (current.TryRead(out _))
+                        {
+                            Thread.Yield();
+                        }
+                    },
+                    (buffer, start),
+                    CancellationToken.None,
+                    TaskCreationOptions.DenyChildAttach,
+                    TaskScheduler.Default
+                );
+                disposer = Task.Factory.StartNew(
+                    static state =>
                     {
-                        Thread.Yield();
-                    }
-                });
-                disposer = Task.Run(() =>
-                {
-                    if (!start.SignalAndWait(TestTimeout))
-                    {
-                        throw new TimeoutException("The buffer disposer did not meet its peer.");
-                    }
+                        (StripedReadBuffer<int> current, Barrier gate) = ((
+                            StripedReadBuffer<int>,
+                            Barrier
+                        ))
+                            state!;
+                        if (!gate.SignalAndWait(TestTimeout))
+                        {
+                            throw new TimeoutException(
+                                "The buffer disposer did not meet its peer."
+                            );
+                        }
 
-                    buffer.Dispose();
-                });
+                        current.Dispose();
+                    },
+                    (buffer, start),
+                    CancellationToken.None,
+                    TaskCreationOptions.DenyChildAttach,
+                    TaskScheduler.Default
+                );
 
                 await Task.WhenAll(consumer, disposer)
                     .WaitAsync(TestTimeout, CancellationToken.None);
@@ -778,18 +821,13 @@ public sealed class MaintenanceTests
     public void CleanUpReturnsMoreWorkAfterBudgetAndRequestDuringDrainCannotExtendIt()
     {
         ManualMaintenanceScheduler scheduler = new();
-        MaintenanceCoordinator coordinator = null!;
-        int passes = 0;
-        coordinator = new MaintenanceCoordinator(
-            () =>
-            {
-                Interlocked.Increment(ref passes);
-                coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
-                return true;
-            },
+        var drain = new ReentrantDrain();
+        var coordinator = new MaintenanceCoordinator(
+            drain.Invoke,
             scheduler,
             maxPassesPerInvocation: 2
         );
+        drain.Coordinator = coordinator;
         using (coordinator)
         {
             MaintenanceCleanupResult first = coordinator.CleanUp();
@@ -797,13 +835,13 @@ public sealed class MaintenanceTests
             first.Performed.Should().BeTrue();
             first.MoreWork.Should().BeTrue();
             first.FallbackRequired.Should().BeFalse();
-            Volatile.Read(ref passes).Should().Be(2);
+            drain.Passes.Should().Be(2);
             coordinator.State.Should().Be(MaintenanceCoordinatorState.Scheduled);
             scheduler.Pending.Should().Be(1);
 
             scheduler.RunNext();
 
-            Volatile.Read(ref passes).Should().Be(4);
+            drain.Passes.Should().Be(4);
             coordinator.State.Should().Be(MaintenanceCoordinatorState.Scheduled);
             coordinator.GetStatistics().BudgetExhaustions.Should().Be(2);
         }
@@ -890,12 +928,12 @@ public sealed class MaintenanceTests
         ];
         string?[] observedContexts = new string?[4];
         int passes = 0;
-        int activeDrains = 0;
+        var activeDrains = new System.Runtime.CompilerServices.StrongBox<int>();
         int overlappingDrains = 0;
-        using MaintenanceCoordinator coordinator = new(
+        MaintenanceCoordinator coordinator = new(
             () =>
             {
-                if (Interlocked.Increment(ref activeDrains) != 1)
+                if (Interlocked.Increment(ref activeDrains.Value) != 1)
                 {
                     Interlocked.Increment(ref overlappingDrains);
                 }
@@ -905,66 +943,72 @@ public sealed class MaintenanceTests
                     int pass = Interlocked.Increment(ref passes) - 1;
                     observedContexts[pass] = Context.Value;
                     Context.Value = "drain-context";
-                    if (pass % 2 == 0)
+                    if (pass % 2 != 0)
                     {
-                        entered[pass / 2].TrySetResult(true);
-                        release[pass / 2]
-                            .Task.WaitAsync(TestTimeout, CancellationToken.None)
-                            .GetAwaiter()
-                            .GetResult();
-                        return true;
+                        return false;
                     }
 
-                    return false;
+                    entered[pass / 2].TrySetResult(true);
+                    release[pass / 2]
+                        .Task.WaitAsync(TestTimeout, CancellationToken.None)
+                        .GetAwaiter()
+                        .GetResult();
+                    return true;
                 }
                 finally
                 {
-                    Interlocked.Decrement(ref activeDrains);
+                    Interlocked.Decrement(ref activeDrains.Value);
                 }
             },
             maxPassesPerInvocation: 1
         );
-
         try
         {
-            for (int round = 0; round < entered.Length; round++)
+            try
             {
-                Context.Value = "request-context";
-                try
+                for (int round = 0; round < entered.Length; round++)
                 {
+                    Context.Value = "request-context";
+                    try
+                    {
+                        coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
+                    }
+                    finally
+                    {
+                        Context.Value = null;
+                    }
+
+                    await entered[round].Task.WaitAsync(TestTimeout);
                     coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
-                }
-                finally
-                {
-                    Context.Value = null;
+                    coordinator.CleanUp().Performed.Should().BeFalse();
+                    Volatile.Read(ref activeDrains.Value).Should().Be(1);
+                    release[round].TrySetResult(true);
+                    await WaitForCompletedDrainAsync(coordinator, (round + 1) * 2);
+                    coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
                 }
 
-                await entered[round].Task.WaitAsync(TestTimeout);
-                coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
-                coordinator.CleanUp().Performed.Should().BeFalse();
-                Volatile.Read(ref activeDrains).Should().Be(1);
-                release[round].TrySetResult(true);
-                await WaitForCompletedDrainAsync(coordinator, (round + 1) * 2);
-                coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
+                passes.Should().Be(4);
+                overlappingDrains.Should().Be(0);
+                observedContexts.Should().OnlyContain(context => context == null);
+                MaintenanceStatistics statistics = coordinator.GetStatistics();
+                statistics.DrainPasses.Should().Be(4);
+                statistics.BudgetExhaustions.Should().Be(2);
+                statistics.SynchronousCleanUps.Should().Be(0);
+                statistics.ScheduleRejections.Should().Be(0);
+                statistics.DrainFaults.Should().Be(0);
             }
-
-            passes.Should().Be(4);
-            overlappingDrains.Should().Be(0);
-            observedContexts.Should().OnlyContain(context => context == null);
-            MaintenanceStatistics statistics = coordinator.GetStatistics();
-            statistics.DrainPasses.Should().Be(4);
-            statistics.BudgetExhaustions.Should().Be(2);
-            statistics.SynchronousCleanUps.Should().Be(0);
-            statistics.ScheduleRejections.Should().Be(0);
-            statistics.DrainFaults.Should().Be(0);
+            finally
+            {
+                coordinator.Dispose();
+                foreach (TaskCompletionSource<bool> gate in release)
+                {
+                    gate.TrySetResult(true);
+                }
+            }
         }
         finally
         {
             coordinator.Dispose();
-            foreach (TaskCompletionSource<bool> gate in release)
-            {
-                gate.TrySetResult(true);
-            }
         }
     }
 
@@ -975,7 +1019,7 @@ public sealed class MaintenanceTests
         TaskCompletionSource<bool> entered = NewCompletionSource<bool>();
         TaskCompletionSource<bool> release = NewCompletionSource<bool>();
         int passes = 0;
-        using MaintenanceCoordinator coordinator = new(
+        MaintenanceCoordinator coordinator = new(
             () =>
             {
                 Interlocked.Increment(ref passes);
@@ -988,29 +1032,35 @@ public sealed class MaintenanceTests
             },
             maxPassesPerInvocation: 1
         );
-
         try
         {
-            coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
-            await entered.Task.WaitAsync(TestTimeout);
-            coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
-            coordinator.Dispose();
-            coordinator.Request().Should().Be(MaintenanceRequestResult.Disposed);
-            coordinator.CleanUp().Performed.Should().BeFalse();
+            try
+            {
+                coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
+                await entered.Task.WaitAsync(TestTimeout);
+                coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
+                coordinator.Dispose();
+                coordinator.Request().Should().Be(MaintenanceRequestResult.Disposed);
+                coordinator.CleanUp().Performed.Should().BeFalse();
+            }
+            finally
+            {
+                coordinator.Dispose();
+                release.TrySetResult(true);
+            }
+
+            await WaitForCompletedDrainAsync(coordinator, 1);
+            passes.Should().Be(1);
+            MaintenanceStatistics statistics = coordinator.GetStatistics();
+            statistics.State.Should().Be(MaintenanceCoordinatorState.Disposed);
+            statistics.DrainPasses.Should().Be(1);
+            statistics.BudgetExhaustions.Should().Be(0);
+            statistics.DrainFaults.Should().Be(0);
         }
         finally
         {
             coordinator.Dispose();
-            release.TrySetResult(true);
         }
-
-        await WaitForCompletedDrainAsync(coordinator, 1);
-        passes.Should().Be(1);
-        MaintenanceStatistics statistics = coordinator.GetStatistics();
-        statistics.State.Should().Be(MaintenanceCoordinatorState.Disposed);
-        statistics.DrainPasses.Should().Be(1);
-        statistics.BudgetExhaustions.Should().Be(0);
-        statistics.DrainFaults.Should().Be(0);
     }
 
     private static async Task WaitForCompletedDrainAsync(
@@ -1045,7 +1095,8 @@ public sealed class MaintenanceTests
         return Task.Factory.StartNew(
             static state =>
             {
-                var (buffer, value) = ((StripedReadBuffer<T> Buffer, T Value))state!;
+                (StripedReadBuffer<T> buffer, T value) = ((StripedReadBuffer<T> Buffer, T Value))
+                    state!;
                 return buffer.TryEnqueue(value);
             },
             (buffer, value),
@@ -1101,13 +1152,15 @@ public sealed class MaintenanceTests
 
         internal void BeforePublish()
         {
-            if (Interlocked.Exchange(ref _pause, 1) == 0)
+            if (Interlocked.Exchange(ref _pause, 1) != 0)
             {
-                Entered.Set();
-                if (!Release.Wait(TestTimeout))
-                {
-                    throw new TimeoutException("The producer did not resume.");
-                }
+                return;
+            }
+
+            Entered.Set();
+            if (!Release.Wait(TestTimeout))
+            {
+                throw new TimeoutException("The producer did not resume.");
             }
         }
 
@@ -1139,9 +1192,12 @@ public sealed class MaintenanceTests
         public void Dispose() => _barrier.Dispose();
     }
 
-    private sealed record ReadEvent(int Producer, int Sequence);
+    private sealed record ReadEvent(
+        [property: UsedImplicitly] int Producer,
+        [property: UsedImplicitly] int Sequence
+    );
 
-    private sealed class TrackedValue { }
+    private sealed class TrackedValue;
 
     private sealed class ManualMaintenanceScheduler : IMaintenanceScheduler
     {
@@ -1186,6 +1242,20 @@ public sealed class MaintenanceTests
         {
             ScheduleCalls++;
             callback();
+            return true;
+        }
+    }
+
+    private sealed class ReentrantDrain
+    {
+        private int _passes;
+        internal int Passes => Volatile.Read(ref _passes);
+        internal MaintenanceCoordinator Coordinator { private get; set; } = null!;
+
+        internal bool Invoke()
+        {
+            Interlocked.Increment(ref _passes);
+            Coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
             return true;
         }
     }

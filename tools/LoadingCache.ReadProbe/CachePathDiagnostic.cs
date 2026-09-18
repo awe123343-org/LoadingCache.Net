@@ -3,6 +3,7 @@ using System.Runtime;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using LoadingCache.Maintenance;
 
 namespace LoadingCache.ReadProbe;
@@ -22,11 +23,19 @@ internal static class CachePathDiagnostic
     internal static int Run(string[] args)
     {
         if (
-            args.Length != 5
-            || args[0] != "--cache-path"
-            || args[1] is not ("accepted" or "full")
-            || args[2] is not ("on" or "off")
-            || args[3] is not ("none" or "write" or "access" or "both")
+            args
+                is not [
+                    "--cache-path",
+                    "accepted"
+                    or "full",
+                    "on"
+                    or "off",
+                    "none"
+                    or "write"
+                    or "access"
+                    or "both",
+                    _,
+                ]
             || string.IsNullOrWhiteSpace(args[4])
             || args[4].StartsWith("--", StringComparison.Ordinal)
         )
@@ -55,11 +64,11 @@ internal static class CachePathDiagnostic
                 MaintenanceReadStripeCapacity = ChunkSize,
             }
         );
-        using Cache<object, int> cache = new(engine);
-        object[] keys = new object[Residents];
-        List<Sample> samples = [];
         try
         {
+            using Cache<object, int> cache = new(engine);
+            object[] keys = new object[Residents];
+            List<Sample> samples = [];
             for (int key = 0; key < keys.Length; key++)
             {
                 keys[key] = key;
@@ -161,7 +170,6 @@ internal static class CachePathDiagnostic
         }
         finally
         {
-            cache.Dispose();
             scheduler.RunAll();
         }
         return 0;
@@ -331,7 +339,7 @@ internal static class CachePathDiagnostic
     {
         CacheStatistics requests = cache.Statistics;
         ReadBufferStatistics buffer = engine.GetPolicyReadBufferStatistics();
-        return new(
+        return new Snapshot(
             requests.Hits,
             requests.Misses,
             buffer.Queued,
@@ -370,13 +378,16 @@ internal static class CachePathDiagnostic
         if (!statistics)
         {
             Require(
-                after.Hits == 0
-                    && after.Misses == 0
-                    && after.Enqueued == 0
-                    && after.Dequeued == 0
-                    && after.DroppedFull == 0
-                    && after.DroppedFailed == 0
-                    && after.DroppedShutdown == 0,
+                after
+                    is {
+                        Hits: 0,
+                        Misses: 0,
+                        Enqueued: 0,
+                        Dequeued: 0,
+                        DroppedFull: 0,
+                        DroppedFailed: 0,
+                        DroppedShutdown: 0,
+                    },
                 "Disabled counters"
             );
         }
@@ -427,28 +438,28 @@ internal static class CachePathDiagnostic
     );
 
     private sealed record Sample(
-        int SampleIndex,
-        bool Warmup,
-        long Operations,
-        int PreparationOperations,
-        long Checksum,
-        int Misses,
-        Snapshot Before,
-        Snapshot After,
-        Snapshot Final,
-        double AcceptedFraction,
-        double FullFraction,
-        string FractionEvidence,
-        long ReadTicks,
-        double ReadNanosecondsPerOperation,
-        long WholeWallTicks,
-        long CleanupTicks,
-        long ThreadAllocatedBytes,
-        long ProcessAllocatedBytes,
-        int[] GcCollections,
-        long ResidentCount,
-        long WeightedSize,
-        long FinalQueued,
-        bool Validated
+        [property: JsonInclude] int SampleIndex,
+        [property: JsonInclude] bool Warmup,
+        [property: JsonInclude] long Operations,
+        [property: JsonInclude] int PreparationOperations,
+        [property: JsonInclude] long Checksum,
+        [property: JsonInclude] int Misses,
+        [property: JsonInclude] Snapshot Before,
+        [property: JsonInclude] Snapshot After,
+        [property: JsonInclude] Snapshot Final,
+        [property: JsonInclude] double AcceptedFraction,
+        [property: JsonInclude] double FullFraction,
+        [property: JsonInclude] string FractionEvidence,
+        [property: JsonInclude] long ReadTicks,
+        [property: JsonInclude] double ReadNanosecondsPerOperation,
+        [property: JsonInclude] long WholeWallTicks,
+        [property: JsonInclude] long CleanupTicks,
+        [property: JsonInclude] long ThreadAllocatedBytes,
+        [property: JsonInclude] long ProcessAllocatedBytes,
+        [property: JsonInclude] int[] GcCollections,
+        [property: JsonInclude] long ResidentCount,
+        [property: JsonInclude] long WeightedSize,
+        [property: JsonInclude] long FinalQueued,
+        [property: JsonInclude] bool Validated
     );
 }

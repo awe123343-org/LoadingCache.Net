@@ -1,4 +1,5 @@
 using FluentAssertions;
+using JetBrains.Annotations;
 using Microsoft.Extensions.Time.Testing;
 using NUnit.Framework;
 
@@ -40,7 +41,7 @@ public sealed class DictionaryViewTests
         SyncCacheDictionary<int, string> dictionary = cache.AsDictionary();
         dictionary[1] = "one";
 
-        KeyValuePair<int, string>[] snapshot = dictionary.ToArray();
+        KeyValuePair<int, string>[] snapshot = [.. dictionary];
         dictionary[2] = "two";
 
         snapshot.Should().Equal([new KeyValuePair<int, string>(1, "one")]);
@@ -225,6 +226,7 @@ public sealed class DictionaryViewTests
             TaskCreationOptions.RunContinuationsAsynchronously
         );
         var release = new ManualResetEventSlim(false);
+        Action waitForRelease = release.Wait;
         using ICache<int, Box> cache = CacheBuilder
             .Create<int, Box>()
             .MaximumWeight(8)
@@ -233,12 +235,13 @@ public sealed class DictionaryViewTests
             .Weigher(
                 (_, value) =>
                 {
-                    if (ReferenceEquals(value, updateValue))
+                    if (!ReferenceEquals(value, updateValue))
                     {
-                        entered.TrySetResult(true);
-                        release.Wait();
+                        return 1;
                     }
 
+                    entered.TrySetResult(true);
+                    waitForRelease();
                     return 1;
                 }
             )
@@ -338,22 +341,24 @@ public sealed class DictionaryViewTests
         SyncCacheDictionary<int, int> dictionary = cache.AsDictionary();
         dictionary[1] = 0;
 
-        Task[] workers = Enumerable
-            .Range(0, 8)
-            .Select(_ =>
-                Task.Run(() =>
-                {
-                    for (int i = 0; i < 250; i++)
+        Task[] workers =
+        [
+            .. Enumerable
+                .Range(0, 8)
+                .Select(_ =>
+                    Task.Run(() =>
                     {
-                        dictionary.AddOrUpdate(
-                            1,
-                            static _ => 1,
-                            static (_, current) => current + 1
-                        );
-                    }
-                })
-            )
-            .ToArray();
+                        for (int i = 0; i < 250; i++)
+                        {
+                            dictionary.AddOrUpdate(
+                                1,
+                                static _ => 1,
+                                static (_, current) => current + 1
+                            );
+                        }
+                    })
+                ),
+        ];
 
         await Task.WhenAll(workers);
 
@@ -380,13 +385,14 @@ public sealed class DictionaryViewTests
                 {
                     int call = Interlocked.Increment(ref calls);
                     current.HasValue.Should().BeFalse();
-                    if (call == 1)
+                    if (call != 1)
                     {
-                        entered.SetResult(true);
-                        release.Task.GetAwaiter().GetResult();
+                        return CacheMutation.Set(20);
                     }
 
-                    return CacheMutation.Set(call == 1 ? 10 : 20);
+                    entered.SetResult(true);
+                    release.Task.GetAwaiter().GetResult();
+                    return CacheMutation.Set(10);
                 }
             )
         );
@@ -483,12 +489,13 @@ public sealed class DictionaryViewTests
                     1,
                     (_, current) =>
                     {
-                        if (!reentered)
+                        if (reentered)
                         {
-                            reentered = true;
-                            dictionary[1] = 10;
+                            return CacheMutation.Set(current.Value + 1);
                         }
 
+                        reentered = true;
+                        dictionary[1] = 10;
                         return CacheMutation.Set(current.Value + 1);
                     }
                 )
@@ -592,7 +599,7 @@ public sealed class DictionaryViewTests
             .Invoking(() => dictionary.ContainsKey(1))
             .Should()
             .Throw<ObjectDisposedException>();
-        FluentActions.Invoking(() => dictionary.Clear()).Should().Throw<ObjectDisposedException>();
+        FluentActions.Invoking(dictionary.Clear).Should().Throw<ObjectDisposedException>();
     }
 
     [Test]
@@ -643,11 +650,11 @@ public sealed class DictionaryViewTests
         }
     }
 
-    private sealed record Box(string Value);
+    private sealed record Box([property: UsedImplicitly] string Value);
 
     private sealed class ReentrantValue(string value) : IEquatable<ReentrantValue>
     {
-        public string Value { get; } = value;
+        private string Value { get; } = value;
 
         public Action? OnEquals;
 

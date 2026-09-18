@@ -43,12 +43,6 @@ public sealed class FixedExpirationReadTests
                 return Task.FromResult("async loaded");
             }
         );
-        string Load(int _)
-        {
-            Interlocked.Increment(ref syncCalls);
-            return "sync loaded";
-        }
-
         cache.Put(1, "resident");
         cache.Put(2, "resident");
         cache.Put(3, "resident");
@@ -80,6 +74,13 @@ public sealed class FixedExpirationReadTests
         statistics.LoadsStarted.Should().Be(recordStatistics ? 2 : 0);
         statistics.LoadSuccesses.Should().Be(recordStatistics ? 2 : 0);
         statistics.ExpiredRemovals.Should().Be(recordStatistics ? 3 : 0);
+        return;
+
+        string Load(int _)
+        {
+            Interlocked.Increment(ref syncCalls);
+            return "sync loaded";
+        }
     }
 
     [TestCase(false)]

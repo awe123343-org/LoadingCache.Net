@@ -28,8 +28,8 @@ public sealed class OwnedCacheTests
             static value => value.Dispose()
         );
         cache.Put(1, oldValue);
-        FluentActions
-            .Invoking(() => cache.Put(1, rejected))
+        cache
+            .Invoking(current => current.Put(1, rejected))
             .Should()
             .ThrowExactly<InvalidOperationException>();
         WaitForDisposal(rejected);
@@ -48,17 +48,10 @@ public sealed class OwnedCacheTests
         var observed = new TaskCompletionSource<string?>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
-        OwnedCache<int, DisposableValue>? cache = null;
-        cache = OwnedCache.CreateAsync(
-            CreateOptions(2, 4),
-            async item =>
-            {
-                // A second thread's mutation must finish before the disposer does.
-                await Task.Run(cache!.Clear).WaitAsync(TimeSpan.FromSeconds(5));
-                item.Dispose();
-                observed.TrySetResult(context.Value);
-            }
-        );
+        var disposer = new ReentrantDisposer(context, observed);
+        var cache = OwnedCache.CreateAsync(CreateOptions(2, 4), disposer.DisposeAsync);
+        disposer.Cache = cache;
+
         await using (cache)
         {
             context.Value = "request";
@@ -74,10 +67,8 @@ public sealed class OwnedCacheTests
         using var cache = OwnedCache.Create(CreateOptions(64, 128), static item => item.Dispose());
         WeakReference[] values = PopulateOwnedValues(cache);
         cache.Clear();
-        WaitUntil(
-            () => cache.GetDisposalStatistics().ActiveValueCount == 0,
-            TimeSpan.FromSeconds(5)
-        );
+        Func<OwnedCacheDisposalStatistics> readDisposalStatistics = cache.GetDisposalStatistics;
+        WaitUntil(() => readDisposalStatistics().ActiveValueCount == 0, TimeSpan.FromSeconds(5));
         for (int attempt = 0; attempt < 8 && values.Any(static item => item.IsAlive); attempt++)
         {
             GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
@@ -109,7 +100,7 @@ public sealed class OwnedCacheTests
         var disposed = new TaskCompletionSource<object?>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
-        using var cache = OwnedCache.Create(
+        await using var cache = OwnedCache.Create(
             CreateOptions(maximumSize: 1, maximumActiveValues: 2),
             item =>
             {
@@ -123,6 +114,7 @@ public sealed class OwnedCacheTests
         disposed.Task.IsCompleted.Should().BeFalse();
         lease.Value.Should().BeSameAs(value);
 
+        // ReSharper disable once MethodHasAsyncOverload -- Verify synchronous lease release queues disposal without waiting.
         lease.Dispose();
         await disposed.Task.WaitAsync(TimeSpan.FromSeconds(2));
         value.DisposeCount.Should().Be(1);
@@ -135,7 +127,7 @@ public sealed class OwnedCacheTests
         var disposed = new TaskCompletionSource<object?>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
-        using var cache = OwnedCache.Create(
+        await using var cache = OwnedCache.Create(
             CreateOptions(maximumSize: 1, maximumActiveValues: 2),
             item =>
             {
@@ -158,7 +150,7 @@ public sealed class OwnedCacheTests
         var disposed = new TaskCompletionSource<object?>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
-        using var cache = OwnedCache.Create(
+        await using var cache = OwnedCache.Create(
             CreateOptions(maximumSize: 1, maximumActiveValues: 2),
             item =>
             {
@@ -173,7 +165,8 @@ public sealed class OwnedCacheTests
         cache.Invalidate(1).Should().BeTrue();
         disposed.Task.IsCompleted.Should().BeFalse();
 
-        lease!.Dispose();
+        // ReSharper disable once MethodHasAsyncOverload -- Verify synchronous lease release queues disposal without waiting.
+        lease.Dispose();
         await disposed.Task.WaitAsync(TimeSpan.FromSeconds(2));
         value.DisposeCount.Should().Be(1);
     }
@@ -185,7 +178,7 @@ public sealed class OwnedCacheTests
         var disposed = new TaskCompletionSource<object?>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
-        using var cache = OwnedCache.Create(
+        await using var cache = OwnedCache.Create(
             CreateOptions(maximumSize: 2, maximumActiveValues: 3),
             item =>
             {
@@ -323,7 +316,7 @@ public sealed class OwnedCacheTests
         var releaseWeigher = new TaskCompletionSource<object?>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
-        using var cache = OwnedCache.Create(
+        var cache = OwnedCache.Create(
             new OwnedCacheOptions<int, DisposableValue>
             {
                 MaximumWeight = 10,
@@ -338,15 +331,52 @@ public sealed class OwnedCacheTests
             },
             item => item.Dispose()
         );
-
-        Task put = Task.Run(() => cache.Put(1, value));
-        await weigherEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        cache.Dispose();
-        value.DisposeCount.Should().Be(0);
-        releaseWeigher.SetResult(null);
-        Func<Task> awaitPut = async () => await put;
-        await awaitPut.Should().ThrowAsync<ObjectDisposedException>();
-        WaitUntil(() => value.DisposeCount == 1, TimeSpan.FromSeconds(2));
+        try
+        {
+            Task put = Task.Factory.StartNew(
+                static state =>
+                {
+                    (OwnedCache<int, DisposableValue> current, DisposableValue item) = ((
+                        OwnedCache<int, DisposableValue>,
+                        DisposableValue
+                    ))
+                        state!;
+                    current.Put(1, item);
+                },
+                (cache, value),
+                CancellationToken.None,
+                TaskCreationOptions.DenyChildAttach,
+                TaskScheduler.Default
+            );
+            try
+            {
+                await weigherEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                // ReSharper disable once MethodHasAsyncOverload -- Exercise synchronous disposal while the weigher is blocked; cleanup uses the same contract.
+                cache.Dispose();
+                value.DisposeCount.Should().Be(0);
+                releaseWeigher.SetResult(null);
+                Func<Task> awaitPut = async () => await put;
+                await awaitPut.Should().ThrowAsync<ObjectDisposedException>();
+                WaitUntil(() => value.DisposeCount == 1, TimeSpan.FromSeconds(2));
+            }
+            finally
+            {
+                releaseWeigher.TrySetResult(null);
+                try
+                {
+                    await put.WaitAsync(TimeSpan.FromSeconds(2));
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Shutdown deliberately wins the pending publication in this test.
+                }
+            }
+        }
+        finally
+        {
+            // ReSharper disable once MethodHasAsyncOverload -- Exercise synchronous disposal while the weigher is blocked; cleanup uses the same contract.
+            cache.Dispose();
+        }
     }
 
     [Test]
@@ -371,23 +401,30 @@ public sealed class OwnedCacheTests
             }
         );
 
-        using CacheLease<DisposableValue> lease = cache.PutAndLease(1, value);
-        cache.CleanUp();
-        lease.Value.Should().BeSameAs(value);
-        value.DisposeCount.Should().Be(0);
-        disposals.Should().BeEmpty();
-        lease.Dispose();
-        disposals.Should().ContainSingle();
-        cache.GetDisposalStatistics().PendingDisposals.Should().Be(1);
-        value.DisposeCount.Should().Be(0);
+        CacheLease<DisposableValue> lease = cache.PutAndLease(1, value);
+        try
+        {
+            cache.CleanUp();
+            lease.Value.Should().BeSameAs(value);
+            value.DisposeCount.Should().Be(0);
+            disposals.Should().BeEmpty();
+            lease.Dispose();
+            disposals.Should().ContainSingle();
+            cache.GetDisposalStatistics().PendingDisposals.Should().Be(1);
+            value.DisposeCount.Should().Be(0);
 
-        disposals.TryDequeue(out Action? dispose).Should().BeTrue();
-        dispose!();
+            disposals.TryDequeue(out Action? dispose).Should().BeTrue();
+            dispose!();
 
-        value.DisposeCount.Should().Be(1);
-        cache.GetDisposalStatistics().PendingDisposals.Should().Be(0);
-        cache.GetDisposalStatistics().ActiveValueCount.Should().Be(0);
-        disposals.Should().BeEmpty();
+            value.DisposeCount.Should().Be(1);
+            cache.GetDisposalStatistics().PendingDisposals.Should().Be(0);
+            cache.GetDisposalStatistics().ActiveValueCount.Should().Be(0);
+            disposals.Should().BeEmpty();
+        }
+        finally
+        {
+            lease.Dispose();
+        }
     }
 
     [Test]
@@ -398,7 +435,7 @@ public sealed class OwnedCacheTests
         var firstDisposed = new TaskCompletionSource<object?>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
-        using var cache = OwnedCache.Create(
+        await using var cache = OwnedCache.Create(
             CreateOptions(maximumSize: 1, maximumActiveValues: 1),
             item =>
             {
@@ -409,16 +446,15 @@ public sealed class OwnedCacheTests
         CacheLease<DisposableValue> lease = cache.PutAndLease(1, first);
         cache.Invalidate(1).Should().BeTrue();
 
-        Action putWhileLeased = () => cache.Put(2, second);
+        Action putWhileLeased = cache.Invoking(current => current.Put(2, second));
         putWhileLeased.Should().Throw<InvalidOperationException>();
         second.DisposeCount.Should().Be(0);
 
+        // ReSharper disable once MethodHasAsyncOverload -- Verify synchronous lease release queues disposal without waiting.
         lease.Dispose();
         await firstDisposed.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        WaitUntil(
-            () => cache.GetDisposalStatistics().ActiveValueCount == 0,
-            TimeSpan.FromSeconds(2)
-        );
+        Func<OwnedCacheDisposalStatistics> readDisposalStatistics = cache.GetDisposalStatistics;
+        WaitUntil(() => readDisposalStatistics().ActiveValueCount == 0, TimeSpan.FromSeconds(2));
         cache.Put(2, second);
         cache.Invalidate(2).Should().BeTrue();
         WaitForDisposal(second);
@@ -435,12 +471,10 @@ public sealed class OwnedCacheTests
         cache.Put(1, value);
         cache.Invalidate(1).Should().BeTrue();
         WaitForDisposal(value);
-        WaitUntil(
-            () => cache.GetDisposalStatistics().ActiveValueCount == 0,
-            TimeSpan.FromSeconds(2)
-        );
+        Func<OwnedCacheDisposalStatistics> readDisposalStatistics = cache.GetDisposalStatistics;
+        WaitUntil(() => readDisposalStatistics().ActiveValueCount == 0, TimeSpan.FromSeconds(2));
 
-        Action republish = () => cache.Put(2, value);
+        Action republish = cache.Invoking(current => current.Put(2, value));
         republish.Should().Throw<InvalidOperationException>();
         value.DisposeCount.Should().Be(1);
     }
@@ -570,10 +604,8 @@ public sealed class OwnedCacheTests
         cache.Put(1, value);
         cache.Invalidate(1).Should().BeTrue();
 
-        WaitUntil(
-            () => cache.GetDisposalStatistics().PendingDisposals == 0,
-            TimeSpan.FromSeconds(2)
-        );
+        Func<OwnedCacheDisposalStatistics> readDisposalStatistics = cache.GetDisposalStatistics;
+        WaitUntil(() => readDisposalStatistics().PendingDisposals == 0, TimeSpan.FromSeconds(2));
         cache
             .GetDisposalStatistics()
             .LastDisposalError.Should()
@@ -619,6 +651,22 @@ public sealed class OwnedCacheTests
                 }
                 callback();
             }
+        }
+    }
+
+    private sealed class ReentrantDisposer(
+        AsyncLocal<string?> context,
+        TaskCompletionSource<string?> observed
+    )
+    {
+        internal OwnedCache<int, DisposableValue> Cache { private get; set; } = null!;
+
+        internal async ValueTask DisposeAsync(DisposableValue item)
+        {
+            // The competing mutation must finish before this disposer can return.
+            await Task.Run(Cache.Clear).WaitAsync(TimeSpan.FromSeconds(5));
+            item.Dispose();
+            observed.TrySetResult(context.Value);
         }
     }
 

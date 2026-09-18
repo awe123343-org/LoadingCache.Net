@@ -103,19 +103,9 @@ public sealed class NotificationDispatcherTests
     {
         ManualNotificationScheduler scheduler = new();
         List<int> observed = [];
-        BoundedNotificationDispatcher<int> dispatcher = null!;
-        dispatcher = new BoundedNotificationDispatcher<int>(
-            4,
-            value =>
-            {
-                observed.Add(value);
-                if (value == 1)
-                {
-                    dispatcher.TryEnqueue(3).Should().BeTrue();
-                }
-            },
-            scheduler
-        );
+        var handler = new ReentrantHandler(observed);
+        var dispatcher = new BoundedNotificationDispatcher<int>(4, handler.Invoke, scheduler);
+        handler.Dispatcher = dispatcher;
         using (dispatcher)
         {
             dispatcher.TryEnqueue(1).Should().BeTrue();
@@ -348,6 +338,20 @@ public sealed class NotificationDispatcherTests
         internal void RunNext()
         {
             _callbacks.Dequeue()();
+        }
+    }
+
+    private sealed class ReentrantHandler(List<int> observed)
+    {
+        internal BoundedNotificationDispatcher<int> Dispatcher { private get; set; } = null!;
+
+        internal void Invoke(int value)
+        {
+            observed.Add(value);
+            if (value == 1)
+            {
+                Dispatcher.TryEnqueue(3).Should().BeTrue();
+            }
         }
     }
 }

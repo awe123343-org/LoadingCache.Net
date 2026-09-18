@@ -73,22 +73,6 @@ internal sealed class ReferenceKey<TKey>
     }
 
     /// <summary>
-    /// Creates an ephemeral strong probe for a live lookup. The probe is never
-    /// inserted into the mapping and only keeps the caller's target alive for
-    /// the dictionary operation.
-    /// </summary>
-    internal static ReferenceKey<TKey> CreateProbe(TKey key)
-    {
-        if (key is null)
-        {
-            throw new ArgumentNullException(nameof(key));
-        }
-        EnsureReferenceType();
-        object target = key;
-        return new ReferenceKey<TKey>(key, weak: false, RuntimeHelpers.GetHashCode(target));
-    }
-
-    /// <summary>
     /// Creates a weak handle with a controlled hash for collision tests.
     /// </summary>
     /// <remarks>

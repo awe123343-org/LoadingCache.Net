@@ -141,7 +141,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 engine._policy.FlushWrites();
                 var tokens = engine._policy.Snapshot(hottest, limit);
                 var result = new List<KeyValuePair<TKey, TValue>>(tokens.Count);
-                foreach (var token in tokens)
+                foreach (object token in tokens)
                 {
                     if (
                         token is not Entry entry
@@ -155,18 +155,17 @@ internal sealed partial class CacheEngine<TKey, TValue>
                     lock (entry.Sync)
                     {
                         if (
-                            Volatile.Read(ref entry.IsReady)
-                            && !entry.PolicyDetached
-                            && !engine.IsExpired(entry, engine._timeProvider.GetTimestamp())
+                            !Volatile.Read(ref entry.IsReady)
+                            || entry.PolicyDetached
+                            || engine.IsExpired(entry, engine._timeProvider.GetTimestamp())
                         )
                         {
-                            if (
-                                entry.TryGetKey(out TKey? key)
-                                && entry.TryGetValue(out TValue? value)
-                            )
-                            {
-                                result.Add(new KeyValuePair<TKey, TValue>(key, value));
-                            }
+                            continue;
+                        }
+
+                        if (entry.TryGetKey(out TKey? key) && entry.TryGetValue(out TValue? value))
+                        {
+                            result.Add(new KeyValuePair<TKey, TValue>(key, value));
                         }
                     }
                 }

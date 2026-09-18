@@ -32,7 +32,13 @@ public sealed class EngineRefreshReviewTests
             );
         (await cache.GetAsync(1)).Should().Be(1);
         Task<int> refresh = cache.RefreshAsync(1).AsTask();
-        Task<bool> oldRead = Task.Run(() => cache.TryGet(1, out _));
+        Task<bool> oldRead = Task.Factory.StartNew(
+            static state => ((IAsyncLoadingCache<int, int>)state!).TryGet(1, out _),
+            cache,
+            CancellationToken.None,
+            TaskCreationOptions.DenyChildAttach,
+            TaskScheduler.Default
+        );
         try
         {
             await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -52,8 +58,7 @@ public sealed class EngineRefreshReviewTests
         {
             resumeRead.TrySetResult();
             resumeReload.TrySetResult(2);
-            await oldRead.WaitAsync(TimeSpan.FromSeconds(5));
-            await refresh.WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.WhenAll(oldRead, refresh).WaitAsync(TimeSpan.FromSeconds(5));
         }
     }
 

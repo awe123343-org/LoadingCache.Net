@@ -36,17 +36,17 @@ public sealed class EngineRefreshTests
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
         var reloadEntered = NewSignal();
         var releaseReload = NewSignal<string>();
-        int loads = 0;
-        int reloads = 0;
+        var loads = new System.Runtime.CompilerServices.StrongBox<int>();
+        var reloads = new System.Runtime.CompilerServices.StrongBox<int>();
         var loader = new TestLoader(
             (key, _) =>
             {
-                Interlocked.Increment(ref loads);
+                Interlocked.Increment(ref loads.Value);
                 return Task.FromResult($"v{key}");
             },
             (_, _, _) =>
             {
-                Interlocked.Increment(ref reloads);
+                Interlocked.Increment(ref reloads.Value);
                 reloadEntered.TrySetResult(true);
                 return releaseReload.Task;
             }
@@ -67,24 +67,24 @@ public sealed class EngineRefreshTests
         (await cache.GetAsync(1)).Should().Be("v1");
         (await cache.GetAsync(1)).Should().Be("v1");
         await reloadEntered.Task.WaitAsync(Watchdog);
-        Volatile.Read(ref reloads).Should().Be(1);
+        Volatile.Read(ref reloads.Value).Should().Be(1);
 
         Task<string> joinedRefresh = cache.RefreshAsync(1).AsTask();
         releaseReload.SetResult("v2");
         (await joinedRefresh.WaitAsync(Watchdog)).Should().Be("v2");
-        Volatile.Read(ref loads).Should().Be(1);
+        Volatile.Read(ref loads.Value).Should().Be(1);
     }
 
     [Test]
     public async Task TryGetDoesNotTriggerAutomaticRefresh()
     {
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
-        int reloads = 0;
+        var reloads = new System.Runtime.CompilerServices.StrongBox<int>();
         var loader = new TestLoader(
             (_, _) => Task.FromResult("old"),
             (_, _, _) =>
             {
-                Interlocked.Increment(ref reloads);
+                Interlocked.Increment(ref reloads.Value);
                 return Task.FromResult("new");
             }
         );
@@ -100,7 +100,7 @@ public sealed class EngineRefreshTests
         clock.Advance(TimeSpan.FromSeconds(1));
         cache.TryGet(1, out string? value).Should().BeTrue();
         value.Should().Be("old");
-        Volatile.Read(ref reloads).Should().Be(0);
+        Volatile.Read(ref reloads.Value).Should().Be(0);
     }
 
     [Test]
@@ -109,17 +109,17 @@ public sealed class EngineRefreshTests
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
         var reloadEntered = NewSignal();
         var releaseReload = NewSignal<string>();
-        int loads = 0;
-        int reloads = 0;
+        var loads = new System.Runtime.CompilerServices.StrongBox<int>();
+        var reloads = new System.Runtime.CompilerServices.StrongBox<int>();
         var loader = new TestLoader(
             (_, _) =>
             {
-                Interlocked.Increment(ref loads);
+                Interlocked.Increment(ref loads.Value);
                 return Task.FromResult("old");
             },
             (_, _, _) =>
             {
-                Interlocked.Increment(ref reloads);
+                Interlocked.Increment(ref reloads.Value);
                 reloadEntered.TrySetResult(true);
                 return releaseReload.Task;
             }
@@ -143,15 +143,15 @@ public sealed class EngineRefreshTests
         joined.IsCompleted.Should().BeFalse();
         releaseReload.SetResult("new");
         (await joined.WaitAsync(Watchdog)).Should().Be("new");
-        Volatile.Read(ref loads).Should().Be(1);
-        Volatile.Read(ref reloads).Should().Be(1);
+        Volatile.Read(ref loads.Value).Should().Be(1);
+        Volatile.Read(ref reloads.Value).Should().Be(1);
     }
 
     [Test]
     public async Task FailedAutomaticRefreshKeepsValueAndHonorsBackoff()
     {
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
-        int reloads = 0;
+        var reloads = new System.Runtime.CompilerServices.StrongBox<int>();
         var firstReloadEntered = NewSignal();
         var secondReloadEntered = NewSignal();
         var firstFailure = NewSignal<string>();
@@ -159,7 +159,7 @@ public sealed class EngineRefreshTests
             (_, _) => Task.FromResult("old"),
             (_, _, _) =>
             {
-                int call = Interlocked.Increment(ref reloads);
+                int call = Interlocked.Increment(ref reloads.Value);
                 (call == 1 ? firstReloadEntered : secondReloadEntered).TrySetResult(true);
                 return call == 1
                     ? firstFailure.Task
@@ -180,7 +180,7 @@ public sealed class EngineRefreshTests
         (await cache.GetAsync(1)).Should().Be("old");
         await firstReloadEntered.Task.WaitAsync(Watchdog);
         Task<string> joinedRefresh = cache.RefreshAsync(1).AsTask();
-        Volatile.Read(ref reloads).Should().Be(1);
+        Volatile.Read(ref reloads.Value).Should().Be(1);
         firstFailure.SetException(new InvalidOperationException("reload"));
         await FluentActions
             .Awaiting(() => joinedRefresh)
@@ -188,7 +188,7 @@ public sealed class EngineRefreshTests
             .ThrowExactlyAsync<InvalidOperationException>();
 
         (await cache.GetAsync(1)).Should().Be("old");
-        Volatile.Read(ref reloads).Should().Be(1);
+        Volatile.Read(ref reloads.Value).Should().Be(1);
 
         clock.Advance(TimeSpan.FromSeconds(5));
         (await cache.GetAsync(1)).Should().Be("old");
@@ -235,69 +235,74 @@ public sealed class EngineRefreshTests
     [Test]
     public async Task ExplicitRefreshSameKeyFailsFastInsideItsLoadChain()
     {
-        IAsyncLoadingCache<int, string>? cache = null;
-        cache = CacheBuilder
+        var loader = new SameKeyRefreshLoader();
+        await using var cache = CacheBuilder
             .Create<int, string>()
             .MaximumSize(4)
             .MaxConcurrentLoads(2)
-            .BuildAsyncLoading(
-                async (key, cancellationToken) =>
-                    await cache!.RefreshAsync(key, cancellationToken).ConfigureAwait(false)
-            );
-
-        await using (cache)
-        {
-            await FluentActions
-                .Awaiting(() => cache.GetAsync(1).AsTask())
-                .Should()
-                .ThrowExactlyAsync<LoadingCacheReentrancyException>();
-        }
+            .BuildAsyncLoading(loader.LoadAsync);
+        loader.Cache = cache;
+        await cache
+            .Awaiting(static current => current.GetAsync(1).AsTask())
+            .Should()
+            .ThrowExactlyAsync<LoadingCacheReentrancyException>();
     }
 
     [Test]
     public async Task ExplicitRefreshKToJToKCycleFailsFast()
     {
-        IAsyncLoadingCache<string, int>? cache = null;
-        cache = CacheBuilder
+        var loader = new CyclicRefreshLoader();
+        await using var cache = CacheBuilder
             .Create<string, int>()
             .MaximumSize(4)
             .MaxConcurrentLoads(4)
-            .BuildAsyncLoading(
-                async (key, _) =>
-                {
-                    string dependency = key == "K" ? "J" : "K";
-                    return await cache!
-                        .RefreshAsync(dependency, CancellationToken.None)
-                        .ConfigureAwait(false);
-                }
-            );
-
-        await using (cache)
-        {
-            await FluentActions
-                .Awaiting(() => cache.GetAsync("K").AsTask())
-                .Should()
-                .ThrowExactlyAsync<LoadingCacheReentrancyException>();
-        }
+            .BuildAsyncLoading(loader.LoadAsync);
+        loader.Cache = cache;
+        await cache
+            .Awaiting(static current => current.GetAsync("K").AsTask())
+            .Should()
+            .ThrowExactlyAsync<LoadingCacheReentrancyException>();
     }
 
     [Test]
     public void SynchronousRefreshSameKeyFailsFastInsideItsLoadChain()
     {
-        ILoadingCache<int, string>? cache = null;
-        cache = CacheBuilder
+        var loader = new SyncReentrantRefreshLoader();
+        using var cache = CacheBuilder
             .Create<int, string>()
             .MaximumSize(4)
             .MaxConcurrentLoads(2)
-            .BuildLoading(key => cache!.RefreshAsync(key).GetAwaiter().GetResult());
+            .BuildLoading(loader.Load);
+        loader.Cache = cache;
+        cache
+            .Invoking(static current => current.Get(1))
+            .Should()
+            .ThrowExactly<LoadingCacheReentrancyException>();
+    }
 
-        using (cache)
-        {
-            FluentActions
-                .Invoking(() => cache.Get(1))
-                .Should()
-                .ThrowExactly<LoadingCacheReentrancyException>();
-        }
+    private sealed class SameKeyRefreshLoader
+    {
+        internal IAsyncLoadingCache<int, string> Cache { private get; set; } = null!;
+
+        internal async Task<string> LoadAsync(int key, CancellationToken cancellationToken) =>
+            await Cache.RefreshAsync(key, cancellationToken).ConfigureAwait(false);
+    }
+
+    private sealed class CyclicRefreshLoader
+    {
+        internal IAsyncLoadingCache<string, int> Cache { private get; set; } = null!;
+
+        internal async Task<int> LoadAsync(string key, CancellationToken cancellationToken) =>
+            await Cache
+                .RefreshAsync(key == "K" ? "J" : "K", CancellationToken.None)
+                .ConfigureAwait(false);
+    }
+
+    private sealed class SyncReentrantRefreshLoader
+    {
+        internal ILoadingCache<int, string> Cache { private get; set; } = null!;
+
+        internal string Load(int key) => Cache.RefreshAsync(key).GetAwaiter().GetResult();
     }
 
     [Test]

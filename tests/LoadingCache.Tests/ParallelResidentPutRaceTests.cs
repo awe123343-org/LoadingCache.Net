@@ -33,8 +33,8 @@ public sealed class ParallelResidentPutRaceTests
         cache.CleanUp();
         cache.TryGetTask(1, out Task<string>? original).Should().BeTrue();
         Task<string> refresh = StartRefresh(cache);
-        Task<string>? refreshed = null;
-        Task<string>? replacement = null;
+        Task<string>? refreshed;
+        Task<string>? replacement;
         try
         {
             await published.Entered.WaitAsync(Watchdog);
@@ -57,10 +57,10 @@ public sealed class ParallelResidentPutRaceTests
         published.TimedOut.Should().BeFalse();
         failure.Calls.Should().Be(1);
         (await original!).Should().Be("v1");
-        (await refreshed!).Should().Be("v2");
+        (await refreshed).Should().Be("v2");
         cache.TryGetTask(1, out Task<string>? current).Should().BeTrue();
         current.Should().BeSameAs(replacement);
-        (await current!).Should().Be("v3");
+        (await current).Should().Be("v3");
         AssertResident(engine, "v3", statistics);
     }
 
@@ -86,8 +86,8 @@ public sealed class ParallelResidentPutRaceTests
             static (_, _) => Task.FromResult("v1")
         );
         Task<string> load = StartLoad(cache);
-        Task<string>? original = null;
-        Task<string>? replacement = null;
+        Task<string>? original;
+        Task<string>? replacement;
         try
         {
             await completion.Entered.WaitAsync(Watchdog);
@@ -100,7 +100,7 @@ public sealed class ParallelResidentPutRaceTests
             probe.AssertSingleFastCommit();
             cache.TryGetTask(1, out replacement).Should().BeTrue();
             replacement.Should().NotBeSameAs(original);
-            (await replacement!).Should().Be("v2");
+            (await replacement).Should().Be("v2");
         }
         finally
         {
@@ -110,10 +110,10 @@ public sealed class ParallelResidentPutRaceTests
 
         completion.TimedOut.Should().BeFalse();
         failure.Calls.Should().Be(1);
-        await ExpectPublicationFailure(original!);
+        await ExpectPublicationFailure(original);
         cache.TryGetTask(1, out Task<string>? current).Should().BeTrue();
         current.Should().BeSameAs(replacement);
-        (await current!).Should().Be("v2");
+        (await current).Should().Be("v2");
         AssertResident(engine, "v2", statistics);
     }
 

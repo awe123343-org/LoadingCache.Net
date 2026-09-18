@@ -36,7 +36,7 @@ public sealed class WeightPublicationRegressionTests
                 MaintenanceScheduler = new InlineScheduler(),
             }
         );
-        int active = 0;
+        var active = new System.Runtime.CompilerServices.StrongBox<int>();
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource<WeightedPayload>(
             TaskCreationOptions.RunContinuationsAsynchronously
@@ -45,7 +45,7 @@ public sealed class WeightPublicationRegressionTests
             engine,
             async (_, _) =>
             {
-                Interlocked.Increment(ref active);
+                Interlocked.Increment(ref active.Value);
                 started.TrySetResult();
                 try
                 {
@@ -53,7 +53,7 @@ public sealed class WeightPublicationRegressionTests
                 }
                 finally
                 {
-                    Interlocked.Decrement(ref active);
+                    Interlocked.Decrement(ref active.Value);
                 }
             }
         );
@@ -75,7 +75,7 @@ public sealed class WeightPublicationRegressionTests
                 read.IsCompletedSuccessfully.Should().BeTrue();
                 cache.CleanUp();
                 CacheStatistics observed = cache.GetStatistics();
-                Volatile.Read(ref active).Should().Be(0);
+                Volatile.Read(ref active.Value).Should().Be(0);
                 observed.InFlightLoads.Should().Be(0);
                 observed.MaintenanceBacklog.Should().Be(0);
                 observed.WriteBufferBacklog.Should().Be(0);
@@ -93,7 +93,7 @@ public sealed class WeightPublicationRegressionTests
             }
             (await read.WaitAsync(Watchdog)).Weight.Should().Be(3);
             await started.Task.WaitAsync(Watchdog);
-            Volatile.Read(ref active).Should().Be(1);
+            Volatile.Read(ref active.Value).Should().Be(1);
             cache.GetStatistics().InFlightLoads.Should().Be(1);
             engine.HasActiveFlights.Should().BeTrue();
             release.TrySetResult(new WeightedPayload(16));
@@ -106,7 +106,7 @@ public sealed class WeightPublicationRegressionTests
                 }
                 await Task.Yield();
             }
-            Volatile.Read(ref active).Should().Be(0);
+            Volatile.Read(ref active.Value).Should().Be(0);
             engine.HasActiveFlights.Should().BeFalse();
             // Drain only after queued, running and revoked publishers are all retired.
             cache.CleanUp();

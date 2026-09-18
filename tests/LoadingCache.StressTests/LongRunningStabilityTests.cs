@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using FluentAssertions;
 using NUnit.Framework;
 
@@ -45,7 +46,7 @@ public sealed class LongRunningStabilityTests
             directory,
             $"soak-{Environment.Version}-stats-{statistics}-{Environment.ProcessId}-{Guid.NewGuid():N}.jsonl"
         );
-        using var log = new StreamWriter(output);
+        await using var log = new StreamWriter(output);
         log.AutoFlush = true;
         var elapsed = Stopwatch.StartNew();
         TimeSpan rotationInterval = TimeSpan.FromSeconds(Math.Min(30, seconds / 3.0));
@@ -93,42 +94,44 @@ public sealed class LongRunningStabilityTests
             {
                 SoakCache[] batchCaches = caches;
                 int batchCycle = cycle;
-                jobs = Enumerable
-                    .Range(0, Workers)
-                    .Select(worker =>
-                        Task.Run(async () =>
-                        {
-                            for (int operation = 0; operation < OperationsPerBatch; operation++)
+                jobs =
+                [
+                    .. Enumerable
+                        .Range(0, Workers)
+                        .Select(worker =>
+                            Task.Run(async () =>
                             {
-                                int mode = random[worker].Next(batchCaches.Length);
-                                int key = random[worker].Next(128);
-                                int kind = random[worker].Next(1000);
-                                long position = positions[worker]++;
-                                traces[worker][position % traces[worker].Length] = new TraceEntry(
-                                    position,
-                                    batchCycle,
-                                    mode,
-                                    key,
-                                    kind
-                                );
-                                try
+                                for (int operation = 0; operation < OperationsPerBatch; operation++)
                                 {
-                                    await OperateAsync(batchCaches[mode], key, kind, random[worker])
-                                        .ConfigureAwait(false);
-                                    Interlocked.Increment(ref outcomes[0]);
+                                    int mode = random[worker].Next(batchCaches.Length);
+                                    int key = random[worker].Next(128);
+                                    int kind = random[worker].Next(1000);
+                                    long position = positions[worker]++;
+                                    traces[worker][position % traces[worker].Length] =
+                                        new TraceEntry(position, batchCycle, mode, key, kind);
+                                    try
+                                    {
+                                        await OperateAsync(
+                                                batchCaches[mode],
+                                                key,
+                                                kind,
+                                                random[worker]
+                                            )
+                                            .ConfigureAwait(false);
+                                        Interlocked.Increment(ref outcomes[0]);
+                                    }
+                                    catch (CacheLoadRejectedException)
+                                    {
+                                        Interlocked.Increment(ref outcomes[1]);
+                                    }
+                                    catch (ControlledLoadFailure)
+                                    {
+                                        Interlocked.Increment(ref outcomes[2]);
+                                    }
                                 }
-                                catch (CacheLoadRejectedException)
-                                {
-                                    Interlocked.Increment(ref outcomes[1]);
-                                }
-                                catch (ControlledLoadFailure)
-                                {
-                                    Interlocked.Increment(ref outcomes[2]);
-                                }
-                            }
-                        })
-                    )
-                    .ToArray();
+                            })
+                        ),
+                ];
                 await Task.WhenAll(jobs).WaitAsync(Watchdog).ConfigureAwait(false);
                 batch++;
                 foreach (SoakCache cache in caches)
@@ -160,40 +163,39 @@ public sealed class LongRunningStabilityTests
                     );
                     nextProgress = elapsed.Elapsed + TimeSpan.FromSeconds(1);
                 }
-                if (elapsed.Elapsed >= nextRotation)
+                if (elapsed.Elapsed < nextRotation)
+                    continue;
+                foreach (SoakCache cache in caches)
                 {
-                    foreach (SoakCache cache in caches)
+                    await cache.DisposeAsync().ConfigureAwait(false);
+                    retired.Enqueue(new WeakReference(cache));
+                    if (retired.Count > 128)
                     {
-                        await cache.DisposeAsync().ConfigureAwait(false);
-                        retired.Enqueue(new WeakReference(cache));
-                        if (retired.Count > 128)
-                        {
-                            retired.Dequeue();
-                        }
+                        retired.Dequeue();
                     }
-                    caches = CreateCaches(statistics, ++cycle, accessOnly);
-                    jobs = [];
-                    GC.Collect(
-                        GC.MaxGeneration,
-                        GCCollectionMode.Forced,
-                        blocking: true,
-                        compacting: false
-                    );
-                    GC.WaitForPendingFinalizers();
-                    WriteProgress(
-                        log,
-                        "recreated",
-                        scenario,
-                        elapsed,
-                        batch,
-                        cycle,
-                        caches,
-                        outcomes,
-                        retired,
-                        forcedGc: true
-                    );
-                    nextRotation = elapsed.Elapsed + rotationInterval;
                 }
+                caches = CreateCaches(statistics, ++cycle, accessOnly);
+                jobs = [];
+                GC.Collect(
+                    GC.MaxGeneration,
+                    GCCollectionMode.Forced,
+                    blocking: true,
+                    compacting: false
+                );
+                GC.WaitForPendingFinalizers();
+                WriteProgress(
+                    log,
+                    "recreated",
+                    scenario,
+                    elapsed,
+                    batch,
+                    cycle,
+                    caches,
+                    outcomes,
+                    retired,
+                    forcedGc: true
+                );
+                nextRotation = elapsed.Elapsed + rotationInterval;
             }
             WriteProgress(
                 log,
@@ -264,10 +266,11 @@ public sealed class LongRunningStabilityTests
     }
 
     private static SoakCache[] CreateCaches(bool statistics, int cycle, bool accessOnly) =>
-        Enumerable
-            .Range(0, 3)
-            .Select(mode => new SoakCache(mode, cycle, statistics, accessOnly))
-            .ToArray();
+        [
+            new(0, cycle, statistics, accessOnly),
+            new(1, cycle, statistics, accessOnly),
+            new(2, cycle, statistics, accessOnly),
+        ];
 
     private static async Task OperateAsync(SoakCache state, int key, int kind, Random random)
     {
@@ -277,6 +280,8 @@ public sealed class LongRunningStabilityTests
                 using (var canceled = new CancellationTokenSource())
                 {
                     ValueTask<Payload> pending = state.Cache.GetAsync(key, canceled.Token);
+                    // Cancellation callbacks must finish before the next deterministic test step.
+                    // ReSharper disable once MethodHasAsyncOverload
                     canceled.Cancel();
                     try
                     {
@@ -399,11 +404,11 @@ public sealed class LongRunningStabilityTests
         log.WriteLine(JsonSerializer.Serialize(item));
 
     private readonly record struct TraceEntry(
-        long Operation,
-        int Cycle,
-        int Mode,
-        int Key,
-        int Kind
+        [property: JsonInclude] long Operation,
+        [property: JsonInclude] int Cycle,
+        [property: JsonInclude] int Mode,
+        [property: JsonInclude] int Key,
+        [property: JsonInclude] int Kind
     );
 
     private sealed class SoakCache : IAsyncDisposable
@@ -471,11 +476,9 @@ public sealed class LongRunningStabilityTests
                 active.Should().BeLessThanOrEqualTo(LoadLimit);
                 await Task.Yield();
                 cancellationToken.ThrowIfCancellationRequested();
-                if (version % 37 == 0)
-                {
-                    throw new ControlledLoadFailure();
-                }
-                return new Payload(key, Instance, key % 17, version);
+                return version % 37 == 0
+                    ? throw new ControlledLoadFailure()
+                    : new Payload(key, Instance, key % 17, version);
             }
             finally
             {
@@ -497,9 +500,8 @@ public sealed class LongRunningStabilityTests
                     CacheStatistics statistics = Cache.GetStatistics();
                     if (
                         Volatile.Read(ref _active) == 0
-                        && statistics.InFlightLoads == 0
-                        && statistics.MaintenanceBacklog == 0
-                        && statistics.WriteBufferBacklog == 0
+                        && statistics
+                            is { InFlightLoads: 0, MaintenanceBacklog: 0, WriteBufferBacklog: 0 }
                         && !_engine.HasActiveFlights
                     )
                     {

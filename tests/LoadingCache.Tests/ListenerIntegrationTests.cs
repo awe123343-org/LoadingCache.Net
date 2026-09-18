@@ -121,29 +121,18 @@ public sealed class ListenerIntegrationTests
     [Test]
     public void EvictionListenerMayReenterAfterTheEntryLockIsReleased()
     {
-        Cache<int, string>? cache = null;
-        int reentries = 0;
-        cache = CreateManualCache(
+        var listener = new ReentrantListener();
+        using Cache<int, string> cache = CreateManualCache(
             removalListener: null,
             scheduler: new ManualNotificationScheduler(),
-            evictionListener: notification =>
-            {
-                if (notification.Key == 1 && Interlocked.Exchange(ref reentries, 1) == 0)
-                {
-                    cache!.Put(3, "reentrant");
-                }
-            },
+            evictionListener: listener.OnEviction,
             maximumSize: 1
         );
-
-        using (cache)
-        {
-            cache.Put(1, "one");
-            cache.Put(2, "two");
-
-            cache.TryGet(3, out string? current).Should().BeTrue();
-            current.Should().Be("reentrant");
-        }
+        listener.Cache = cache;
+        cache.Put(1, "one");
+        cache.Put(2, "two");
+        cache.TryGet(3, out string? current).Should().BeTrue();
+        current.Should().Be("reentrant");
     }
 
     [Test]
@@ -195,26 +184,39 @@ public sealed class ListenerIntegrationTests
     [Test]
     public async Task EagerSchedulerAllowsReentrantListenerMutation()
     {
-        var entered = new TaskCompletionSource<object?>(
-            TaskCreationOptions.RunContinuationsAsynchronously
-        );
-        Cache<int, string>? current = null;
+        var listener = new ReentrantListener();
         using Cache<int, string> cache = CreateManualCache(
-            removalListener: _ =>
-            {
-                current!.Put(2, "reentrant");
-                entered.TrySetResult(null);
-            },
+            removalListener: listener.OnRemoval,
             scheduler: new EagerNotificationScheduler()
         );
-        current = cache;
-
+        listener.Cache = cache;
         cache.Put(1, "one");
         cache.Invalidate(1).Should().BeTrue();
-
-        await entered.Task.WaitAsync(TestTimeout);
+        await listener.Entered.Task.WaitAsync(TestTimeout);
         cache.TryGet(2, out string? value).Should().BeTrue();
         value.Should().Be("reentrant");
+    }
+
+    private sealed class ReentrantListener
+    {
+        private int _reentries;
+        internal Cache<int, string> Cache { private get; set; } = null!;
+        internal TaskCompletionSource<object?> Entered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal void OnEviction(RemovalNotification<int, string> notification)
+        {
+            if (notification.Key == 1 && Interlocked.Exchange(ref _reentries, 1) == 0)
+            {
+                Cache.Put(3, "reentrant");
+            }
+        }
+
+        internal void OnRemoval(RemovalNotification<int, string> notification)
+        {
+            Cache.Put(2, "reentrant");
+            Entered.TrySetResult(null);
+        }
     }
 
     [Test]
@@ -279,7 +281,7 @@ public sealed class ListenerIntegrationTests
         var release = new TaskCompletionSource<object?>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
-        using Cache<int, string> cache = CreateManualCache(
+        Cache<int, string> cache = CreateManualCache(
             removalListener: _ =>
             {
                 entered.TrySetResult(null);
@@ -288,44 +290,56 @@ public sealed class ListenerIntegrationTests
             scheduler: scheduler,
             notificationCapacity: 2
         );
+        try
+        {
+            cache.Put(1, "one");
+            cache.Invalidate(1).Should().BeTrue();
+            await Eventually(() => scheduler.Pending == 1);
 
-        cache.Put(1, "one");
-        cache.Invalidate(1).Should().BeTrue();
-        await Eventually(() => scheduler.Pending == 1);
+            Task drain = Task.Run(scheduler.RunNext);
+            await entered.Task.WaitAsync(TestTimeout);
+            cache.Dispose();
+            drain.IsCompleted.Should().BeFalse();
 
-        Task drain = Task.Run(scheduler.RunNext);
-        await entered.Task.WaitAsync(TestTimeout);
-        cache.Dispose();
-        drain.IsCompleted.Should().BeFalse();
+            CacheNotificationStatistics afterDispose = cache.GetNotificationStatistics();
+            afterDispose.IsDisposed.Should().BeTrue();
+            afterDispose.DroppedShutdown.Should().Be(0);
 
-        CacheNotificationStatistics afterDispose = cache.GetNotificationStatistics();
-        afterDispose.IsDisposed.Should().BeTrue();
-        afterDispose.DroppedShutdown.Should().Be(0);
-
-        release.TrySetResult(null);
-        await drain.WaitAsync(TestTimeout);
+            release.TrySetResult(null);
+            await drain.WaitAsync(TestTimeout);
+        }
+        finally
+        {
+            cache.Dispose();
+        }
     }
 
     [Test]
     public async Task DisposeDropsPendingHandoffAndKeepsShutdownDiagnosticsReadable()
     {
         var scheduler = new ManualNotificationScheduler();
-        using Cache<int, string> cache = CreateManualCache(
+        Cache<int, string> cache = CreateManualCache(
             removalListener: _ => { },
             scheduler: scheduler,
             notificationCapacity: 2
         );
+        try
+        {
+            cache.Put(1, "one");
+            cache.Invalidate(1).Should().BeTrue();
+            await Eventually(() => scheduler.Pending == 1);
 
-        cache.Put(1, "one");
-        cache.Invalidate(1).Should().BeTrue();
-        await Eventually(() => scheduler.Pending == 1);
+            cache.Dispose();
 
-        cache.Dispose();
-
-        CacheNotificationStatistics afterDispose = cache.GetNotificationStatistics();
-        afterDispose.IsDisposed.Should().BeTrue();
-        afterDispose.DroppedShutdown.Should().Be(1);
-        afterDispose.Dropped.Should().Be(1);
+            CacheNotificationStatistics afterDispose = cache.GetNotificationStatistics();
+            afterDispose.IsDisposed.Should().BeTrue();
+            afterDispose.DroppedShutdown.Should().Be(1);
+            afterDispose.Dropped.Should().Be(1);
+        }
+        finally
+        {
+            cache.Dispose();
+        }
     }
 
     [Test]
@@ -494,7 +508,7 @@ public sealed class ListenerIntegrationTests
         }
     }
 
-    private sealed class CollectedValue { }
+    private sealed class CollectedValue;
 
     private sealed class EagerNotificationScheduler : INotificationScheduler
     {

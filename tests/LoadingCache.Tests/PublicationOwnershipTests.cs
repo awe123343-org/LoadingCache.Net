@@ -351,8 +351,7 @@ public sealed class PublicationOwnershipTests
         probe.AssertOwnership(expectedCalls: 1, expectedOutsideCalls: 1);
     }
 
-    private static Dictionary<int, string> BulkValues() =>
-        new Dictionary<int, string> { [1] = "one", [2] = "two" };
+    private static Dictionary<int, string> BulkValues() => new() { [1] = "one", [2] = "two" };
 
     private static CacheEngine<int, string> CreateEngine(PublicationProbe probe) =>
         new(
@@ -501,13 +500,13 @@ public sealed class PublicationOwnershipTests
             _owned.Should().HaveCount(expectedCalls);
             _owned.Should().OnlyContain(result => result.OwnerHeld && !result.CompetitorAcquired);
             _outsideCalls.Should().Be(expectedOutsideCalls);
-            if (expectedOutsideCalls != 0)
+            if (expectedOutsideCalls == 0)
             {
-                _outside.Should().NotBeEmpty();
-                _outside
-                    .Should()
-                    .OnlyContain(result => !result.OwnerHeld && result.CompetitorAcquired);
+                return;
             }
+
+            _outside.Should().NotBeEmpty();
+            _outside.Should().OnlyContain(result => !result.OwnerHeld && result.CompetitorAcquired);
         }
     }
 }

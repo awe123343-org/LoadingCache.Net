@@ -205,21 +205,23 @@ internal sealed partial class CacheEngine<TKey, TValue>
             }
         }
 
-        if (timedOut)
+        if (!timedOut)
         {
-            try
-            {
-                CompleteTimeoutPromise(flight);
-            }
-            finally
-            {
-                lock (_gate)
-                {
-                    flight.TimeoutFinalizationCompleted = 1;
-                }
+            return;
+        }
 
-                RetireFlight(flight);
+        try
+        {
+            CompleteTimeoutPromise(flight);
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                flight.TimeoutFinalizationCompleted = 1;
             }
+
+            RetireFlight(flight);
         }
     }
 

@@ -76,21 +76,17 @@ public sealed class ExpirationEngineTests
     public async Task VariableReadCallbackRunsOutsideEntryLock()
     {
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
-        IAsyncLoadingCache<int, string>? cache = null;
         var expiry = new TestExpiry
         {
             CreateDuration = TimeSpan.FromMinutes(1),
             ReadDuration = TimeSpan.FromMinutes(1),
-            OnRead = () =>
-            {
-                Task probe = Task.Run(() =>
-                {
-                    cache!.Policy.VariableExpiration!.GetExpiresAfter(1);
-                });
-                probe.Wait(Watchdog).Should().BeTrue();
-            },
         };
-        cache = CreateVariableCache(clock, expiry);
+        IAsyncLoadingCache<int, string> cache = CreateVariableCache(clock, expiry);
+        expiry.OnRead = () =>
+        {
+            Task probe = Task.Run(() => cache.Policy.VariableExpiration!.GetExpiresAfter(1));
+            probe.Wait(Watchdog).Should().BeTrue();
+        };
 
         try
         {
@@ -119,7 +115,13 @@ public sealed class ExpirationEngineTests
         try
         {
             (await cache.GetAsync(1)).Should().Be("1");
-            read = Task.Run(() => cache.TryGet(1, out _));
+            read = Task.Factory.StartNew(
+                static state => ((IAsyncLoadingCache<int, string>)state!).TryGet(1, out _),
+                cache,
+                CancellationToken.None,
+                TaskCreationOptions.DenyChildAttach,
+                TaskScheduler.Default
+            );
             await callback.Entered.WaitAsync(Watchdog, CancellationToken.None);
 
             cache
@@ -147,15 +149,18 @@ public sealed class ExpirationEngineTests
         using var bothEntered = new CountdownEvent(2);
         using var releaseFirst = new ManualResetEventSlim(false);
         using var releaseSecond = new ManualResetEventSlim(false);
+        Func<bool> signalEntered = bothEntered.Signal;
+        Func<TimeSpan, bool> waitFirst = releaseFirst.Wait;
+        Func<TimeSpan, bool> waitSecond = releaseSecond.Wait;
         var committed = NewSignal();
         var expiry = new TestExpiry
         {
             CreateDuration = TimeSpan.FromMinutes(1),
             ReadDurationFactory = call =>
             {
-                bothEntered.Signal();
-                ManualResetEventSlim release = call == 1 ? releaseFirst : releaseSecond;
-                release.Wait(Watchdog).Should().BeTrue();
+                signalEntered();
+                Func<TimeSpan, bool> wait = call == 1 ? waitFirst : waitSecond;
+                wait(Watchdog).Should().BeTrue();
                 return call == 1 ? TimeSpan.FromSeconds(2) : TimeSpan.FromSeconds(7);
             },
         };
@@ -180,8 +185,20 @@ public sealed class ExpirationEngineTests
         );
 
         (await cache.GetAsync(1)).Should().Be("1");
-        Task<bool> first = Task.Run(() => cache.TryGet(1, out _));
-        Task<bool> second = Task.Run(() => cache.TryGet(1, out _));
+        Task<bool> first = Task.Factory.StartNew(
+            static state => ((IAsyncLoadingCache<int, string>)state!).TryGet(1, out _),
+            cache,
+            CancellationToken.None,
+            TaskCreationOptions.DenyChildAttach,
+            TaskScheduler.Default
+        );
+        Task<bool> second = Task.Factory.StartNew(
+            static state => ((IAsyncLoadingCache<int, string>)state!).TryGet(1, out _),
+            cache,
+            CancellationToken.None,
+            TaskCreationOptions.DenyChildAttach,
+            TaskScheduler.Default
+        );
         try
         {
             bothEntered.Wait(Watchdog).Should().BeTrue();
@@ -294,6 +311,7 @@ public sealed class ExpirationEngineTests
         using var timeProvider = new RecordingTimerProvider();
         var armEntered = NewSignal();
         using var releaseArm = new ManualResetEventSlim(false);
+        Func<TimeSpan, bool> waitForArmRelease = releaseArm.Wait;
         int armCount = 0;
         var hooks = new LoadingCacheTestHooks
         {
@@ -305,7 +323,7 @@ public sealed class ExpirationEngineTests
                 }
 
                 armEntered.TrySetResult(true);
-                releaseArm.Wait(Watchdog).Should().BeTrue();
+                waitForArmRelease(Watchdog).Should().BeTrue();
             },
         };
         var engine = new CacheEngine<int, string>(
@@ -322,19 +340,16 @@ public sealed class ExpirationEngineTests
         using var cache = new Cache<int, string>(engine);
 
         cache.Put(1, "value");
+        IFixedExpirationPolicy<int, string> writeExpiry = cache.Policy.ExpireAfterWrite!;
         Task staleArm = Task.Run(cache.CleanUp);
         Task? shorterArm = null;
         try
         {
             await armEntered.Task.WaitAsync(Watchdog, CancellationToken.None);
-            shorterArm = Task.Run(() =>
-                cache.Policy.ExpireAfterWrite!.SetDuration(TimeSpan.FromSeconds(1))
-            );
+            shorterArm = Task.Run(() => writeExpiry.SetDuration(TimeSpan.FromSeconds(1)));
             SpinWait
                 .SpinUntil(
-                    () =>
-                        cache.Policy.ExpireAfterWrite!.GetExpiresAfter(1)
-                        == TimeSpan.FromSeconds(1),
+                    () => writeExpiry.GetExpiresAfter(1) == TimeSpan.FromSeconds(1),
                     Watchdog
                 )
                 .Should()
@@ -428,7 +443,7 @@ public sealed class ExpirationEngineTests
         internal TimeSpan ReadDuration { get; init; } = TimeSpan.FromMinutes(1);
         internal Func<int, TimeSpan>? ReadDurationFactory { get; init; }
         internal bool ThrowOnRead { get; set; }
-        internal Action? OnRead { get; init; }
+        internal Action? OnRead { get; set; }
         internal int CreateCalls;
         internal int UpdateCalls;
         internal int ReadCalls;

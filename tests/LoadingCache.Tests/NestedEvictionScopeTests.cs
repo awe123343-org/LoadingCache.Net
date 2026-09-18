@@ -23,10 +23,11 @@ public sealed class NestedEvictionScopeTests
             .Build();
         cache.Put(2, 0);
         time.Advance(TimeSpan.FromSeconds(1));
+        Func<int, Func<int, int>, int> getOrAdd = cache.GetOrAdd;
         int value = cache.GetOrAdd(
             1,
             _ =>
-                cache.GetOrAdd(
+                getOrAdd(
                     2,
                     _ =>
                     {

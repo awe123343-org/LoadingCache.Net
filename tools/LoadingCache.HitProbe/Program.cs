@@ -26,14 +26,14 @@ internal static class Program
             ProbeOptions options = ProbeOptions.Parse(args);
             if (options.KeyMode == "preboxed")
             {
-                Run(
+                Run<object>(
                     options,
-                    Enumerable.Range(0, options.Residents).Select(key => (object)key).ToArray()
+                    [.. Enumerable.Range(0, options.Residents).Select(key => (object)key)]
                 );
             }
             else
             {
-                Run(options, Enumerable.Range(0, options.Residents).ToArray());
+                Run(options, [.. Enumerable.Range(0, options.Residents)]);
             }
             return 0;
         }
@@ -50,8 +50,10 @@ internal static class Program
         if (options.Backend == "loadingcache")
         {
             using ICache<TKey, int> cache = CreateCache<TKey>(options);
-            LoadingDiagnostics? diagnostics = options.Diagnostics ? new(cache) : null;
-            Run<TKey, LoadingBackend<TKey>>(options, keys, new(cache), diagnostics);
+            LoadingDiagnostics? diagnostics = options.Diagnostics
+                ? new LoadingDiagnostics(cache)
+                : null;
+            Run(options, keys, new LoadingBackend<TKey>(cache), diagnostics);
         }
         else
         {
@@ -62,7 +64,7 @@ internal static class Program
                     TrackStatistics = options.Statistics,
                 }
             );
-            Run<TKey, MemoryBackend<TKey>>(options, keys, new(cache, options));
+            Run(options, keys, new MemoryBackend<TKey>(cache, options));
         }
     }
 
@@ -179,7 +181,7 @@ internal static class Program
         return builder.Build();
     }
 
-    private interface IBackend<TKey>
+    private interface IBackend<in TKey>
         where TKey : notnull
     {
         bool TryGet(TKey key, out int value);
@@ -209,7 +211,7 @@ internal static class Program
             get
             {
                 CacheStatistics stats = cache.Statistics;
-                return new(stats.Hits, stats.Misses);
+                return new RequestStatistics(stats.Hits, stats.Misses);
             }
         }
     }
@@ -247,7 +249,7 @@ internal static class Program
             get
             {
                 MemoryCacheStatistics? stats = _cache.GetCurrentStatistics();
-                return new(stats?.TotalHits ?? 0, stats?.TotalMisses ?? 0);
+                return new RequestStatistics(stats?.TotalHits ?? 0, stats?.TotalMisses ?? 0);
             }
         }
     }
@@ -544,7 +546,7 @@ internal static class Program
                     : "TimeSpan ticks (10,000,000/second); aggregate CPU of all process threads including measurement-boundary overhead, excluding diagnostic captures and explicit cleanup.",
                 Diagnostics: diagnosticBefore is null || diagnosticAfter is null
                     ? null
-                    : new(
+                    : new ProbeDiagnostics(
                         diagnosticBefore,
                         diagnosticAfter,
                         operations - (diagnosticAfter.Reserved - diagnosticBefore.Reserved)
@@ -794,7 +796,7 @@ internal static class Program
         internal ProbeReaderDiagnostic DescribeReader(int workerIndex, int managedThreadId)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(managedThreadId);
-            return new(
+            return new ProbeReaderDiagnostic(
                 workerIndex,
                 managedThreadId,
                 _statisticsStripeMask,
@@ -828,7 +830,7 @@ internal static class Program
                 }
             }
 
-            return new(
+            return new ProbeDiagnosticSnapshot(
                 (long)_requests.GetValue(maintenance)!,
                 (long)_drainPasses.GetValue(maintenance)!,
                 _recordTotals ? (long)_enqueued.GetValue(reads)! : null,
@@ -894,29 +896,28 @@ internal static class Program
                 }
             }
 
-            foreach (string option in values.Keys)
-            {
-                if (
+            foreach (
+                string option in values.Keys.Where(static option =>
                     option
-                    is not (
-                        "--backend"
-                        or "--key-mode"
-                        or "--expiration"
-                        or "--capacity"
-                        or "--residents"
-                        or "--pattern"
-                        or "--workers"
-                        or "--statistics"
-                        or "--warmups"
-                        or "--runs"
-                        or "--duration-ms"
-                        or "--diagnostics"
-                        or "--output"
-                    )
+                        is not (
+                            "--backend"
+                            or "--key-mode"
+                            or "--expiration"
+                            or "--capacity"
+                            or "--residents"
+                            or "--pattern"
+                            or "--workers"
+                            or "--statistics"
+                            or "--warmups"
+                            or "--runs"
+                            or "--duration-ms"
+                            or "--diagnostics"
+                            or "--output"
+                        )
                 )
-                {
-                    throw new ArgumentException($"Unknown option '{option}'.");
-                }
+            )
+            {
+                throw new ArgumentException($"Unknown option '{option}'.");
             }
 
             int capacity = ReadInt(values, "--capacity", 1_024, 1, 1 << 26);
@@ -965,7 +966,7 @@ internal static class Program
                 throw new ArgumentException("Duration must resolve to positive stopwatch ticks.");
             }
 
-            return new(
+            return new ProbeOptions(
                 backend,
                 keyMode,
                 expiration,
@@ -978,7 +979,7 @@ internal static class Program
                 runs,
                 durationMilliseconds,
                 diagnosticsValue == "on",
-                values.TryGetValue("--output", out string? output) ? output : null
+                values.GetValueOrDefault("--output")
             );
         }
 
@@ -1016,7 +1017,7 @@ internal static class Program
             IReadOnlyDictionary<string, string> values,
             string option,
             string fallback
-        ) => values.TryGetValue(option, out string? value) ? value : fallback;
+        ) => values.GetValueOrDefault(option, fallback);
     }
 
     private readonly record struct CacheSnapshot(long ResidentCount, long? WeightedSize);

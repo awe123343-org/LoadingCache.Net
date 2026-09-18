@@ -21,22 +21,35 @@ public sealed class EngineIntegrationRegressionTests
         cache.Put(1, 42);
         comparer.Armed = true;
 
-        Task writer = Task.Run(() => cache.Put(99, 99));
+        Task writer = Task.Factory.StartNew(
+            static state => ((ICache<int, int>)state!).Put(99, 99),
+            cache,
+            CancellationToken.None,
+            TaskCreationOptions.DenyChildAttach,
+            TaskScheduler.Default
+        );
+        Task<int>? reader = null;
         try
         {
             await comparer.Entered.Task.WaitAsync(Watchdog);
-            Task<int> reader = Task.Run(() =>
-                cache.GetOrAdd(
-                    1,
-                    static _ => throw new AssertionException("A resident hit invoked its factory.")
-                )
+            reader = Task.Factory.StartNew(
+                static state =>
+                    ((ICache<int, int>)state!).GetOrAdd(
+                        1,
+                        static _ =>
+                            throw new AssertionException("A resident hit invoked its factory.")
+                    ),
+                cache,
+                CancellationToken.None,
+                TaskCreationOptions.DenyChildAttach,
+                TaskScheduler.Default
             );
             (await reader.WaitAsync(Watchdog)).Should().Be(42);
         }
         finally
         {
             comparer.Release.Set();
-            await writer.WaitAsync(Watchdog);
+            await Task.WhenAll(writer, reader ?? Task.CompletedTask).WaitAsync(Watchdog);
         }
     }
 

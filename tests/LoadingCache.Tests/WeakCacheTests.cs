@@ -37,7 +37,7 @@ public sealed class WeakCacheTests
         // Keep policy transport out of this measurement: its scheduler and
         // read-buffer work are separate from the authoritative key lookup.
         // The rejecting scheduler also prevents an accidental async work item.
-        using CacheEngine<Key, Value> engine = new(
+        await using CacheEngine<Key, Value> engine = new(
             new CacheEngineOptions<Key, Value>
             {
                 MaximumSize = 8,
@@ -301,7 +301,7 @@ public sealed class WeakCacheTests
 
         cache.TryGet(liveKey, out Value? current).Should().BeTrue();
         current.Should().BeSameAs(liveValue);
-        KeyValuePair<Key, Value>[] snapshot = cache.AsDictionary().ToArray();
+        KeyValuePair<Key, Value>[] snapshot = [.. cache.AsDictionary()];
         snapshot
             .Should()
             .ContainSingle(pair =>
@@ -333,7 +333,7 @@ public sealed class WeakCacheTests
         );
 
         calls.Should().Be(2);
-        ForceCollection([firstReference, secondReference]);
+        ForceCollection(firstReference, secondReference);
 
         cache.TryGet(key, out _).Should().BeFalse();
         cache.EstimatedCount.Should().Be(0);
@@ -556,7 +556,7 @@ public sealed class WeakCacheTests
 
         public void SetMaximum(long maximum, bool weighted) { }
 
-        public IReadOnlyList<object> Snapshot(bool hottest, int limit) => Array.Empty<object>();
+        public IReadOnlyList<object> Snapshot(bool hottest, int limit) => [];
 
         public void OnAccess(object? entryToken) { }
 

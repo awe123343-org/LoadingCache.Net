@@ -9,16 +9,13 @@ internal sealed partial class CacheEngine<TKey, TValue>
     /// gate still fences removal. The callback must only perform trusted,
     /// non-user ownership bookkeeping.
     /// </summary>
-    internal bool TryGetOwned(
-        TKey key,
-        Func<TValue, bool> tryAcquire,
-        [System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out TValue value
-    )
+    internal bool TryGetOwned(TKey key, Func<TValue, bool> tryAcquire)
     {
         ArgumentNullException.ThrowIfNull(key);
         ArgumentNullException.ThrowIfNull(tryAcquire);
         ThrowIfDisposed();
 
+        TValue value = default!;
         Entry readyEntry = null!;
         object? policyToken = null;
         long variableTimestamp = 0;
@@ -33,7 +30,6 @@ internal sealed partial class CacheEngine<TKey, TValue>
             ThrowIfDisposedLocked();
             if (!_entries.TryGetValue(key, out Entry? entry) || !Volatile.Read(ref entry.IsReady))
             {
-                value = default;
                 RecordMiss();
                 return false;
             }
@@ -44,20 +40,17 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 if (!Volatile.Read(ref entry.IsReady) || IsExpired(entry, now))
                 {
                     pendingEviction = RemoveCurrentEntryLocked(entry, RemovalCause.Expired);
-                    value = default;
                     RecordMiss();
                     miss = true;
                 }
                 else if (!entry.TryGetValue(out TValue? liveValue))
                 {
                     pendingEviction = RemoveCurrentEntryLocked(entry, collected: true);
-                    value = default;
                     RecordMiss();
                     miss = true;
                 }
                 else if (!tryAcquire(liveValue))
                 {
-                    value = default;
                     RecordMiss();
                     miss = true;
                 }
@@ -91,7 +84,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             ApplyReadExpiryUpdate(
                 readyEntry,
                 key,
-                value!,
+                value,
                 variableTimestamp,
                 variableRevision,
                 variableDuration
@@ -104,8 +97,6 @@ internal sealed partial class CacheEngine<TKey, TValue>
             _policy.OnAccess(policyToken);
         }
 
-        TValue acquiredValue = value!;
-        value = acquiredValue;
         return true;
     }
 }

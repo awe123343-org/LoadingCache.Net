@@ -75,12 +75,9 @@ internal sealed partial class CacheEngine<TKey, TValue>
         )
         {
             ArgumentNullException.ThrowIfNull(key);
-            if (!_weakKeys)
-            {
-                return _strong!.TryGetValue(key, out entry);
-            }
-
-            return _weak!.TryGetValue(key, out entry);
+            return !_weakKeys
+                ? _strong!.TryGetValue(key, out entry)
+                : _weak!.TryGetValue(key, out entry);
         }
 
         internal Entry this[TKey key]

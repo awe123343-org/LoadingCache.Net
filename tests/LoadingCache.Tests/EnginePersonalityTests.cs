@@ -162,6 +162,7 @@ public sealed class EnginePersonalityTests
     {
         var weigherEntered = NewSignal();
         using var releaseWeigher = new ManualResetEventSlim(false);
+        Func<TimeSpan, bool> waitForWeigherRelease = releaseWeigher.Wait;
         using ICache<int, string> cache = CacheBuilder
             .Create<int, string>()
             .MaximumWeight(100)
@@ -171,14 +172,20 @@ public sealed class EnginePersonalityTests
                 (_, item) =>
                 {
                     weigherEntered.TrySetResult(true);
-                    return releaseWeigher.Wait(TestTimeout)
+                    return waitForWeigherRelease(TestTimeout)
                         ? item.Length
                         : throw new TimeoutException("The controlled weigher was not released.");
                 }
             )
             .Build();
 
-        Task put = Task.Run(() => cache.Put(1, "value"));
+        Task put = Task.Factory.StartNew(
+            static state => ((ICache<int, string>)state!).Put(1, "value"),
+            cache,
+            CancellationToken.None,
+            TaskCreationOptions.DenyChildAttach,
+            TaskScheduler.Default
+        );
         try
         {
             await weigherEntered.Task.WaitAsync(TestTimeout, CancellationToken.None);
@@ -328,7 +335,13 @@ public sealed class EnginePersonalityTests
             source.SetResult("1");
             await publication.Entered.WaitAsync(TestTimeout, CancellationToken.None);
 
-            probe = Task.Run(() => cache.TryGet(1, out _));
+            probe = Task.Factory.StartNew(
+                static state => ((AsyncLoadingCache<int, string>)state!).TryGet(1, out _),
+                cache,
+                CancellationToken.None,
+                TaskCreationOptions.DenyChildAttach,
+                TaskScheduler.Default
+            );
             (await probe.WaitAsync(TestTimeout, CancellationToken.None)).Should().BeFalse();
 
             publication.Release();
@@ -361,7 +374,21 @@ public sealed class EnginePersonalityTests
         await using var cache = new AsyncCache<int, string>(engine);
         var source = NewSignal<string>();
 
-        Task installer = Task.Run(() => cache.Put(1, source.Task));
+        Task installer = Task.Factory.StartNew(
+            static state =>
+            {
+                (AsyncCache<int, string> current, Task<string> pending) = ((
+                    AsyncCache<int, string>,
+                    Task<string>
+                ))
+                    state!;
+                current.Put(1, pending);
+            },
+            (cache, source.Task),
+            CancellationToken.None,
+            TaskCreationOptions.DenyChildAttach,
+            TaskScheduler.Default
+        );
         try
         {
             await installation.Entered.WaitAsync(TestTimeout, CancellationToken.None);

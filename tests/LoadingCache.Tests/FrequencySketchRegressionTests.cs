@@ -283,7 +283,7 @@ public sealed class FrequencySketchRegressionTests
             uint counters = unchecked(mixed * 0x31848BABu);
             counters ^= counters >> 14;
             byte row = (byte)(counters >> (lane * 8));
-            return block * 128 + lane * 32 + (row % 2) * 16 + (row / 2) % 16;
+            return block * 128 + lane * 32 + row % 2 * 16 + row / 2 % 16;
         }
 
         internal int Frequency(uint hash)
@@ -312,11 +312,13 @@ public sealed class FrequencySketchRegressionTests
             for (int lane = 0; lane < 4; lane++)
             {
                 int index = CounterIndex(hash, lane);
-                if (_counters[index] < 15)
+                if (_counters[index] >= 15)
                 {
-                    _counters[index]++;
-                    changed = true;
+                    continue;
                 }
+
+                _counters[index]++;
+                changed = true;
             }
 
             if (!changed)

@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Diagnostics.CodeAnalysis;
+using JetBrains.Annotations;
 
 namespace LoadingCache;
 
@@ -77,6 +78,7 @@ public static class CacheValue
 
 /// <summary>Represents an optional value supplied to an atomic dictionary transform.</summary>
 /// <typeparam name="TValue">The cache value type.</typeparam>
+[PublicAPI]
 public readonly struct CacheValue<TValue>
     where TValue : notnull
 {
@@ -119,6 +121,7 @@ public readonly struct CacheValue<TValue>
 /// </remarks>
 /// <typeparam name="TKey">The key type.</typeparam>
 /// <typeparam name="TValue">The value type.</typeparam>
+[PublicAPI]
 public class CacheDictionary<TKey, TValue>
     : IDictionary<TKey, TValue>,
         IReadOnlyDictionary<TKey, TValue>
@@ -150,15 +153,10 @@ public class CacheDictionary<TKey, TValue>
     /// <summary>Gets or replaces the value for a key.</summary>
     public TValue this[TKey key]
     {
-        get
-        {
-            if (!TryGetValue(key, out TValue? value))
-            {
-                throw new KeyNotFoundException($"The key was not present: {key}.");
-            }
-
-            return value!;
-        }
+        get =>
+            TryGetValue(key, out TValue? value)
+                ? value!
+                : throw new KeyNotFoundException($"The key was not present: {key}.");
         set
         {
             ValidateValue(value);
@@ -306,6 +304,7 @@ public class CacheDictionary<TKey, TValue>
 }
 
 /// <summary>A synchronous cache dictionary view with an atomic value factory.</summary>
+[PublicAPI]
 public sealed class SyncCacheDictionary<TKey, TValue> : CacheDictionary<TKey, TValue>
     where TKey : notnull
     where TValue : notnull

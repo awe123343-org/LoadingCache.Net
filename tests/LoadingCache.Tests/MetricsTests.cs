@@ -137,18 +137,14 @@ public sealed class MetricsTests
         using MeterListener listener = new();
         listener.InstrumentPublished = (instrument, meterListener) =>
         {
-            if (
-                instrument.Meter.Name == CacheMetrics.MeterName
-                && throwDuringBuild.Value
-                && Interlocked.Increment(ref published) == 1
-            )
+            switch (instrument.Meter.Name)
             {
-                throw new InvalidOperationException("instrument subscriber failure");
-            }
-
-            if (instrument.Meter.Name == CacheMetrics.MeterName)
-            {
-                meterListener.EnableMeasurementEvents(instrument);
+                case CacheMetrics.MeterName
+                    when throwDuringBuild.Value && Interlocked.Increment(ref published) == 1:
+                    throw new InvalidOperationException("instrument subscriber failure");
+                case CacheMetrics.MeterName:
+                    meterListener.EnableMeasurementEvents(instrument);
+                    break;
             }
         };
         listener.Start();
@@ -200,7 +196,7 @@ public sealed class MetricsTests
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static WeakReference CreateDisposedMetricsCache()
     {
-        ICache<int, string>? cache = CacheBuilder
+        ICache<int, string> cache = CacheBuilder
             .Create<int, string>()
             .MaximumSize(4)
             .MaxConcurrentLoads(1)
@@ -208,7 +204,6 @@ public sealed class MetricsTests
             .Build();
         var reference = new WeakReference(cache);
         cache.Dispose();
-        cache = null;
         return reference;
     }
 

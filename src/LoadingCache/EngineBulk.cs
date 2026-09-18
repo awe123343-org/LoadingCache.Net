@@ -829,26 +829,17 @@ internal sealed partial class CacheEngine<TKey, TValue>
     /// ordinary completion path before that path computes a single-key weight,
     /// so each bulk result invokes user callbacks once.
     /// </summary>
-    private bool TryCompleteBulkSuccess(Flight flight, TValue leaderValue)
-    {
-        if (
-            flight is AsyncFlight asyncFlight
-            && _bulkAsyncGroups.TryGetValue(asyncFlight, out BulkAsyncGroup? asyncGroup)
-        )
+    private bool TryCompleteBulkSuccess(Flight flight, TValue leaderValue) =>
+        flight switch
         {
-            return CompleteBulkSuccess(asyncGroup, leaderValue);
-        }
-
-        if (
-            flight is SyncFlight syncFlight
-            && _bulkSyncGroups.TryGetValue(syncFlight, out BulkSyncGroup? syncGroup)
-        )
-        {
-            return CompleteBulkSuccess(syncGroup, leaderValue);
-        }
-
-        return false;
-    }
+            AsyncFlight asyncFlight
+                when _bulkAsyncGroups.TryGetValue(asyncFlight, out BulkAsyncGroup? asyncGroup) =>
+                CompleteBulkSuccess(asyncGroup, leaderValue),
+            SyncFlight syncFlight
+                when _bulkSyncGroups.TryGetValue(syncFlight, out BulkSyncGroup? syncGroup) =>
+                CompleteBulkSuccess(syncGroup, leaderValue),
+            _ => false,
+        };
 
     private bool CompleteBulkSuccess(BulkSyncGroup group, TValue leaderValue) =>
         CompleteBulkSuccessCore(group, leaderValue);
@@ -1080,25 +1071,27 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 lock (entry.Sync)
                 {
                     if (
-                        entry.Epoch == group.Epoch
-                        && entry.Generation == group.Owner.Generation
-                        && (
-                            ReferenceEquals(entry.Flight, group.Owner)
-                            || (
-                                group.Prepared is { } prepared
-                                && prepared.Publications.TryGetValue(
+                        entry.Epoch != group.Epoch
+                        || entry.Generation != group.Owner.Generation
+                        || (
+                            !ReferenceEquals(entry.Flight, group.Owner)
+                            && (
+                                group.Prepared is not { } prepared
+                                || !prepared.Publications.TryGetValue(
                                     key,
                                     out BulkPublication? publication
                                 )
-                                && ReferenceEquals(publication.PublishedEntry, entry)
-                                && publication.PublishedRevision == entry.PublicationRevision
+                                || !ReferenceEquals(publication.PublishedEntry, entry)
+                                || publication.PublishedRevision != entry.PublicationRevision
                             )
                         )
                     )
                     {
-                        _testHooks?.BeforeEntryPublicationCommit?.Invoke(entry.Sync);
-                        RemoveCurrentEntryLocked(entry);
+                        continue;
                     }
+
+                    _testHooks?.BeforeEntryPublicationCommit?.Invoke(entry.Sync);
+                    RemoveCurrentEntryLocked(entry);
                 }
             }
         }
@@ -1190,37 +1183,31 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
     private void CompleteBulkTimeout(Flight flight, Exception exception)
     {
-        if (
-            flight is AsyncFlight asyncFlight
-            && _bulkAsyncGroups.TryGetValue(asyncFlight, out BulkAsyncGroup? asyncGroup)
-        )
+        switch (flight)
         {
-            FailBulkGroup(asyncGroup, exception);
-        }
-        else if (
-            flight is SyncFlight syncFlight
-            && _bulkSyncGroups.TryGetValue(syncFlight, out BulkSyncGroup? syncGroup)
-        )
-        {
-            FailBulkGroup(syncGroup, exception);
+            case AsyncFlight asyncFlight
+                when _bulkAsyncGroups.TryGetValue(asyncFlight, out BulkAsyncGroup? asyncGroup):
+                FailBulkGroup(asyncGroup, exception);
+                break;
+            case SyncFlight syncFlight
+                when _bulkSyncGroups.TryGetValue(syncFlight, out BulkSyncGroup? syncGroup):
+                FailBulkGroup(syncGroup, exception);
+                break;
         }
     }
 
     private void FailBulkFlight(Flight flight, Exception exception)
     {
-        if (
-            flight is AsyncFlight asyncFlight
-            && _bulkAsyncGroups.TryGetValue(asyncFlight, out BulkAsyncGroup? asyncGroup)
-        )
+        switch (flight)
         {
-            FailBulkGroup(asyncGroup, exception);
-        }
-        else if (
-            flight is SyncFlight syncFlight
-            && _bulkSyncGroups.TryGetValue(syncFlight, out BulkSyncGroup? syncGroup)
-        )
-        {
-            FailBulkGroup(syncGroup, exception);
+            case AsyncFlight asyncFlight
+                when _bulkAsyncGroups.TryGetValue(asyncFlight, out BulkAsyncGroup? asyncGroup):
+                FailBulkGroup(asyncGroup, exception);
+                break;
+            case SyncFlight syncFlight
+                when _bulkSyncGroups.TryGetValue(syncFlight, out BulkSyncGroup? syncGroup):
+                FailBulkGroup(syncGroup, exception);
+                break;
         }
     }
 
@@ -1235,31 +1222,30 @@ internal sealed partial class CacheEngine<TKey, TValue>
         {
             _bulkPendingKeyCount -= group.OwnedKeys.Length;
             _bulkGroupCount--;
-            if (_bulkGroupCount == 0)
+            if (_bulkGroupCount != 0)
             {
-                _strongBulkMutationVersions?.Clear();
-                _weakBulkMutationVersions?.Clear();
-                _bulkMutationSequence = 0;
-                _bulkMutationLedgerToken = new object();
+                return;
             }
+
+            _strongBulkMutationVersions?.Clear();
+            _weakBulkMutationVersions?.Clear();
+            _bulkMutationSequence = 0;
+            _bulkMutationLedgerToken = new object();
         }
     }
 
     private void RetireBulkFlight(Flight flight)
     {
-        if (
-            flight is AsyncFlight asyncFlight
-            && _bulkAsyncGroups.TryGetValue(asyncFlight, out BulkAsyncGroup? asyncGroup)
-        )
+        switch (flight)
         {
-            ReleaseBulkKeyReservation(asyncGroup);
-        }
-        else if (
-            flight is SyncFlight syncFlight
-            && _bulkSyncGroups.TryGetValue(syncFlight, out BulkSyncGroup? syncGroup)
-        )
-        {
-            ReleaseBulkKeyReservation(syncGroup);
+            case AsyncFlight asyncFlight
+                when _bulkAsyncGroups.TryGetValue(asyncFlight, out BulkAsyncGroup? asyncGroup):
+                ReleaseBulkKeyReservation(asyncGroup);
+                break;
+            case SyncFlight syncFlight
+                when _bulkSyncGroups.TryGetValue(syncFlight, out BulkSyncGroup? syncGroup):
+                ReleaseBulkKeyReservation(syncGroup);
+                break;
         }
     }
 

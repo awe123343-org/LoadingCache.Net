@@ -422,11 +422,7 @@ public sealed class CacheBuilder<TKey, TValue>
             );
         }
 
-        if (
-            _maximumBulkKeys.HasValue
-            && _maxPendingLoadKeys.HasValue
-            && _maximumBulkKeys > _maxPendingLoadKeys
-        )
+        if (_maximumBulkKeys > _maxPendingLoadKeys)
         {
             throw new InvalidOperationException(
                 "MaximumBulkKeys cannot exceed MaxPendingLoadKeys."

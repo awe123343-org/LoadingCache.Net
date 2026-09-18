@@ -198,8 +198,9 @@ public sealed class BulkTerminalRaceTests
             loader.Release.TrySetException(new InvalidOperationException("backend failed"));
             await loader.Returned.Task.WaitAsync(Watchdog);
 
+            Func<CacheStatistics> readStatistics = cache.GetStatistics;
             SpinWait
-                .SpinUntil(() => cache.GetStatistics().InFlightLoads == 0, Watchdog)
+                .SpinUntil(() => readStatistics().InFlightLoads == 0, Watchdog)
                 .Should()
                 .BeTrue();
             joined.IsCompleted.Should().BeFalse();
@@ -300,9 +301,18 @@ public sealed class BulkTerminalRaceTests
             .BuildAsyncLoading(loader);
 
         cache.Set(1, "ready");
-        Task<IReadOnlyDictionary<int, string>> bulk = Task.Run(async () =>
-            await cache.GetAllAsync([1, 2]).ConfigureAwait(false)
-        );
+        Task<IReadOnlyDictionary<int, string>> bulk = Task
+            .Factory.StartNew(
+                static async state =>
+                    await ((IAsyncLoadingCache<int, string>)state!)
+                        .GetAllAsync([1, 2])
+                        .ConfigureAwait(false),
+                cache,
+                CancellationToken.None,
+                TaskCreationOptions.DenyChildAttach,
+                TaskScheduler.Default
+            )
+            .Unwrap();
         try
         {
             await expiry.ReadEntered.Task.WaitAsync(Watchdog);
@@ -310,7 +320,7 @@ public sealed class BulkTerminalRaceTests
             Task<string> joined = cache.GetAsync(2).AsTask();
             await loader.BulkStarted.Task.WaitAsync(Watchdog);
 
-            Func<Task> rejected = async () => await cache.GetAsync(3);
+            Func<Task> rejected = cache.Awaiting(static current => current.GetAsync(3).AsTask());
             await rejected.Should().ThrowExactlyAsync<CacheLoadRejectedException>();
 
             expiry.Release.TrySetResult(null);
@@ -323,8 +333,9 @@ public sealed class BulkTerminalRaceTests
             loader.Release.TrySetResult(new Dictionary<int, string> { [2] = "late" });
             (await joined).Should().Be("late");
             await loader.Finished.Task.WaitAsync(Watchdog);
+            Func<CacheStatistics> readStatistics = cache.GetStatistics;
             SpinWait
-                .SpinUntil(() => cache.GetStatistics().InFlightLoads == 0, Watchdog)
+                .SpinUntil(() => readStatistics().InFlightLoads == 0, Watchdog)
                 .Should()
                 .BeTrue();
         }
@@ -332,9 +343,21 @@ public sealed class BulkTerminalRaceTests
         {
             expiry.Release.TrySetResult(null);
             loader.Release.TrySetResult(new Dictionary<int, string> { [2] = "late" });
-            if (loader.BulkStarted.Task.IsCompleted)
+            try
             {
-                await loader.Finished.Task.WaitAsync(Watchdog);
+                await bulk.WaitAsync(Watchdog);
+            }
+            catch (InvalidOperationException exception)
+                when (exception.Message == "The bulk read callback failed.")
+            {
+                // Observe the controlled ready-read failure before disposing the cache.
+            }
+            finally
+            {
+                if (loader.BulkStarted.Task.IsCompleted)
+                {
+                    await loader.Finished.Task.WaitAsync(Watchdog);
+                }
             }
         }
     }

@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using JetBrains.Annotations;
 using LoadingCache.Maintenance;
 using LoadingCache.Ownership;
 
@@ -10,6 +11,7 @@ namespace LoadingCache;
 /// </summary>
 /// <typeparam name="TKey">The key type.</typeparam>
 /// <typeparam name="TValue">The reference value type.</typeparam>
+[PublicAPI]
 public sealed class OwnedCacheOptions<TKey, TValue>
     where TKey : notnull
     where TValue : class
@@ -139,6 +141,7 @@ public static class OwnedCache
 /// are no longer in use without changing the loading API's ownership contract.
 /// </para>
 /// </remarks>
+[PublicAPI]
 public sealed class OwnedCache<TKey, TValue> : IDisposable, IAsyncDisposable
     where TKey : notnull
     where TValue : class
@@ -187,8 +190,8 @@ public sealed class OwnedCache<TKey, TValue> : IDisposable, IAsyncDisposable
                     MaximumResidentCount = options.MaximumResidentCount,
                     Weigher = configuredWeigher is null
                         ? null
-                        : (key, entry) => configuredWeigher!(key, entry.Value),
-                    OnValueRetired = entry => _ownership.Retire(entry.Token),
+                        : (key, entry) => configuredWeigher(key, entry.Value),
+                    OnValueRetired = RetireOwnedEntry,
                     MaxConcurrentLoads = 1,
                     ExpireAfterWrite = options.ExpireAfterWrite,
                     ExpireAfterAccess = options.ExpireAfterAccess,
@@ -211,6 +214,8 @@ public sealed class OwnedCache<TKey, TValue> : IDisposable, IAsyncDisposable
             throw;
         }
     }
+
+    private void RetireOwnedEntry(OwnedEntry entry) => _ownership.Retire(entry.Token);
 
     /// <summary>
     /// Attempts to acquire a lease for a fresh resident value.
@@ -236,8 +241,7 @@ public sealed class OwnedCache<TKey, TValue> : IDisposable, IAsyncDisposable
                     {
                         return false;
                     }
-                },
-                out _
+                }
             );
 
             if (!found)

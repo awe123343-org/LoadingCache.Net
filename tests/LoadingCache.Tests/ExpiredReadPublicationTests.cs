@@ -53,7 +53,11 @@ public sealed class ExpiredReadPublicationTests
             .Factory.StartNew(
                 static async state =>
                 {
-                    var (readerCache, readTask) = ((AsyncLoadingCache<int, string>, bool))state!;
+                    (AsyncLoadingCache<int, string> readerCache, bool readTask) = ((
+                        AsyncLoadingCache<int, string>,
+                        bool
+                    ))
+                        state!;
                     if (readTask)
                     {
                         bool found = readerCache.TryGetTask(1, out Task<string>? task);

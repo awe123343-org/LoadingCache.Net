@@ -15,42 +15,45 @@ public sealed class RuntimePolicyTests
             .MaxConcurrentLoads(4)
             .Build();
         var eviction = cache.Policy.Eviction!;
-        await Task.WhenAll(
-                Enumerable
-                    .Range(0, 4)
-                    .Select(worker =>
-                        Task.Run(
-                            () =>
-                            {
-                                var random = new Random(811 + worker);
-                                for (int operation = 0; operation < 1_000; operation++)
-                                {
-                                    int key = random.Next(128);
-                                    switch (operation % 5)
-                                    {
-                                        case 0:
-                                            eviction.SetMaximum(random.Next(1, 64));
-                                            break;
-                                        case 1:
-                                            cache.Put(key, operation);
-                                            break;
-                                        case 2:
-                                            cache.TryGet(key, out _);
-                                            break;
-                                        case 3:
-                                            cache.Invalidate(key);
-                                            break;
-                                        default:
-                                            eviction.Hottest(8).Count.Should().BeLessOrEqualTo(8);
-                                            break;
-                                    }
-                                }
-                            },
-                            CancellationToken.None
-                        )
-                    )
-            )
-            .WaitAsync(TimeSpan.FromSeconds(30), CancellationToken.None);
+        var workers = new Task[4];
+        for (int worker = 0; worker < workers.Length; worker++)
+        {
+            workers[worker] = Task.Factory.StartNew(
+                static state =>
+                {
+                    (ICache<int, int> current, int workerId) = ((ICache<int, int>, int))state!;
+                    var policy = current.Policy.Eviction!;
+                    var random = new Random(811 + workerId);
+                    for (int operation = 0; operation < 1_000; operation++)
+                    {
+                        int key = random.Next(128);
+                        switch (operation % 5)
+                        {
+                            case 0:
+                                policy.SetMaximum(random.Next(1, 64));
+                                break;
+                            case 1:
+                                current.Put(key, operation);
+                                break;
+                            case 2:
+                                current.TryGet(key, out _);
+                                break;
+                            case 3:
+                                current.Invalidate(key);
+                                break;
+                            default:
+                                policy.Hottest(8).Count.Should().BeLessOrEqualTo(8);
+                                break;
+                        }
+                    }
+                },
+                (cache, worker),
+                CancellationToken.None,
+                TaskCreationOptions.DenyChildAttach,
+                TaskScheduler.Default
+            );
+        }
+        await Task.WhenAll(workers).WaitAsync(TimeSpan.FromSeconds(30), CancellationToken.None);
         eviction.SetMaximum(4);
         cache.CleanUp();
         cache.EstimatedCount.Should().BeLessOrEqualTo(4);

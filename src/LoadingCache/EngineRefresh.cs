@@ -23,14 +23,14 @@ internal sealed partial class CacheEngine<TKey, TValue>
             && _refreshFailureBackoffTicks > 0
             && _timeProvider.GetElapsedTime(entry.RefreshFailureTimestamp, now)
                 < TimeSpan.FromTicks(_refreshFailureBackoffTicks);
-        if (inFailureBackoff)
+        if (!inFailureBackoff)
         {
-            RecordCounter(CacheCounterKind.RefreshBackoff);
-            return false;
+            return _timeProvider.GetElapsedTime(entry.WriteTimestamp, now)
+                >= TimeSpan.FromTicks(refreshTicks);
         }
 
-        return _timeProvider.GetElapsedTime(entry.WriteTimestamp, now)
-            >= TimeSpan.FromTicks(refreshTicks);
+        RecordCounter(CacheCounterKind.RefreshBackoff);
+        return false;
     }
 
     private bool IsCurrentRefreshFlightLocked(Entry entry, Flight flight)
@@ -588,6 +588,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
             // shared promise.
             if (published)
             {
+                // This readonly, init-only hook deliberately runs after releasing the publication lock.
+                // ReSharper disable once InconsistentlySynchronizedField
                 InvokeHook(_testHooks?.AfterRefreshPublished);
             }
             RequestExpirationTimer();

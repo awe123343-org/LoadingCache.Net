@@ -15,6 +15,8 @@ public sealed class SynchronousEvictionRaceTests
     {
         await using var first = new BlockingTestHook(Timeout);
         await using var second = new BlockingTestHook(Timeout);
+        Action pauseFirst = first.Invoke;
+        Action pauseSecond = second.Invoke;
         var notifications = new ConcurrentQueue<int>();
         using var cache = CacheBuilder
             .Create<int, int>()
@@ -25,15 +27,27 @@ public sealed class SynchronousEvictionRaceTests
             .EvictionListener(notification =>
             {
                 notifications.Enqueue(notification.Key);
-                (notification.Key == 1 ? first : second).Invoke();
+                (notification.Key == 1 ? pauseFirst : pauseSecond)();
             })
             .Build();
-        Task firstPut = Task.Run(() => cache.Put(1, 1));
+        Task firstPut = Task.Factory.StartNew(
+            static state => ((ICache<int, int>)state!).Put(1, 1),
+            cache,
+            CancellationToken.None,
+            TaskCreationOptions.DenyChildAttach,
+            TaskScheduler.Default
+        );
         Task secondPut = Task.CompletedTask;
         try
         {
             await first.Entered.WaitAsync(Timeout);
-            secondPut = Task.Run(() => cache.Put(2, 2));
+            secondPut = Task.Factory.StartNew(
+                static state => ((ICache<int, int>)state!).Put(2, 2),
+                cache,
+                CancellationToken.None,
+                TaskCreationOptions.DenyChildAttach,
+                TaskScheduler.Default
+            );
             await second.Entered.WaitAsync(Timeout);
             firstPut.IsCompleted.Should().BeFalse();
             secondPut.IsCompleted.Should().BeFalse();
@@ -58,9 +72,7 @@ public sealed class SynchronousEvictionRaceTests
     public async Task EvictionCallbackCanWaitForAnotherThreadToMutateTheCache()
     {
         var notifications = new ConcurrentQueue<int>();
-        ICache<int, int>? current = null;
-        Task nested = Task.CompletedTask;
-        bool nestedFinished = false;
+        var mutation = new ReentrantMutation();
         using var cache = CacheBuilder
             .Create<int, int>()
             .MaximumWeight(1)
@@ -70,18 +82,19 @@ public sealed class SynchronousEvictionRaceTests
             .EvictionListener(notification =>
             {
                 notifications.Enqueue(notification.Key);
-                if (notification.Key == 1)
+                if (notification.Key != 1)
                 {
-                    nested = Task.Run(() => current!.Put(2, 2));
-                    nestedFinished = nested.Wait(Timeout);
+                    return;
                 }
+
+                mutation.Invoke();
             })
             .Build();
-        current = cache;
+        mutation.Cache = cache;
         cache.Put(1, 1);
-        await nested.WaitAsync(Timeout);
-        nestedFinished
-            .Should()
+        await mutation.Pending.WaitAsync(Timeout);
+        mutation
+            .Finished.Should()
             .BeTrue("no engine, entry, policy, or timer lock may surround the callback");
         notifications.Should().BeEquivalentTo([1, 2]);
     }
@@ -90,6 +103,7 @@ public sealed class SynchronousEvictionRaceTests
     public async Task ColdLoadPromiseWaitsForEvictionCallback()
     {
         await using var callback = new BlockingTestHook(Timeout);
+        Action pauseCallback = callback.Invoke;
         var result = new TaskCompletionSource<int>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
@@ -103,7 +117,7 @@ public sealed class SynchronousEvictionRaceTests
             .EvictionListener(_ =>
             {
                 Interlocked.Increment(ref calls);
-                callback.Invoke();
+                pauseCallback();
             })
             .BuildAsyncLoading((_, _) => result.Task);
         Task<int> waiting = cache.GetAsync(1).AsTask();
@@ -126,6 +140,7 @@ public sealed class SynchronousEvictionRaceTests
     public async Task BulkPromisesWaitForRequestedAndPrefetchedEvictionCallbacks()
     {
         await using var callback = new BlockingTestHook(Timeout);
+        Action pauseCallback = callback.Invoke;
         var loader = new GatedBulkLoader();
         var notifications = new ConcurrentQueue<int>();
         await using var cache = CacheBuilder
@@ -140,7 +155,7 @@ public sealed class SynchronousEvictionRaceTests
             .EvictionListener(notification =>
             {
                 notifications.Enqueue(notification.Key);
-                callback.Invoke();
+                pauseCallback();
             })
             .BuildAsyncLoading(loader);
         Task<IReadOnlyDictionary<int, int>> waiting = cache.GetAllAsync([1, 2]).AsTask();
@@ -331,9 +346,7 @@ public sealed class SynchronousEvictionRaceTests
     public async Task PromptExpirationCallbackRunsOutsideTimerCoordination()
     {
         var time = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
-        ICache<int, int>? current = null;
-        Task nested = Task.CompletedTask;
-        bool nestedFinished = false;
+        var mutation = new ReentrantMutation();
         int calls = 0;
         using var cache = CacheBuilder
             .Create<int, int>()
@@ -345,18 +358,32 @@ public sealed class SynchronousEvictionRaceTests
             .EvictionListener(_ =>
             {
                 Interlocked.Increment(ref calls);
-                nested = Task.Run(() => current!.Put(2, 2));
-                nestedFinished = nested.Wait(Timeout);
+                mutation.Invoke();
             })
             .Build();
-        current = cache;
+        mutation.Cache = cache;
         cache.Put(1, 1);
         time.Advance(TimeSpan.FromSeconds(1));
-        await nested.WaitAsync(Timeout);
-        nestedFinished.Should().BeTrue();
+        await mutation.Pending.WaitAsync(Timeout);
+        mutation.Finished.Should().BeTrue();
         calls.Should().Be(1);
         cache.TryGet(2, out int value).Should().BeTrue();
         value.Should().Be(2);
+    }
+
+    private sealed class ReentrantMutation
+    {
+        internal ICache<int, int> Cache { private get; set; } = null!;
+        internal Task Pending { get; private set; } = Task.CompletedTask;
+        internal bool Finished { get; private set; }
+
+        internal void Invoke()
+        {
+            Pending = Task.Run(Put);
+            Finished = Pending.Wait(Timeout);
+        }
+
+        private void Put() => Cache.Put(2, 2);
     }
 
     private static void WaitForSyncJoin(ILoadingCache<int, int> cache) =>

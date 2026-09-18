@@ -40,7 +40,13 @@ internal static class LoaderContractSmoke
         }
     }
 
-    private readonly record struct ConfigKey(string Tenant, string Name);
+    // Generated equality/hash code uses both cache-key identity components.
+    private readonly record struct ConfigKey(
+        // ReSharper disable once NotAccessedPositionalProperty.Local
+        string Tenant,
+        // ReSharper disable once NotAccessedPositionalProperty.Local
+        string Name
+    );
 
     private sealed record Config(int Version);
 

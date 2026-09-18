@@ -306,7 +306,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
     /// Invokes one captured eviction callback after the caller has released engine/entry locks.
     /// Callback failures are observed in cache statistics and do not alter authoritative state.
     /// </summary>
-    internal void DispatchSynchronousEviction(RemovalNotification<TKey, TValue> notification)
+    private void DispatchSynchronousEviction(RemovalNotification<TKey, TValue> notification)
     {
         Action<RemovalNotification<TKey, TValue>>? listener = _evictionListener;
         if (listener is null)

@@ -17,7 +17,7 @@ public sealed class TimeoutAdversarialTests
         var cancellationExited = Signal();
         var cancellationRelease = Signal();
         var backend = Signal<string>();
-        int callbackCount = 0;
+        var callbackCount = new System.Runtime.CompilerServices.StrongBox<int>();
         await using IAsyncLoadingCache<int, string> cache = CacheBuilder
             .Create<int, string>()
             .MaximumSize(4)
@@ -40,8 +40,9 @@ public sealed class TimeoutAdversarialTests
             await cancellationEntered.Task.WaitAsync(Watchdog);
 
             backend.TrySetResult("late");
+            Func<CacheStatistics> readStatistics = cache.GetStatistics;
             SpinWait
-                .SpinUntil(() => cache.GetStatistics().InFlightLoads == 0, Watchdog)
+                .SpinUntil(() => readStatistics().InFlightLoads == 0, Watchdog)
                 .Should()
                 .BeTrue();
 
@@ -51,7 +52,7 @@ public sealed class TimeoutAdversarialTests
                 .Awaiting(() => second)
                 .Should()
                 .ThrowExactlyAsync<CacheLoadRejectedException>();
-            Volatile.Read(ref callbackCount).Should().Be(1);
+            Volatile.Read(ref callbackCount.Value).Should().Be(1);
         }
         finally
         {
@@ -72,7 +73,7 @@ public sealed class TimeoutAdversarialTests
 
             cancellationToken.Register(() =>
             {
-                Interlocked.Increment(ref callbackCount);
+                Interlocked.Increment(ref callbackCount.Value);
                 cancellationEntered.TrySetResult(true);
                 cancellationRelease.Task.GetAwaiter().GetResult();
                 cancellationExited.TrySetResult(true);
@@ -107,7 +108,7 @@ public sealed class TimeoutAdversarialTests
     {
         var clock = new ThrowNextTimestampTimeProvider();
         int hookCalls = 0;
-        int loads = 0;
+        var loads = new System.Runtime.CompilerServices.StrongBox<int>();
         var hooks = new LoadingCacheTestHooks
         {
             BeforeReadyPublish = () =>
@@ -127,7 +128,8 @@ public sealed class TimeoutAdversarialTests
         var engine = builder.CreateEngine(hooks, hasFixedLoader: true);
         await using var cache = new AsyncLoadingCache<int, string>(
             engine,
-            (_, _) => Task.FromResult(Interlocked.Increment(ref loads) == 1 ? "first" : "retry")
+            (_, _) =>
+                Task.FromResult(Interlocked.Increment(ref loads.Value) == 1 ? "first" : "retry")
         );
 
         Task<string> first = cache.GetAsync(1).AsTask();
@@ -140,7 +142,7 @@ public sealed class TimeoutAdversarialTests
         Task<string> retry = cache.GetAsync(1).AsTask();
         await WaitForCompletion(retry);
         (await retry).Should().Be("retry");
-        Volatile.Read(ref loads).Should().Be(2);
+        Volatile.Read(ref loads.Value).Should().Be(2);
     }
 
     [Test]

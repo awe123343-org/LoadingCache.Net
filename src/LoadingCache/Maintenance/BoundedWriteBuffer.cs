@@ -18,7 +18,6 @@ internal sealed class BoundedWriteBuffer<TEvent> : IDisposable
 {
     private readonly object _gate;
     private readonly Queue<TEvent> _queue;
-    private readonly int _capacity;
     private int _queued;
     private long _enqueued;
     private long _dequeued;
@@ -30,12 +29,12 @@ internal sealed class BoundedWriteBuffer<TEvent> : IDisposable
     internal BoundedWriteBuffer(int capacity, object? coordinationGate = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
-        _capacity = capacity;
+        Capacity = capacity;
         _gate = coordinationGate ?? new object();
         _queue = new Queue<TEvent>(capacity);
     }
 
-    internal int Capacity => _capacity;
+    internal int Capacity { get; }
 
     internal bool IsDisposed => Volatile.Read(ref _disposed) != 0;
 
@@ -65,7 +64,7 @@ internal sealed class BoundedWriteBuffer<TEvent> : IDisposable
             return false;
         }
 
-        if (_queue.Count >= _capacity)
+        if (_queue.Count >= Capacity)
         {
             SaturatingIncrement(ref _full);
             return false;
@@ -141,7 +140,7 @@ internal sealed class BoundedWriteBuffer<TEvent> : IDisposable
         {
             return new WriteBufferStatistics(
                 isDisposed: _disposed != 0,
-                capacity: _capacity,
+                capacity: Capacity,
                 queued: _queued,
                 enqueued: _enqueued,
                 dequeued: _dequeued,

@@ -89,46 +89,48 @@ public sealed class FeatureCombinationStabilityTests
             {
                 FeatureCache[] current = caches;
                 int currentCycle = cycle;
-                jobs = Enumerable
-                    .Range(0, Workers)
-                    .Select(worker =>
-                        Task.Run(async () =>
-                        {
-                            for (int index = 0; index < OperationsPerBatch; index++)
+                jobs =
+                [
+                    .. Enumerable
+                        .Range(0, Workers)
+                        .Select(worker =>
+                            Task.Run(async () =>
                             {
-                                int mode = random[worker].Next(current.Length);
-                                int key = random[worker].Next(128);
-                                int kind = random[worker].Next(100);
-                                long position = positions[worker]++;
-                                traces[worker][position % 128] = new TraceEntry(
-                                    position,
-                                    currentCycle,
-                                    mode,
-                                    key,
-                                    kind
-                                );
-                                try
+                                for (int index = 0; index < OperationsPerBatch; index++)
                                 {
-                                    await OperateAsync(current[mode], key, kind)
-                                        .ConfigureAwait(false);
-                                    Interlocked.Increment(ref outcomes[0]);
+                                    int mode = random[worker].Next(current.Length);
+                                    int key = random[worker].Next(128);
+                                    int kind = random[worker].Next(100);
+                                    long position = positions[worker]++;
+                                    traces[worker][position % 128] = new TraceEntry(
+                                        position,
+                                        currentCycle,
+                                        mode,
+                                        key,
+                                        kind
+                                    );
+                                    try
+                                    {
+                                        await OperateAsync(current[mode], key, kind)
+                                            .ConfigureAwait(false);
+                                        Interlocked.Increment(ref outcomes[0]);
+                                    }
+                                    catch (CacheLoadRejectedException)
+                                    {
+                                        Interlocked.Increment(ref outcomes[1]);
+                                    }
+                                    catch (ControlledLoaderFailure)
+                                    {
+                                        Interlocked.Increment(ref outcomes[2]);
+                                    }
+                                    catch (OperationCanceledException) when (kind < 5)
+                                    {
+                                        Interlocked.Increment(ref outcomes[3]);
+                                    }
                                 }
-                                catch (CacheLoadRejectedException)
-                                {
-                                    Interlocked.Increment(ref outcomes[1]);
-                                }
-                                catch (ControlledLoaderFailure)
-                                {
-                                    Interlocked.Increment(ref outcomes[2]);
-                                }
-                                catch (OperationCanceledException) when (kind < 5)
-                                {
-                                    Interlocked.Increment(ref outcomes[3]);
-                                }
-                            }
-                        })
-                    )
-                    .ToArray();
+                            })
+                        ),
+                ];
                 await Task.WhenAll(jobs).WaitAsync(Watchdog).ConfigureAwait(false);
                 batch++;
                 foreach (FeatureCache cache in caches)
@@ -157,14 +159,13 @@ public sealed class FeatureCombinationStabilityTests
                     Progress(log, "progress", elapsed, batch, cycle, caches, outcomes);
                     nextProgress = elapsed.Elapsed + TimeSpan.FromSeconds(1);
                 }
-                if (elapsed.Elapsed >= nextRotation)
-                {
-                    foreach (FeatureCache cache in caches)
-                        await cache.DisposeAsync().ConfigureAwait(false);
-                    Progress(log, "retired", elapsed, batch, cycle, caches, outcomes);
-                    caches = CreateCaches(statistics, ++cycle);
-                    nextRotation = elapsed.Elapsed + interval;
-                }
+                if (elapsed.Elapsed < nextRotation)
+                    continue;
+                foreach (FeatureCache cache in caches)
+                    await cache.DisposeAsync().ConfigureAwait(false);
+                Progress(log, "retired", elapsed, batch, cycle, caches, outcomes);
+                caches = CreateCaches(statistics, ++cycle);
+                nextRotation = elapsed.Elapsed + interval;
             }
             Progress(log, "workload-complete", elapsed, batch, cycle, caches, outcomes);
         }
@@ -224,7 +225,7 @@ public sealed class FeatureCombinationStabilityTests
     }
 
     private static FeatureCache[] CreateCaches(bool statistics, int cycle) =>
-        Enumerable.Range(0, 3).Select(mode => new FeatureCache(mode, cycle, statistics)).ToArray();
+        [new(0, cycle, statistics), new(1, cycle, statistics), new(2, cycle, statistics)];
 
     private static async Task OperateAsync(FeatureCache cache, int id, int kind)
     {
@@ -238,6 +239,8 @@ public sealed class FeatureCombinationStabilityTests
                         [key, cache.Keys[(id + 1) % 128], key],
                         cancellation.Token
                     );
+                    // Cancellation callbacks must finish before the next deterministic test step.
+                    // ReSharper disable once MethodHasAsyncOverload
                     cancellation.Cancel();
                     cache.Validate(await pending.ConfigureAwait(false));
                 }
@@ -376,7 +379,7 @@ public sealed class FeatureCombinationStabilityTests
         internal int Mode { get; }
         internal int Instance { get; }
         internal Key[] Keys { get; private set; } =
-            Enumerable.Range(0, 128).Select(id => new Key(id)).ToArray();
+        [.. Enumerable.Range(0, 128).Select(id => new Key(id))];
         internal CacheEngine<Key, Payload> Engine { get; }
         internal Exception? Error => Volatile.Read(ref _error);
 
@@ -384,18 +387,15 @@ public sealed class FeatureCombinationStabilityTests
             new(key.Id, Instance, Interlocked.Increment(ref _version));
 
         internal void RotateKeys() =>
-            Keys = Enumerable.Range(0, 128).Select(id => new Key(id)).ToArray();
+            Keys = [.. Enumerable.Range(0, 128).Select(id => new Key(id))];
 
         internal ValueTask<Payload> GetAsync(Key key) =>
-            _async is null ? ValueTask.FromResult(_sync!.Get(key)) : _async.GetAsync(key);
+            _async?.GetAsync(key) ?? ValueTask.FromResult(_sync!.Get(key));
 
         internal ValueTask<IReadOnlyDictionary<Key, Payload>> GetAllAsync(
             Key[] keys,
             CancellationToken token = default
-        ) =>
-            _async is null
-                ? ValueTask.FromResult(_sync!.GetAll(keys))
-                : _async.GetAllAsync(keys, token);
+        ) => _async?.GetAllAsync(keys, token) ?? ValueTask.FromResult(_sync!.GetAll(keys));
 
         internal void Validate(IReadOnlyDictionary<Key, Payload> values)
         {
@@ -451,9 +451,11 @@ public sealed class FeatureCombinationStabilityTests
         {
             if (call % 37 == 0)
                 throw new ControlledLoaderFailure();
-            var values = new Dictionary<Key, Payload>(_comparer);
-            foreach (Key key in keys)
-                values.Add(key, NewPayload(key));
+            Dictionary<Key, Payload> values = keys.ToDictionary(
+                static key => key,
+                NewPayload,
+                _comparer
+            );
             Key extra = new(10_000 + (int)(call % 8));
             values.Add(extra, NewPayload(extra));
             return values;
@@ -519,14 +521,13 @@ public sealed class FeatureCombinationStabilityTests
                     Interlocked.Increment(ref _collected);
                 if (eviction)
                     notification.Cause.Should().BeOneOf(RemovalCause.Size, RemovalCause.Collected);
-                if (notification.Key is { } key)
+                if (notification.Key is not { } key)
+                    return;
+                try
                 {
-                    try
-                    {
-                        Engine.TryGet(key, out _);
-                    }
-                    catch (ObjectDisposedException) { }
+                    Engine.TryGet(key, out _);
                 }
+                catch (ObjectDisposedException) { }
             }
             catch (Exception exception)
             {
@@ -538,11 +539,10 @@ public sealed class FeatureCombinationStabilityTests
         {
             CheckNotification(notification, eviction: false);
             long call = Interlocked.Increment(ref _listenerCalls);
-            if (call % 31 == 0)
-            {
-                Interlocked.Increment(ref _listenerThrows);
-                throw new ControlledListenerFailure();
-            }
+            if (call % 31 != 0)
+                return;
+            Interlocked.Increment(ref _listenerThrows);
+            throw new ControlledListenerFailure();
         }
 
         private void Evicted(RemovalNotification<Key, Payload> notification)

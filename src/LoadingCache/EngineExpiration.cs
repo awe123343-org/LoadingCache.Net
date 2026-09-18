@@ -8,19 +8,27 @@ internal sealed partial class CacheEngine<TKey, TValue>
     where TKey : notnull
     where TValue : notnull
 {
+    // The ref is forwarded to Volatile.Read/Write; no unsynchronized value access occurs here.
+    // ReSharper disable once InconsistentlySynchronizedField
     private TimeSpan? GetExpireAfterAccess() => GetConfiguredDuration(ref _expireAfterAccessTicks);
 
+    // The ref is forwarded to Volatile.Read/Write; no unsynchronized value access occurs here.
+    // ReSharper disable once InconsistentlySynchronizedField
     private TimeSpan? GetExpireAfterWrite() => GetConfiguredDuration(ref _expireAfterWriteTicks);
 
     private TimeSpan? GetRefreshAfterWrite() => GetConfiguredDuration(ref _refreshAfterWriteTicks);
 
     private void SetExpireAfterAccess(TimeSpan duration)
     {
+        // The ref is forwarded to Volatile.Read/Write; no unsynchronized value access occurs here.
+        // ReSharper disable once InconsistentlySynchronizedField
         SetFixedDuration(ref _expireAfterAccessTicks, duration);
     }
 
     private void SetExpireAfterWrite(TimeSpan duration)
     {
+        // The ref is forwarded to Volatile.Read/Write; no unsynchronized value access occurs here.
+        // ReSharper disable once InconsistentlySynchronizedField
         SetFixedDuration(ref _expireAfterWriteTicks, duration);
     }
 
@@ -320,6 +328,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
         if (ExecutionContext.IsFlowSuppressed())
         {
+            // The provider reference is readonly; its thread-safe clock/timer API is used in both lock contexts.
+            // ReSharper disable once InconsistentlySynchronizedField
             return _timeProvider.CreateTimer(
                 OnTimer,
                 this,
@@ -330,6 +340,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
         using (ExecutionContext.SuppressFlow())
         {
+            // The provider reference is readonly; its thread-safe clock/timer API is used in both lock contexts.
+            // ReSharper disable once InconsistentlySynchronizedField
             return _timeProvider.CreateTimer(
                 OnTimer,
                 this,
@@ -545,13 +557,19 @@ internal sealed partial class CacheEngine<TKey, TValue>
     {
         if (!_expirationClockInitialized)
         {
+            // The provider reference is readonly; its thread-safe clock/timer API is used in both lock contexts.
+            // ReSharper disable once InconsistentlySynchronizedField
             _expirationOriginTimestamp = _timeProvider.GetTimestamp();
             _expirationClockInitialized = true;
             _expirationNow = 0;
         }
 
+        // The provider reference is readonly; its thread-safe clock/timer API is used in both lock contexts.
+        // ReSharper disable once InconsistentlySynchronizedField
         TimeSpan elapsed = _timeProvider.GetElapsedTime(
             _expirationOriginTimestamp,
+            // The provider reference is readonly; its thread-safe clock/timer API is used in both lock contexts.
+            // ReSharper disable once InconsistentlySynchronizedField
             _timeProvider.GetTimestamp()
         );
         if (elapsed <= TimeSpan.Zero)

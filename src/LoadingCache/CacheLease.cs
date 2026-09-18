@@ -1,3 +1,4 @@
+using JetBrains.Annotations;
 using LoadingCache.Ownership;
 
 namespace LoadingCache;
@@ -10,6 +11,7 @@ namespace LoadingCache;
 /// <remarks>Do not release this lease concurrently with using its Value.
 /// Concurrent readers must acquire independent leases, and values must not
 /// escape their lease lifetime. Repeated concurrent Dispose calls are safe.</remarks>
+[PublicAPI]
 public sealed class CacheLease<TValue> : IDisposable, IAsyncDisposable
     where TValue : class
 {

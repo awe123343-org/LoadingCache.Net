@@ -86,7 +86,7 @@ public sealed class MemoryPressureTests
         cache.EstimatedCount.Should().Be(14);
         MemoryPressureStatistics? diagnostics = cache.Policy.MemoryPressureStatistics;
         diagnostics.Should().NotBeNull();
-        diagnostics!.Value.Samples.Should().Be(1);
+        diagnostics.Value.Samples.Should().Be(1);
         diagnostics.Value.PressureSamples.Should().Be(1);
         diagnostics.Value.EvictedEntries.Should().Be(2);
     }
@@ -142,16 +142,18 @@ public sealed class MemoryPressureTests
     {
         using var timeProvider = new ThrowingSecondTimerProvider();
 
-        Action build = () =>
+        Action build = timeProvider.Invoking(static current =>
+        {
             CacheBuilder
                 .Create<int, string>()
                 .MaximumSize(8)
                 .MaxConcurrentLoads(1)
-                .TimeProvider(timeProvider)
+                .TimeProvider(current)
                 .ExpireAfterWrite(TimeSpan.FromMinutes(1))
                 .EnableExpirationScheduler()
                 .MemoryPressureEviction(TimeSpan.FromSeconds(1))
                 .Build();
+        });
 
         build.Should().ThrowExactly<InvalidOperationException>();
         timeProvider.DisposedTimerCount.Should().Be(1);
@@ -177,7 +179,7 @@ public sealed class MemoryPressureTests
 
         MemoryPressureStatistics? diagnostics = cache.Policy.MemoryPressureStatistics;
         diagnostics.Should().NotBeNull();
-        diagnostics!.Value.SamplingErrors.Should().Be(1);
+        diagnostics.Value.SamplingErrors.Should().Be(1);
         diagnostics.Value.LastSamplingError.Should().BeOfType<InvalidOperationException>();
         cache.TryGet(1, out string? value).Should().BeTrue();
         value.Should().Be("one");
@@ -309,12 +311,7 @@ public sealed class MemoryPressureTests
     public async Task ProviderRunsOutsideCacheGateAndMayReenter()
     {
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
-        Cache<int, string>? cache = null;
-        var source = new TestMemoryPressureSource(() =>
-        {
-            cache!.Put(2, "reentrant");
-            return new MemoryPressureSample(0);
-        });
+        var source = new ReentrantMemoryPressureSource();
         CacheEngine<int, string> engine = CacheBuilder
             .Create<int, string>()
             .MaximumSize(8)
@@ -323,14 +320,11 @@ public sealed class MemoryPressureTests
             .MemoryPressureSource(source)
             .MemoryPressureEviction(TimeSpan.FromSeconds(1))
             .CreateEngine();
-        using (var typedCache = new Cache<int, string>(engine))
-        {
-            cache = typedCache;
-            await Task.Run(engine.SampleMemoryPressureForTesting)
-                .WaitAsync(TimeSpan.FromSeconds(5));
-            typedCache.TryGet(2, out string? value).Should().BeTrue();
-            value.Should().Be("reentrant");
-        }
+        using var typedCache = new Cache<int, string>(engine);
+        source.Cache = typedCache;
+        await Task.Run(engine.SampleMemoryPressureForTesting).WaitAsync(TimeSpan.FromSeconds(5));
+        typedCache.TryGet(2, out string? value).Should().BeTrue();
+        value.Should().Be("reentrant");
     }
 
     [Test]
@@ -484,6 +478,17 @@ public sealed class MemoryPressureTests
     private static TaskCompletionSource<bool> NewSignal() =>
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    private sealed class ReentrantMemoryPressureSource : IMemoryPressureSource
+    {
+        internal Cache<int, string> Cache { private get; set; } = null!;
+
+        public MemoryPressureSample GetSample()
+        {
+            Cache.Put(2, "reentrant");
+            return new MemoryPressureSample(0);
+        }
+    }
+
     private sealed class TestMemoryPressureSource : IMemoryPressureSource
     {
         private readonly Func<MemoryPressureSample> _sample;
@@ -511,7 +516,7 @@ public sealed class MemoryPressureTests
 
     private sealed class ContextCapturingTimeProvider : TimeProvider, IDisposable
     {
-        private readonly TimeProvider _system = TimeProvider.System;
+        private readonly TimeProvider _system = System;
         private ContextCapturingTimer? _timer;
 
         public override DateTimeOffset GetUtcNow() => _system.GetUtcNow();
@@ -618,7 +623,7 @@ public sealed class MemoryPressureTests
 
     private sealed class ThrowingSecondTimerProvider : TimeProvider, IDisposable
     {
-        private readonly TimeProvider _system = TimeProvider.System;
+        private readonly TimeProvider _system = System;
         private int _createCount;
         private int _disposedTimerCount;
 
@@ -639,12 +644,9 @@ public sealed class MemoryPressureTests
             TimeSpan period
         )
         {
-            if (Interlocked.Increment(ref _createCount) == 2)
-            {
-                throw new InvalidOperationException("The second timer is rejected.");
-            }
-
-            return new TrackingTimer(() => Interlocked.Increment(ref _disposedTimerCount));
+            return Interlocked.Increment(ref _createCount) == 2
+                ? throw new InvalidOperationException("The second timer is rejected.")
+                : new TrackingTimer(() => Interlocked.Increment(ref _disposedTimerCount));
         }
 
         public void Dispose() { }

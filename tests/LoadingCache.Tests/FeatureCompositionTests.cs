@@ -1,4 +1,5 @@
 using FluentAssertions;
+using JetBrains.Annotations;
 using Microsoft.Extensions.Time.Testing;
 using NUnit.Framework;
 
@@ -21,24 +22,38 @@ public sealed class FeatureCompositionTests
         var allJoined = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
-        int joined = 0;
-        Task<IReadOnlyDictionary<int, int>>[] callers = Enumerable
-            .Range(0, 100)
-            .Select(_ =>
-                Task.Run(
-                    async () =>
+        var joined = new System.Runtime.CompilerServices.StrongBox<int>();
+        var callers = new Task<IReadOnlyDictionary<int, int>>[100];
+        for (int index = 0; index < callers.Length; index++)
+        {
+            callers[index] = Task
+                .Factory.StartNew(
+                    static async state =>
                     {
-                        Task<IReadOnlyDictionary<int, int>> result = cache
+                        (
+                            IAsyncLoadingCache<int, int> current,
+                            System.Runtime.CompilerServices.StrongBox<int> count,
+                            TaskCompletionSource signal
+                        ) = ((
+                            IAsyncLoadingCache<int, int>,
+                            System.Runtime.CompilerServices.StrongBox<int>,
+                            TaskCompletionSource
+                        ))
+                            state!;
+                        Task<IReadOnlyDictionary<int, int>> result = current
                             .GetAllAsync([1, 2])
                             .AsTask();
-                        if (Interlocked.Increment(ref joined) == 100)
-                            allJoined.TrySetResult();
+                        if (Interlocked.Increment(ref count.Value) == 100)
+                            signal.TrySetResult();
                         return await result.ConfigureAwait(false);
                     },
-                    CancellationToken.None
+                    (cache, joined, allJoined),
+                    CancellationToken.None,
+                    TaskCreationOptions.DenyChildAttach,
+                    TaskScheduler.Default
                 )
-            )
-            .ToArray();
+                .Unwrap();
+        }
         IReadOnlyDictionary<int, int>[] results;
         try
         {
@@ -163,7 +178,7 @@ public sealed class FeatureCompositionTests
         public MemoryPressureSample GetSample() => new(1);
     }
 
-    private sealed record EqualValue(int Number);
+    private sealed record EqualValue([property: UsedImplicitly] int Number);
 
     private sealed class GatedBulkLoader : IBulkAsyncCacheLoader<int, int>
     {

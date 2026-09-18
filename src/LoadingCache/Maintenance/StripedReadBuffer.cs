@@ -215,14 +215,16 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
         }
 
         Volatile.Read(ref table[0])!.SetCounterForTesting(counter);
-        if (_dropCounters is not null)
+        if (_dropCounters is null)
         {
-            // Counter-wrap tests reset a quiescent first ring. Its full-drop accounting now
-            // lives in the shared shards; failed-offer history is not part of the ring reset.
-            for (int start = 0; start < _dropCounters.Length; start += DropCounterStride)
-            {
-                Volatile.Write(ref _dropCounters[start + DroppedFullOffset], 0);
-            }
+            return;
+        }
+
+        // Counter-wrap tests reset a quiescent first ring. Its full-drop accounting now
+        // lives in the shared shards; failed-offer history is not part of the ring reset.
+        for (int start = 0; start < _dropCounters.Length; start += DropCounterStride)
+        {
+            Volatile.Write(ref _dropCounters[start + DroppedFullOffset], 0);
         }
     }
 
@@ -574,13 +576,13 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
                                 // detached this table and already inspected its previously empty
                                 // slot; a release-only store could otherwise escape both checks.
                                 Interlocked.Exchange(ref table[index], created);
-                                if (Volatile.Read(ref _disposed) != 0)
+                                if (Volatile.Read(ref _disposed) == 0)
                                 {
-                                    DisposeCreatedRing(created);
-                                    return ReadBufferOfferResult.Shutdown;
+                                    return ReadBufferOfferResult.Success;
                                 }
 
-                                return ReadBufferOfferResult.Success;
+                                DisposeCreatedRing(created);
+                                return ReadBufferOfferResult.Shutdown;
                             }
                         }
                         finally
@@ -660,59 +662,61 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
             }
 
             if (
-                Volatile.Read(ref _tableBusy) == 0
-                && Interlocked.CompareExchange(ref _tableBusy, 1, 0) == 0
+                Volatile.Read(ref _tableBusy) != 0
+                || Interlocked.CompareExchange(ref _tableBusy, 1, 0) != 0
             )
             {
-                try
-                {
-                    if (Volatile.Read(ref _disposed) == 0 && Volatile.Read(ref _table) is null)
-                    {
-                        RingBuffer<TEvent> initializedRing = new(
-                            _stripeCapacity,
-                            value,
-                            _recordStatistics,
-                            _dropCounters,
-                            Volatile.Read(ref _beforeReserveForTesting),
-                            Volatile.Read(ref _beforePublishForTesting)
-                        );
-                        RingBuffer<TEvent>?[] initialized = [initializedRing];
-                        if (
-                            ReferenceEquals(
-                                Interlocked.CompareExchange(ref _table, initialized, null),
-                                null
-                            )
-                        )
-                        {
-                            if (Volatile.Read(ref _disposed) != 0)
-                            {
-                                DisposeCreatedRing(initializedRing);
-                                return ReadBufferOfferResult.Shutdown;
-                            }
+                continue;
+            }
 
+            try
+            {
+                if (Volatile.Read(ref _disposed) == 0 && Volatile.Read(ref _table) is null)
+                {
+                    RingBuffer<TEvent> initializedRing = new(
+                        _stripeCapacity,
+                        value,
+                        _recordStatistics,
+                        _dropCounters,
+                        Volatile.Read(ref _beforeReserveForTesting),
+                        Volatile.Read(ref _beforePublishForTesting)
+                    );
+                    RingBuffer<TEvent>?[] initialized = [initializedRing];
+                    if (
+                        ReferenceEquals(
+                            Interlocked.CompareExchange(ref _table, initialized, null),
+                            null
+                        )
+                    )
+                    {
+                        if (Volatile.Read(ref _disposed) == 0)
+                        {
                             return ReadBufferOfferResult.Success;
                         }
 
                         DisposeCreatedRing(initializedRing);
+                        return ReadBufferOfferResult.Shutdown;
                     }
-                }
-                finally
-                {
-                    Volatile.Write(ref _tableBusy, 0);
+
+                    DisposeCreatedRing(initializedRing);
                 }
             }
-        }
-
-        if (Volatile.Read(ref _disposed) != 0)
-        {
-            if (_recordStatistics)
+            finally
             {
-                SaturatingIncrement(ref _droppedShutdown);
+                Volatile.Write(ref _tableBusy, 0);
             }
-            return ReadBufferOfferResult.Shutdown;
         }
 
-        return ReadBufferOfferResult.Failed;
+        if (Volatile.Read(ref _disposed) == 0)
+        {
+            return ReadBufferOfferResult.Failed;
+        }
+
+        if (_recordStatistics)
+        {
+            SaturatingIncrement(ref _droppedShutdown);
+        }
+        return ReadBufferOfferResult.Shutdown;
     }
 
     private void DisposeCreatedRing(RingBuffer<TEvent> ring)
@@ -929,16 +933,16 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
 
             long tail = Volatile.Read(ref _writeCounter);
             long head = Volatile.Read(ref _readCounter);
-            if (unchecked((ulong)(tail - head)) >= (ulong)_capacity)
+            if (unchecked((ulong)(tail - head)) < (ulong)_capacity)
             {
-                if (_recordStatistics)
-                {
-                    RecordDrop(_dropCounters!, DroppedFullOffset);
-                }
-                return ReadBufferOfferResult.Full;
+                return OfferAvailable(value, tail);
             }
 
-            return OfferAvailable(value, tail);
+            if (_recordStatistics)
+            {
+                RecordDrop(_dropCounters!, DroppedFullOffset);
+            }
+            return ReadBufferOfferResult.Full;
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
@@ -997,24 +1001,24 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
             // still buffered, after the disposer has already cleared and inspected this slot.
             Interlocked.Exchange(ref slot.Sequence, unchecked(tail + 1));
 
-            if (Volatile.Read(ref _disposed) != 0)
+            if (Volatile.Read(ref _disposed) == 0)
             {
-                slot.Value = default!;
-                if (
-                    _recordStatistics
-                    // A producer can be delayed after its event was consumed. In a one-slot
-                    // ring the next free sequence equals that old publication's sequence.
-                    && unchecked((ulong)(tail - Volatile.Read(ref _readCounter))) < (ulong)_capacity
-                    && TryClaimShutdownDrop(ref slot, tail)
-                )
-                {
-                    SaturatingIncrement(ref _droppedShutdown);
-                }
-
-                return ReadBufferOfferResult.Shutdown;
+                return ReadBufferOfferResult.Success;
             }
 
-            return ReadBufferOfferResult.Success;
+            slot.Value = default!;
+            if (
+                _recordStatistics
+                // A producer can be delayed after its event was consumed. In a one-slot
+                // ring the next free sequence equals that old publication's sequence.
+                && unchecked((ulong)(tail - Volatile.Read(ref _readCounter))) < (ulong)_capacity
+                && TryClaimShutdownDrop(ref slot, tail)
+            )
+            {
+                SaturatingIncrement(ref _droppedShutdown);
+            }
+
+            return ReadBufferOfferResult.Shutdown;
         }
 
         internal bool TryRead(out T value)
@@ -1150,29 +1154,33 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
             // cache-owned root and clear every value so unrelated queued events can be collected
             // immediately. A late publisher clears its own value after seeing the disposed bit.
             Slot[]? slots = Interlocked.Exchange(ref _slots, null);
-            if (slots is not null)
+            if (slots is null)
             {
-                for (int index = 0; index < slots.Length; index++)
-                {
-                    slots[index].Value = default!;
-                }
+                return;
+            }
 
-                if (_recordStatistics)
+            for (int index = 0; index < slots.Length; index++)
+            {
+                slots[index].Value = default!;
+            }
+
+            if (!_recordStatistics)
+            {
+                return;
+            }
+
+            int count = (int)Math.Min(unchecked((ulong)(tail - head)), (ulong)_capacity);
+            int dropped = 0;
+            for (int offset = 0; offset < count; offset++)
+            {
+                long position = unchecked(head + offset);
+                ref Slot slot = ref slots[unchecked((int)position) & _mask];
+                if (TryClaimShutdownDrop(ref slot, position))
                 {
-                    int count = (int)Math.Min(unchecked((ulong)(tail - head)), (ulong)_capacity);
-                    int dropped = 0;
-                    for (int offset = 0; offset < count; offset++)
-                    {
-                        long position = unchecked(head + offset);
-                        ref Slot slot = ref slots[unchecked((int)position) & _mask];
-                        if (TryClaimShutdownDrop(ref slot, position))
-                        {
-                            dropped++;
-                        }
-                    }
-                    SaturatingAdd(ref _droppedShutdown, dropped);
+                    dropped++;
                 }
             }
+            SaturatingAdd(ref _droppedShutdown, dropped);
         }
 
         private static bool TryClaimShutdownDrop(ref Slot slot, long position)
@@ -1214,13 +1222,15 @@ internal static class ReadBufferThreadProbe
         get
         {
             ulong value = _value;
-            if (value == 0)
+            if (value != 0)
             {
-                value = unchecked((uint)Environment.CurrentManagedThreadId);
-                value = (value ^ (value >> 30)) * 0xBF58476D1CE4E5B9UL;
-                value = (value ^ (value >> 27)) * 0x94D049BB133111EBUL;
-                _value = value ^= value >> 31;
+                return value;
             }
+
+            value = unchecked((uint)Environment.CurrentManagedThreadId);
+            value = (value ^ (value >> 30)) * 0xBF58476D1CE4E5B9UL;
+            value = (value ^ (value >> 27)) * 0x94D049BB133111EBUL;
+            _value = value ^= value >> 31;
 
             return value;
         }
