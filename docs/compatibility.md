@@ -5,10 +5,11 @@ assembly. Tests and the source consumer target `net8.0` and `net10.0`; actual
 runtime and platform results are recorded in [release readiness](release-readiness.md).
 The repository build uses the .NET 10 SDK pinned in `global.json` and C# 12.
 
-The API is experimental and may change before a stable release. No binary or
-source compatibility guarantee has been established. Before 1.0, baseline the
-public API, compile all examples, test the packed consumer, establish supported
-OS/architecture/runtime matrices, and define a documented versioning policy.
+The API is experimental and may change before a stable release. The
+[public API baseline and versioning policy](api-compatibility.md) define review
+and mechanical checks; they do not certify V1 compatibility or readiness.
+Before 1.0, compile all examples, test the packed consumer and establish the
+supported OS/architecture/runtime matrices on the final candidate.
 
 The explicit .NET 8 requirement supersedes the original commission's default.
 Before release, reassess the runtime lifecycle and consumer migration needs as
