@@ -1,8 +1,11 @@
 minimum_prek_version: "0.4.14"
 default_stages: [pre-commit]
+# Dated benchmark runs include hash-bound reports, scripts and source snapshots.
+# Keep their archived bytes intact; ordinary documentation remains checked.
 exclude: >-
   (?x)(^|/)(artifacts|bin|obj|node_modules|\.idea|\.git|__pycache__)/|
   ^pnpm-lock\.yaml$|^docs/research-evidence/|^docs/benchmarks/.*\.(json|csv)$|
+  ^docs/benchmarks/[^/]+-[0-9]{8}/|
   ^tools/LoadingCache\.Simulator/results/
 
 repos:
