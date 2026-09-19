@@ -7,7 +7,7 @@
   "automergeStrategy": "squash",
   "platformAutomerge": true,
   "rebaseWhen": "conflicted",
-  "prConcurrentLimit": 3,
+  "prConcurrentLimit": 6,
   "ignorePaths": [
     "**/artifacts/**",
     "**/bin/**",
