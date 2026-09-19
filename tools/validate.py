@@ -58,7 +58,7 @@ def source_manifest(root: Path) -> dict[str, str]:
         for name in sorted(set(names))
         if name
         and (root / name).is_file()
-        and Path(name).suffix in suffixes
+        and (Path(name).suffix in suffixes or name == "VERSION")
         and not name.startswith("docs/")
     }
 

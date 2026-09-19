@@ -9,13 +9,18 @@ from verify_release_artifact import verify
 
 
 class ReleaseArtifactTests(unittest.TestCase):
-    def test_publication_requires_exact_successful_source_and_archives(self):
+    def test_stable_artifact(self):
+        self.test_publication_requires_exact_successful_source_and_archives("0.1.0")
+
+    def test_publication_requires_exact_successful_source_and_archives(
+        self, version="0.1.0-alpha.1.2"
+    ):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             packages = root / "packages"
             packages.mkdir()
             expected = {
-                "version": "0.1.0-alpha.1.2",
+                "version": version,
                 "core_id": "LoadingCache.Net",
                 "di_id": "LoadingCache.Net.Extensions.DependencyInjection",
                 "authors": "Maintainer",

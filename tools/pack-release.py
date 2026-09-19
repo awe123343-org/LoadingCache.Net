@@ -25,9 +25,9 @@ except ImportError:
 
 
 PACKAGE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
-SEMVER_PRERELEASE_PATTERN = re.compile(
+SEMVER_PATTERN = re.compile(
     r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
-    r"-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*$"
+    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
 SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
 CORE_ASSEMBLY = "LoadingCache"
@@ -39,7 +39,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--output", required=True, help="Fresh output directory for logs and packages"
     )
-    parser.add_argument("--version", help="SemVer 2.0 prerelease version")
+    parser.add_argument("--version", help="SemVer 2.0 version")
     parser.add_argument("--core-id", help="NuGet ID for the core package")
     parser.add_argument("--di-id", help="NuGet ID for the DI integration package")
     parser.add_argument("--authors", help="NuGet Authors metadata")
@@ -70,9 +70,9 @@ def validate_package_id(value: str, name: str) -> str:
 
 
 def validate_version(value: str) -> str:
-    if not SEMVER_PRERELEASE_PATTERN.fullmatch(value):
-        raise fail("version must be canonical SemVer 2.0 and include a prerelease identifier")
-    prerelease = value.split("-", 1)[1]
+    if not SEMVER_PATTERN.fullmatch(value):
+        raise fail("version must be canonical SemVer 2.0")
+    prerelease = value.partition("-")[2]
     for identifier in prerelease.split("."):
         if identifier.isdigit() and len(identifier) > 1 and identifier.startswith("0"):
             raise fail("numeric prerelease identifiers must not contain leading zeroes")

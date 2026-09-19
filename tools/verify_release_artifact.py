@@ -9,8 +9,11 @@ from pathlib import Path
 
 def verify(root: Path, expected: dict[str, str]) -> dict[str, str]:
     root = root.resolve()
-    if not re.fullmatch(r"0\.1\.0-alpha\.[1-9][0-9]*\.[1-9][0-9]*", expected["version"]):
-        raise ValueError("expected an automatically versioned prerelease")
+    if not re.fullmatch(
+        r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-alpha\.[1-9][0-9]*\.[1-9][0-9]*)?",
+        expected["version"],
+    ):
+        raise ValueError("expected a stable or automatically versioned alpha release")
     if not re.fullmatch(r"[0-9a-f]{40}", expected["repository_commit"]):
         raise ValueError("expected a full source commit")
     report = json.loads((root / "results.json").read_text(encoding="utf-8"))

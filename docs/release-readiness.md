@@ -10,7 +10,7 @@ version **0.1.0-alpha.1.2** were published by [GitHub run 35413554855, attempt 2
 
 Verification, package consumers, immutable manifest checks, OIDC login and both package/symbol pushes succeeded. Downloaded public nupkg entry payloads matched CI artifacts byte-for-byte, excluding NuGet's added `.signature.p7s`; signature presence, not independent cryptographic trust, was checked. Original published revisions remain historical evidence, not aliases for subsequently amended documentation commits.
 
-The [publishing workflow](nuget-publishing.md) automatically creates prereleases on verified main pushes. A stable-release trigger and stable-version pack path are not implemented. No stable tag/release is implied by prerelease success.
+The [publishing workflow](nuget-publishing.md) publishes official versions when `VERSION` changes on main, and alpha snapshots through manual dispatch. Both paths require the shared correctness and package-consumer gates. Initial official version 0.1.0 is user-authorised; this is not a claim that all 1.0 gates have passed.
 
 ## Verified scope
 

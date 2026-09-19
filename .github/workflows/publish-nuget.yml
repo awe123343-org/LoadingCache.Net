@@ -5,6 +5,13 @@ name: NuGet release
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Alpha snapshot, or explicitly retry the official VERSION release
+        type: choice
+        default: alpha
+        options: [alpha, official]
 
 permissions:
   contents: read
@@ -13,9 +20,37 @@ env:
   NUGET_SOURCE: https://api.nuget.org/v3/index.json
   DOTNET_NOLOGO: true
 
+concurrency:
+  group: nuget-publication
+  cancel-in-progress: false
+
 jobs:
+  select:
+    name: Select release version
+    if: github.repository == 'awe123343/LoadingCache.Net' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        with:
+          version: "0.9.11"
+      - name: Select version from VERSION
+        id: version
+        env:
+          BEFORE: ${{ github.event.before }}
+          CHANNEL: ${{ inputs.channel }}
+        run: uv run --no-project python tools/release_version.py
+
   verify:
     name: Verify repository
+    needs: select
+    if: needs.select.outputs.publish == 'true'
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
@@ -23,7 +58,7 @@ jobs:
   pack:
     name: Pack release artifacts
     if: github.repository == 'awe123343/LoadingCache.Net'
-    needs: verify
+    needs: [select, verify]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -35,7 +70,7 @@ jobs:
       NUGET_AUTHORS: ${{ vars.NUGET_AUTHORS }}
       REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
       REPOSITORY_COMMIT: ${{ github.sha }}
-      RELEASE_VERSION: 0.1.0-alpha.${{ github.run_number }}.${{ github.run_attempt }}
+      RELEASE_VERSION: ${{ needs.select.outputs.version }}
     steps:
       - name: Fix release identity for this pack attempt
         id: version
@@ -130,8 +165,8 @@ jobs:
           REF: ${{ github.ref }}
         run: |
           test -n "$NUGET_USERNAME"
-          if [[ "$EVENT_NAME" != push || "$REF" != refs/heads/main || "$REPOSITORY" != awe123343/LoadingCache.Net ]]; then
-            echo "::error::Publishing is allowed only for a push to awe123343/LoadingCache.Net main."
+          if [[ ( "$EVENT_NAME" != push && "$EVENT_NAME" != workflow_dispatch ) || "$REF" != refs/heads/main || "$REPOSITORY" != awe123343/LoadingCache.Net ]]; then
+            echo "::error::Publishing is allowed only from awe123343/LoadingCache.Net main."
             exit 1
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -180,9 +215,9 @@ jobs:
             --timeout 300
 
   github-release:
-    name: Publish GitHub prerelease
+    name: Publish GitHub release
     needs: [pack, publish]
-    if: github.repository == 'awe123343/LoadingCache.Net' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.repository == 'awe123343/LoadingCache.Net' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -222,8 +257,14 @@ jobs:
             echo "::error::Release tag already exists; inspect the previous attempt before recovery."
             exit 1
           fi
+          prerelease=false
+          latest=true
+          if [[ "$RELEASE_VERSION" == *-* ]]; then
+            prerelease=true
+            latest=false
+          fi
           printf '%s\n' \
-            "Experimental prerelease; not stable 1.0 approval." \
+            "LoadingCache.Net $RELEASE_VERSION" \
             "" \
             "Source commit: $REPOSITORY_COMMIT" \
             "" \
@@ -238,5 +279,5 @@ jobs:
           gh release create "$tag" artifacts/nuget/packages/*.nupkg \
             artifacts/nuget/packages/*.snupkg artifacts/nuget/results.json \
             --target "$REPOSITORY_COMMIT" --title "$tag" \
-            --notes-file artifacts/release-notes.md --prerelease --latest=false --draft
-          gh release edit "$tag" --draft=false --prerelease --latest=false
+            --notes-file artifacts/release-notes.md --prerelease="$prerelease" --latest="$latest" --draft
+          gh release edit "$tag" --draft=false --prerelease="$prerelease" --latest="$latest"

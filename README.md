@@ -143,8 +143,8 @@ dotnet csharpier check .
 
 [CONTRIBUTING](CONTRIBUTING.md) has test and consumer commands;
 [the documentation index](docs/README.md) links the design, samples and benchmark
-tools. The [NuGet workflow](docs/nuget-publishing.md) publishes a prerelease after
-each `main` push passes CI. NuGet identity and Trusted Publishing must be configured.
+tools. The [NuGet workflow](docs/nuget-publishing.md) publishes official versions when `VERSION` changes on `main`,
+and next-patch alpha snapshots through a manual Action. Both paths require CI to pass. NuGet identity and Trusted Publishing must be configured.
 
 Licensed under [Apache-2.0](LICENSE). Source attribution and dependencies are
 recorded in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md) and the

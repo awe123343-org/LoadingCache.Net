@@ -2,11 +2,16 @@
 
 One managed core package contains `lib/net8.0/LoadingCache.dll` for .NET 8 and .NET 10 consumers. The optional DI package depends on the same core/version. Managed prerelease publishing is active; that is not stable 1.0 approval. AOT qualification is tracked separately.
 
-## Automatic prereleases
+## Release triggers and versions
 
-[Publish NuGet](https://github.com/awe123343/LoadingCache.Net/actions/workflows/publish-nuget.yml) runs on `main` pushes. It calls the shared correctness workflow, then packs, validates real package-only consumers and publishes the immutable verified artifact. PRs, other branches, tags and forks do not publish. There is no manual dispatch/publish switch. After NuGet publishing succeeds, CI creates a matching GitHub prerelease and source tag.
+The root `VERSION` file contains the official base version, initially `0.1.0`.
 
-Pack chooses `0.1.0-alpha.<run_number>.<run_attempt>` once for both packages. Publish uses that job's version and immutable artifact ID, not a recalculated retry version or latest branch HEAD. The stable-release trigger is **not implemented** and the pack helper currently rejects stable versions.
+- Push a changed `VERSION` to `main` to publish that official version. It must increase over the previous value and all existing official version tags. Adding the file starts the first release.
+- Run [NuGet release](https://github.com/awe123343/LoadingCache.Net/actions/workflows/publish-nuget.yml) manually on `main` to publish the next patch with `-alpha.<run_number>.<run_attempt>`. No version input is required: base `0.1.0` produces `0.1.1-alpha.<run>.<attempt>`.
+- Manual dispatch defaults to `alpha`; the explicit `official` choice retries publication of the current VERSION after inspection of any partial uploads. It cannot reuse an existing official tag.
+- Other pushes run correctness CI without publishing. PRs, other branches, tags and forks cannot publish.
+
+Both paths call the same correctness, pack, package-consumer and publication jobs. The version is selected once, then carried with the immutable artifact ID. Alpha is a development snapshot newer than the base, not a compatibility promise or a release candidate for that base. Publication is serialised; running publication is never cancelled by a newer request.
 
 Windows/Linux verification runs actual .NET 8/10 tests and smoke checks. Package consumers use an isolated NuGet cache and PackageReference only; DI resolves core transitively. Restored archives must match feed SHA-256. Preserve nupkg/snupkg and validation manifests. These checks do not replace long stress, performance, architecture or provenance qualification.
 
@@ -18,7 +23,7 @@ The same workflow publishes to [GitHub Releases](https://github.com/awe123343/Lo
 
 The release job downloads the same immutable artifact ID and reruns the shared source/version/archive-hash verifier. It does not rebuild. Tag `v<package-version>` targets the full package source commit, never the current branch tip. Existing matching tags cause a failure rather than silently reusing or moving them. Assets are the two nupkg files, two snupkg files and results.json. GitHub automatically supplies source ZIP/tar.gz links for the tag, so no duplicate source archive is maintained.
 
-CI uploads assets while the release is a draft, then publishes it as a prerelease without marking it Latest. If this stage fails, NuGet uploads are not rolled back. Inspect any existing draft/tag before recovery; the workflow does not overwrite assets, move tags or blindly retry a partial publication. Rerun the failed GitHub job only when its existing draft/tag state has been resolved; rerunning all jobs chooses a new package version.
+CI uploads assets while the release is a draft, then publishes it as a prerelease without marking it Latest for alpha versions, or as an official Latest release for stable versions. If this stage fails, NuGet uploads are not rolled back. Inspect any existing draft/tag before recovery; the workflow does not overwrite assets, move tags or blindly retry a partial publication. Rerun the failed GitHub job only when its existing draft/tag state has been resolved; rerunning all jobs chooses a new alpha version, but an official version remains unchanged and must not be blindly republished.
 
 This is **GitHub Releases**, not **GitHub Packages**. NuGet.org remains the installation feed. The user-level Packages page does not list release attachments. GitHub-hosted package restore would be a separate registry configuration and is not required to download these assets.
 
@@ -39,7 +44,7 @@ The GitHub environment is `nuget.org`, limited to the `main` deployment branch. 
 
 ## Artifact checks and failure handling
 
-- Reject missing metadata, invalid/stable versions, ID conflicts and unexpected assets/dependencies before publishing.
+- Reject missing metadata, invalid versions, ID conflicts and unexpected assets/dependencies before publishing.
 - Before OIDC login, revalidate revision/version, non-local-validation mode, both package roles and four archive hashes. Publish only the manifest's artifacts from that run.
 - Retain failed pack/consumer logs as diagnostics, excluding restore caches/credentials. Produce the publishable artifact only on successful validation.
 - Core has no runtime package dependency. DI depends on the selected core/version and Microsoft DI abstractions. Packages contain README, Apache-2.0 licence, third-party notices and XML; symbols contain portable PDBs.

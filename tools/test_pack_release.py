@@ -17,9 +17,8 @@ write_props = PACK_RELEASE.write_props
 
 
 class PackReleaseTests(unittest.TestCase):
-    def test_rejects_stable_and_leading_zero_versions(self) -> None:
-        with self.assertRaises(ValueError):
-            validate_version("1.0.0")
+    def test_accepts_stable_and_rejects_leading_zero_versions(self) -> None:
+        self.assertEqual(validate_version("0.1.0"), "0.1.0")
         with self.assertRaises(ValueError):
             validate_version("0.1.0-alpha.01")
         with self.assertRaises(ValueError):
