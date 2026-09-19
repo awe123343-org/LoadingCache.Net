@@ -27,6 +27,8 @@ concurrency:
 jobs:
   select:
     name: Select release version
+    permissions:
+      contents: write
     if: github.actor_id == '8992564' && github.actor == 'awe123343' && github.triggering_actor == 'awe123343' && github.repository == 'awe123343/LoadingCache.Net' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
@@ -46,6 +48,14 @@ jobs:
           BEFORE: ${{ github.event.before }}
           CHANNEL: ${{ inputs.channel }}
         run: uv run --no-project python tools/release_version.py
+      - name: Reserve exact source tag before validation
+        if: steps.version.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          REPOSITORY_COMMIT: ${{ github.sha }}
+        run: uv run --no-project python tools/release_tag.py --create
 
   verify:
     name: Verify repository
@@ -199,6 +209,11 @@ jobs:
           ARTIFACT_ROOT: artifacts/nuget
         run: |
           uv run --no-project python tools/verify_release_artifact.py
+      - name: Verify reserved source tag before NuGet upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: uv run --no-project python tools/release_tag.py
       - uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
         id: nuget-login
         with:
@@ -259,12 +274,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           tag="v$RELEASE_VERSION"
-          # Never attach these packages to an existing or moved tag.
-          refs=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$tag" --jq "map(select(.ref == \"refs/tags/$tag\")) | length")
-          if [[ "$refs" != 0 ]]; then
-            echo "::error::Release tag already exists; inspect the previous attempt before recovery."
-            exit 1
-          fi
+          uv run --no-project python tools/release_tag.py
           prerelease=false
           latest=true
           if [[ "$RELEASE_VERSION" == *-* ]]; then
@@ -286,6 +296,6 @@ jobs:
           # Upload everything while draft, then make the complete release visible.
           gh release create "$tag" artifacts/nuget/packages/*.nupkg \
             artifacts/nuget/packages/*.snupkg artifacts/nuget/results.json \
-            --target "$REPOSITORY_COMMIT" --title "$tag" \
+            --verify-tag --title "$tag" \
             --notes-file artifacts/release-notes.md --prerelease="$prerelease" --latest="$latest" --draft
           gh release edit "$tag" --draft=false --prerelease="$prerelease" --latest="$latest"

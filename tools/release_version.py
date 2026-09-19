@@ -30,8 +30,8 @@ def select(base, previous, event, run, attempt, tags):
     official = [
         parse(tag[1:]) for tag in tags if tag.startswith("v") and PATTERN.fullmatch(tag[1:])
     ]
-    if official and numbers <= max(official):
-        raise ValueError("VERSION must exceed existing official tags")
+    if official and numbers < max(official):
+        raise ValueError("VERSION must not precede existing official tags")
     return base
 
 
