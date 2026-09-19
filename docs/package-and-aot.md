@@ -5,10 +5,16 @@ The initial distribution route is managed NuGet: one net8.0 asset supports .NET 
 ## Package-only consumers
 
 ```sh
-uv run --no-project python tools/package-smoke.py --output artifacts/package/<unique-run>
+uv run --no-project python tools/pack-release.py --local-validation --output artifacts/package/<unique-run>
+uv run --no-project python tools/package-consumers.py \
+  --feed artifacts/package/<unique-run>/packages \
+  --output artifacts/package/<unique-run>-consumers \
+  --core-id LoadingCache.LocalValidation \
+  --di-id LoadingCache.Extensions.DependencyInjection.LocalValidation \
+  --version 0.1.0-alpha.localvalidation
 ```
 
-This creates a new local feed/cache and explicit local-validation IDs/authorship, without uploading or changing shared NuGet configuration. Consumers use PackageReference, check actual resolution and execute on both runtimes. Inspect net8 DLL/XML, README, licence/notices, portable-PDB symbols and absence of core runtime dependencies. Preserve commands, exits, nuspecs and source/archive hashes; changed inputs invalidate fixed-source claims. The release helper additionally validates core/DI together, including transitive core resolution; see the publishing guide.
+This uses the same pack inspection and core/DI consumer flow as CI, with a new local feed/cache and explicit local-validation IDs/authorship. Nothing is uploaded and shared NuGet configuration is unchanged. Consumers use PackageReference, check actual resolution and archive hashes, including transitive core resolution, and execute on both runtimes. Package inspection checks net8 DLL/XML, README, licence/notices, portable-PDB symbols and absence of core runtime dependencies. Preserve commands, exits, nuspecs and source/archive hashes; changed inputs invalidate fixed-source claims. See the publishing guide for release metadata.
 
 ## Trim and native consumers
 
