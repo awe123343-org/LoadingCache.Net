@@ -219,15 +219,23 @@ public sealed class ReferenceStorageTests
     }
 
     [Test]
-    public void StrongValueAlwaysReturnsItsValue()
+    public void WeakValueReturnsItsLiveValue()
     {
         Value value = new();
-        ReferenceValue<Value> holder = ReferenceValue<Value>.Strong(value);
+        ReferenceValue<Value> holder = ReferenceValue<Value>.Weak(value);
 
-        holder.IsWeak.Should().BeFalse();
         holder.IsCollected.Should().BeFalse();
         holder.TryGetValue(out Value? actual).Should().BeTrue();
         actual.Should().BeSameAs(value);
+        GC.KeepAlive(value);
+    }
+
+    [Test]
+    public void WeakValueRejectsNull()
+    {
+        Action create = () => ReferenceValue<Value>.Weak(null!);
+
+        create.Should().Throw<ArgumentNullException>();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

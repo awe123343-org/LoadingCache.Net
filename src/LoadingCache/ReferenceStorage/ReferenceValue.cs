@@ -3,7 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 namespace LoadingCache.ReferenceStorage;
 
 /// <summary>
-/// Stores a value either strongly or through a typed weak target.
+/// Stores a value through a typed weak target.
 /// </summary>
 /// <typeparam name="TValue">The non-null value type.</typeparam>
 /// <remarks>
@@ -14,45 +14,17 @@ namespace LoadingCache.ReferenceStorage;
 internal sealed class ReferenceValue<TValue>
     where TValue : notnull
 {
-    private readonly TValue _strongValue;
-    private readonly WeakReference<object>? _weakValue;
+    private readonly WeakReference<object> _weakValue;
 
-    private ReferenceValue(TValue value, bool weak)
+    private ReferenceValue(TValue value)
     {
-        if (value is null)
-        {
-            throw new ArgumentNullException(nameof(value));
-        }
-
-        switch (weak, typeof(TValue).IsValueType)
-        {
-            case (true, true):
-                throw new ArgumentException("Weak values require a reference type.", nameof(value));
-            case (true, false):
-                _weakValue = new WeakReference<object>(value);
-                _strongValue = default!;
-                break;
-            default:
-                _strongValue = value;
-                break;
-        }
+        _weakValue = new WeakReference<object>(value);
     }
-
-    /// <summary>
-    /// Gets whether this holder stores its value weakly.
-    /// </summary>
-    internal bool IsWeak => _weakValue is not null;
 
     /// <summary>
     /// Gets whether a weak value target has been collected.
     /// </summary>
-    internal bool IsCollected => IsWeak && !_weakValue!.TryGetTarget(out _);
-
-    /// <summary>Creates a strong value holder.</summary>
-    internal static ReferenceValue<TValue> Strong(TValue value)
-    {
-        return new ReferenceValue<TValue>(value, weak: false);
-    }
+    internal bool IsCollected => !_weakValue.TryGetTarget(out _);
 
     /// <summary>Creates a weak value holder.</summary>
     internal static ReferenceValue<TValue> Weak(TValue value)
@@ -62,7 +34,7 @@ internal sealed class ReferenceValue<TValue>
             throw new ArgumentNullException(nameof(value));
         }
         return !typeof(TValue).IsValueType
-            ? new ReferenceValue<TValue>(value, weak: true)
+            ? new ReferenceValue<TValue>(value)
             : throw new InvalidOperationException("Weak values require a reference type.");
     }
 
@@ -71,13 +43,7 @@ internal sealed class ReferenceValue<TValue>
     /// </summary>
     internal bool TryGetValue([MaybeNullWhen(false)] out TValue value)
     {
-        if (!IsWeak)
-        {
-            value = _strongValue;
-            return true;
-        }
-
-        if (_weakValue!.TryGetTarget(out object? target) && target is TValue typed)
+        if (_weakValue.TryGetTarget(out object? target) && target is TValue typed)
         {
             value = typed;
             return true;
