@@ -4,6 +4,7 @@ plugins {
 }
 
 group = "local.benchmark"
+
 version = "1.0-SNAPSHOT"
 
 java {

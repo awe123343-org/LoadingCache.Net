@@ -22,6 +22,12 @@ repos:
       - id: check-toml
   - repo: local
     hooks:
+      - id: ktlint-fmt
+        name: Format and lint Kotlin files
+        entry: bash tools/hooks/ktfmt-lint.sh
+        language: system
+        files: '\.(kt|kts)$'
+        require_serial: true
       - id: ruff-check
         name: Ruff lint
         entry: uvx --from ruff==0.14.0 ruff check --fix --force-exclude

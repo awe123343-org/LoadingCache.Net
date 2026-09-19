@@ -4,6 +4,13 @@ Use the SDK in `global.json`, Node in `.node-version` (`fnm use`), pnpm from
 `package.json`, and `uv`/`uvx`. Tools are pinned: CSharpier 1.3.0, prek 0.4.14,
 Ruff 0.14.0 and oxfmt 0.67.0. No global .NET tool installation is needed.
 
+Kotlin files (`.kt` and `.kts`, including Gradle scripts) use the `ktlint-fmt`
+hook: ktfmt followed by ktlint auto-fix, matching the playground style in
+`.editorconfig`. Versions live in `gradle/libs.versions.toml`; the hook downloads
+the tools into ignored `bin` on first use. Use the JDK selected by
+`.sdkmanrc`; CI installs Azul Java 25. Run it directly with
+`uvx --from prek==0.4.14 prek run ktlint-fmt --all-files`.
+
 ```sh
 make install-tools
 make install-hooks
@@ -13,7 +20,8 @@ make format             # Both stages; imports before final formatting
 bash pre-commit.sh      # Same fast validation as CI; fails on fixes or errors
 ```
 
-Fixers leave changes unstaged. Review and stage their edits, then rerun the
+The Kotlin script follows playground and stages its input files
+with `git add`. Other fixers leave changes unstaged. Review their edits, then rerun the
 command; prek reports a nonzero exit status when a hook changes files. Existing
 Git hook settings are not reset by the installer. On Windows, run the shell
 entry points through Git Bash with Make available.

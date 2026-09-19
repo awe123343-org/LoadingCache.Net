@@ -13,5 +13,7 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "loadingcache-benchmarks"
+
 include(":caffeine-write")
+
 project(":caffeine-write").projectDir = file("benchmarks/LoadingCache.Benchmarks/caffeine-write")
