@@ -6,6 +6,7 @@
   "automergeType": "pr",
   "automergeStrategy": "squash",
   "platformAutomerge": true,
+  "rebaseWhen": "conflicted",
   "prConcurrentLimit": 3,
   "ignorePaths": [
     "**/artifacts/**",
