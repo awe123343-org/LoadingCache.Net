@@ -1,0 +1,31 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "semanticCommits": "enabled",
+  "automerge": false,
+  "prConcurrentLimit": 3,
+  "ignorePaths": [
+    "**/artifacts/**",
+    "**/bin/**",
+    "**/obj/**",
+    "**/node_modules/**",
+    "docs/research-evidence/**",
+    "docs/benchmarks/**"
+  ],
+  "packageRules": [
+    {
+      "matchManagers": ["nuget"],
+      "rangeStrategy": "bump"
+    },
+    {
+      "description": "Allow Node major upgrades while preserving the major-only version format.",
+      "matchManagers": ["nodenv"],
+      "rangeStrategy": "replace"
+    },
+    {
+      "description": "Preserve the FluentAssertions licence decision in docs/adr/0001-framework-and-tooling.md.",
+      "matchPackageNames": ["FluentAssertions"],
+      "allowedVersions": "<8"
+    }
+  ]
+}
