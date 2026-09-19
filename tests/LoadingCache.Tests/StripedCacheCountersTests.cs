@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using FluentAssertions;
 using LoadingCache.Diagnostics;
 using NUnit.Framework;
@@ -265,14 +266,23 @@ public sealed class StripedCacheCountersTests
         StripedCacheCounters counters = new(1);
         counters.Add(CacheCounterKind.Hits);
 
+        MeasureCounter(counters).Should().Be(0);
+    }
+
+    // NoInlining keeps this kernel out of the async test; AggressiveOptimization
+    // compiles it before the allocation baseline. Otherwise OSR can grow the CLR
+    // CastCache during JIT cast analysis (6,192 B observed on Windows .NET 10).
+    // Keep the zero-byte assertion; only this measurement kernel bypasses tiering.
+    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
+    private static long MeasureCounter(StripedCacheCounters counters)
+    {
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int index = 0; index < 100_000; index++)
         {
             counters.Add(CacheCounterKind.Hits);
         }
 
-        long after = GC.GetAllocatedBytesForCurrentThread();
-        after.Should().Be(before);
+        return GC.GetAllocatedBytesForCurrentThread() - before;
     }
 
     private static void CreateCounters(int stripeCount) =>

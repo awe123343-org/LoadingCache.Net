@@ -15,7 +15,8 @@ internal static class AllocationTestProcess
     // Background GC discards unused allocation contexts and charges their remaining space to
     // GetAllocatedBytesForCurrentThread. This can happen inside an allocation-free loop.
     // A dedicated process lets us forbid GC during the sample without affecting other tests.
-    // No threshold, warmup, JIT, tiering or PGO setting is changed.
+    // No process-wide JIT, tiering or PGO setting is changed. Individual measurement
+    // kernels compile before their allocation baseline; zero-byte thresholds remain.
     internal static async Task<bool> RunIsolatedIfNeededAsync(string scenario)
     {
         if (_isChild)

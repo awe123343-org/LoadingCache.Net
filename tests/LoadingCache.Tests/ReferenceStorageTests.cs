@@ -74,6 +74,40 @@ public sealed class ReferenceStorageTests
         ReferenceKey<Key> handle = ReferenceKey<Key>.CreateWeak(key);
         IEqualityComparer<object> comparer = WeakKeyObjectComparer<Key>.Instance;
 
+        (long allocated, bool allMatches) = MeasureComparison(comparer, handle, key);
+        allMatches.Should().BeTrue();
+        allocated.Should().Be(0);
+    }
+
+    [Test]
+    public void RawComparisonMeasurementDetectsAllocatingComparer()
+    {
+        Key key = new(1);
+        ReferenceKey<Key> handle = ReferenceKey<Key>.CreateWeak(key);
+        IEqualityComparer<object> allocating = EqualityComparer<object>.Create(
+            (_, _) =>
+            {
+                GC.KeepAlive(new byte[1_024]);
+                return true;
+            }
+        );
+
+        (long allocated, bool allMatches) = MeasureComparison(allocating, handle, key);
+        allMatches.Should().BeTrue();
+        allocated.Should().BeGreaterThan(0);
+    }
+
+    // NoInlining keeps this kernel out of the async test; AggressiveOptimization
+    // compiles it before the allocation baseline. Otherwise OSR can grow the CLR
+    // CastCache during JIT cast analysis (6,192 B observed on Windows .NET 10).
+    // Keep the zero-byte assertion; only this measurement kernel bypasses tiering.
+    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
+    private static (long Allocated, bool AllMatches) MeasureComparison(
+        IEqualityComparer<object> comparer,
+        ReferenceKey<Key> handle,
+        Key key
+    )
+    {
         long before = GC.GetAllocatedBytesForCurrentThread();
         bool allMatches = true;
         for (int index = 0; index < 10_000; index++)
@@ -81,9 +115,7 @@ public sealed class ReferenceStorageTests
             allMatches &= comparer.Equals(handle, key);
         }
 
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        allMatches.Should().BeTrue();
-        allocated.Should().Be(0);
+        return (GC.GetAllocatedBytesForCurrentThread() - before, allMatches);
     }
 
     [Test]
