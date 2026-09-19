@@ -2,7 +2,7 @@
 
 This executable complements the resident-read and drained-write probes. It shares
 its scenarios, key/value shapes, input sequence and assertions with
-`../LoadingCache.ScenarioProbe.Java/ScenarioProbe.java`.
+`../../benchmarks/jvm/src/main/kotlin/ScenarioProbe.kt`.
 
 ```sh
 dotnet build tools/LoadingCache.ScenarioProbe/LoadingCache.ScenarioProbe.csproj -c Release -f net8.0 --artifacts-path /private/tmp/scenario-build -m:1

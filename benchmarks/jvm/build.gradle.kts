@@ -1,4 +1,6 @@
 plugins {
+    alias(libs.plugins.kotlin)
+    alias(libs.plugins.kotlin.kapt)
     application
     idea
 }
@@ -16,7 +18,7 @@ java {
 
 tasks.withType<JavaCompile>().configureEach {
     options.encoding = "UTF-8"
-    options.release.set(17)
+    options.release.set(25)
 }
 
 idea {
@@ -30,8 +32,11 @@ dependencyLocking { lockAllConfigurations() }
 
 dependencies {
     implementation(libs.caffeine)
+    implementation(libs.guava)
     implementation(libs.jmh.core)
-    annotationProcessor(libs.jmh.generator)
+    kapt(libs.jmh.generator)
 }
 
-application { mainClass.set("org.openjdk.jmh.Main") }
+application { mainClass.set("MainKt") }
+
+kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25) } }

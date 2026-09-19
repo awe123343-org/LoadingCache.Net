@@ -168,10 +168,22 @@ jobs:
           distribution: zulu
           java-version: "25"
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
-      - name: Build JVM comparison harness
-        run: ./gradlew :caffeine-write:build :caffeine-write:installDist
+      - name: Build Kotlin comparison harnesses
+        run: ./gradlew build installDist
       - name: Verify JMH execution only
-        run: ./gradlew :caffeine-write:run --args='baseline.CaffeineWriteDrainBenchmark.putBatchAndQuiesce -p workers=1 -p writesPerWorker=512 -p capacity=1024 -p statistics=off -p valueMode=same -wi 0 -i 1 -r 100ms -f 1'
+        run: ./gradlew :jvm-benchmarks:run --args='caffeine-write baseline.CaffeineWriteDrainBenchmark.putBatchAndQuiesce -p workers=1 -p writesPerWorker=512 -p capacity=1024 -p statistics=off -p valueMode=same -wi 0 -i 1 -r 100ms -f 1'
+      - name: Verify hit probes and feature scenarios
+        run: |
+          benchmarks/jvm/build/install/jvm-benchmarks/bin/jvm-benchmarks caffeine-hit --capacity 1024 --residents 512 --pattern cycle --workers 4 --statistics on --warmups 1 --runs 2 --duration-ms 50 --output artifacts/jvm-smoke/caffeine-hit.json
+          benchmarks/jvm/build/install/jvm-benchmarks/bin/jvm-benchmarks guava-hit --capacity 1024 --residents 512 --pattern cycle --workers 4 --statistics on --warmups 1 --runs 2 --duration-ms 50 --output artifacts/jvm-smoke/guava-hit.json
+          benchmarks/jvm/build/install/jvm-benchmarks/bin/jvm-benchmarks caffeine-scenarios --scenario all --cycles 8 --capacity 64 --fan-in 4 --warmups 0 --runs 1 --statistics on --output artifacts/jvm-smoke/scenarios.json
+      - name: Preserve JVM smoke evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: jvm-smoke
+          path: artifacts/jvm-smoke
+          if-no-files-found: warn
 
   benchmark-smoke:
     runs-on: ubuntu-latest

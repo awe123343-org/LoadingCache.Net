@@ -14,6 +14,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "loadingcache-benchmarks"
 
-include(":caffeine-write")
+include(":jvm-benchmarks")
 
-project(":caffeine-write").projectDir = file("benchmarks/LoadingCache.Benchmarks/caffeine-write")
+project(":jvm-benchmarks").projectDir = file("benchmarks/jvm")

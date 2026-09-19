@@ -1,13 +1,20 @@
 # Keep entries within each section in lexicographic order by key.
 [versions]
 caffeine = "3.2.4"
+guava = "33.7.1-jre"
 jmh = "1.37"
+kotlin = "2.4.20"
 ktfmt = "0.64"
 ktlint = "1.8.0"
 
 [libraries]
 caffeine = { module = "com.github.ben-manes.caffeine:caffeine", version.ref = "caffeine" }
+guava = { module = "com.google.guava:guava", version.ref = "guava" }
 jmh-core = { module = "org.openjdk.jmh:jmh-core", version.ref = "jmh" }
 jmh-generator = { module = "org.openjdk.jmh:jmh-generator-annprocess", version.ref = "jmh" }
 ktfmt = { module = "com.facebook:ktfmt", version.ref = "ktfmt" }
 ktlint = { module = "com.pinterest.ktlint:ktlint-cli", version.ref = "ktlint" }
+
+[plugins]
+kotlin = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-kapt = { id = "org.jetbrains.kotlin.kapt", version.ref = "kotlin" }
