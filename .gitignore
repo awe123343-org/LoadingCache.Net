@@ -10,3 +10,6 @@ __pycache__/
 node_modules/
 .ruff_cache/
 .pnpm-store/
+.gradle/
+build/
+target/

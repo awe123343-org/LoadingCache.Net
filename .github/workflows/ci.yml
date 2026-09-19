@@ -150,6 +150,23 @@ jobs:
             artifacts/nuget-ci-consumers/*.log
           if-no-files-found: warn
 
+  jvm-benchmark-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: zulu
+          java-version: "25"
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - name: Build JVM comparison harness
+        run: ./gradlew :caffeine-write:build :caffeine-write:installDist
+      - name: Verify JMH execution only
+        run: ./gradlew :caffeine-write:run --args='baseline.CaffeineWriteDrainBenchmark.putBatchAndQuiesce -p workers=1 -p writesPerWorker=512 -p capacity=1024 -p statistics=off -p valueMode=same -wi 0 -i 1 -r 100ms -f 1'
+
   benchmark-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 15
