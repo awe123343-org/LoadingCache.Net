@@ -101,6 +101,9 @@ internal static class AllocationTestProcess
         }
 
         _isChild = true;
+        // Keep stdout a JSON protocol; assertion-library diagnostics belong on stderr.
+        TextWriter reportOutput = Console.Out;
+        Console.SetOut(Console.Error);
         try
         {
             if (!GC.TryStartNoGCRegion(AllocationBudget))
@@ -155,7 +158,7 @@ internal static class AllocationTestProcess
                 // Exhaustion or a forced collection is a failed measurement, never a retry/skip.
                 GC.EndNoGCRegion();
             }
-            Console.WriteLine(
+            reportOutput.WriteLine(
                 JsonSerializer.Serialize(new Report(scenario, Environment.Version.ToString(), true))
             );
             return 0;
@@ -163,7 +166,7 @@ internal static class AllocationTestProcess
         catch (Exception exception)
         {
             await Console.Error.WriteLineAsync(exception.ToString());
-            Console.WriteLine(
+            reportOutput.WriteLine(
                 JsonSerializer.Serialize(
                     new Report(scenario, Environment.Version.ToString(), false)
                 )
@@ -193,5 +196,7 @@ public sealed class AllocationMeasurementTests
             .ConfigureAwait(false);
         result.ExitCode.Should().Be(1);
         result.Error.Should().Contain(error);
+        using JsonDocument report = JsonDocument.Parse(result.Output);
+        report.RootElement.GetProperty("Success").GetBoolean().Should().BeFalse();
     }
 }

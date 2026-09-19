@@ -3,8 +3,7 @@
 Renovate proposes dependency updates through pull requests using `renovate.json`.
 It tracks GitHub Actions (with commit SHA pins), NuGet packages and tools, the
 .NET SDK, and Node/pnpm tooling. Updates require review and the existing CI;
-automerge is disabled. Node major upgrades are allowed; FluentAssertions stays
-below 8 under the recorded licence decision. Enable the
+automerge is disabled. Node major upgrades are allowed. Enable the
 [Renovate GitHub App](https://github.com/apps/renovate) for this repository to
 activate the hosted service. Renovate does not change the release `VERSION`.
 

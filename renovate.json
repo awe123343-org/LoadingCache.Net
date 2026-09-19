@@ -21,11 +21,6 @@
       "description": "Allow Node major upgrades while preserving the major-only version format.",
       "matchManagers": ["nodenv"],
       "rangeStrategy": "replace"
-    },
-    {
-      "description": "Preserve the FluentAssertions licence decision in docs/adr/0001-framework-and-tooling.md.",
-      "matchPackageNames": ["FluentAssertions"],
-      "allowedVersions": "<8"
     }
   ]
 }

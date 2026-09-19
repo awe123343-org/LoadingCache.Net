@@ -203,7 +203,7 @@ public sealed class MaintenanceTests
         buffer.StripeCountForTesting.Should().Be(2);
         buffer.SetForcedCasFailuresForTesting(0);
         buffer.TryEnqueue(1).Should().BeTrue();
-        buffer.StripeCountForTesting.Should().BeLessOrEqualTo(2);
+        buffer.StripeCountForTesting.Should().BeLessThanOrEqualTo(2);
     }
 
     [Test]
@@ -414,7 +414,7 @@ public sealed class MaintenanceTests
             ReadBufferStatistics statistics = buffer.GetStatistics();
             statistics.Queued.Should().Be(0);
             statistics.Enqueued.Should().Be(observed.Count);
-            statistics.Enqueued.Should().BeLessOrEqualTo(8L * 16L);
+            statistics.Enqueued.Should().BeLessThanOrEqualTo(8L * 16L);
         }
         finally
         {

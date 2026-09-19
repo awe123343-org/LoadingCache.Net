@@ -23,11 +23,11 @@ public sealed class PolicyTests
 
         policy.Maintain();
 
-        policy.ResidentCount.Should().BeLessOrEqualTo(capacity);
-        policy.WeightedSize.Should().BeLessOrEqualTo(capacity);
+        policy.ResidentCount.Should().BeLessThanOrEqualTo(capacity);
+        policy.WeightedSize.Should().BeLessThanOrEqualTo(capacity);
         policy.WindowMaximum.Should().BeInRange(1, capacity);
         policy.MainMaximum.Should().BeGreaterThanOrEqualTo(0);
-        policy.ProtectedMaximum.Should().BeLessOrEqualTo(policy.MainMaximum);
+        policy.ProtectedMaximum.Should().BeLessThanOrEqualTo(policy.MainMaximum);
     }
 
     [Test]
@@ -272,8 +272,8 @@ public sealed class PolicyTests
 
         evicted.Should().NotBeEmpty();
         evicted.Should().OnlyContain(node => nodes.Contains(node));
-        policy.WeightedSize.Should().BeLessOrEqualTo(3);
-        policy.ResidentCount.Should().BeLessOrEqualTo(16);
+        policy.WeightedSize.Should().BeLessThanOrEqualTo(3);
+        policy.ResidentCount.Should().BeLessThanOrEqualTo(16);
         policy.WindowMaximum.Should().BeInRange(1, 3);
     }
 
@@ -294,7 +294,7 @@ public sealed class PolicyTests
 
         Math.Abs(policy.StepSize).Should().BeGreaterThanOrEqualTo(1);
         policy.WindowMaximum.Should().BeInRange(1, policy.Maximum);
-        policy.ProtectedMaximum.Should().BeLessOrEqualTo(policy.MainMaximum);
+        policy.ProtectedMaximum.Should().BeLessThanOrEqualTo(policy.MainMaximum);
     }
 
     [Test]

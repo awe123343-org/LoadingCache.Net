@@ -42,7 +42,7 @@ public sealed class RuntimePolicyTests
                                 current.Invalidate(key);
                                 break;
                             default:
-                                policy.Hottest(8).Count.Should().BeLessOrEqualTo(8);
+                                policy.Hottest(8).Count.Should().BeLessThanOrEqualTo(8);
                                 break;
                         }
                     }
@@ -56,7 +56,7 @@ public sealed class RuntimePolicyTests
         await Task.WhenAll(workers).WaitAsync(TimeSpan.FromSeconds(30), CancellationToken.None);
         eviction.SetMaximum(4);
         cache.CleanUp();
-        cache.EstimatedCount.Should().BeLessOrEqualTo(4);
+        cache.EstimatedCount.Should().BeLessThanOrEqualTo(4);
         eviction.WeightedSize.Should().Be(cache.EstimatedCount);
         ((Cache<int, int>)cache).AssertInvariants();
     }
@@ -100,7 +100,7 @@ public sealed class RuntimePolicyTests
         cache.Put(2, 10);
         cache.Policy.Eviction!.SetMaximum(5);
         cache.CleanUp();
-        cache.Policy.Eviction.WeightedSize.Should().BeLessOrEqualTo(5);
+        cache.Policy.Eviction.WeightedSize.Should().BeLessThanOrEqualTo(5);
         cache.Policy.Eviction.SetMaximum(long.MaxValue);
         cache.Clear();
         for (int key = 0; key < 10; key++)

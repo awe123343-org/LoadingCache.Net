@@ -9,7 +9,7 @@
         <PackageReference Include="Microsoft.NET.Test.Sdk" />
         <PackageReference Include="NUnit" />
         <PackageReference Include="NUnit3TestAdapter" />
-        <PackageReference Include="FluentAssertions" />
+        <PackageReference Include="FluentAssertions" PrivateAssets="all" />
         <ProjectReference Include="../../src/LoadingCache/LoadingCache.csproj" />
     </ItemGroup>
 </Project>

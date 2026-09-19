@@ -96,7 +96,7 @@ public sealed class EngineWriteBufferTests
         value.Should().Be("ready");
         scheduler.Pending.Should().Be(1);
         cache.Statistics.WriteBufferBacklog.Should().Be(1);
-        cache.Statistics.MaintenanceBacklog.Should().BeGreaterOrEqualTo(1);
+        cache.Statistics.MaintenanceBacklog.Should().BeGreaterThanOrEqualTo(1);
 
         scheduler.RunAll();
         engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
@@ -122,8 +122,8 @@ public sealed class EngineWriteBufferTests
         for (int key = 0; key < 64; key++)
         {
             cache.Put(key, "value");
-            engine.GetPolicyWriteBufferStatistics().Queued.Should().BeLessOrEqualTo(capacity);
-            cache.EstimatedCount.Should().BeLessOrEqualTo(maximum + capacity + 1);
+            engine.GetPolicyWriteBufferStatistics().Queued.Should().BeLessThanOrEqualTo(capacity);
+            cache.EstimatedCount.Should().BeLessThanOrEqualTo(maximum + capacity + 1);
         }
 
         engine.GetPolicyWriteBufferStatistics().Full.Should().BeGreaterThan(0);
@@ -138,8 +138,8 @@ public sealed class EngineWriteBufferTests
 
         cache.CleanUp();
         engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
-        cache.EstimatedCount.Should().BeLessOrEqualTo(maximum);
-        cache.Policy.Eviction!.WeightedSize.Should().BeLessOrEqualTo(maximum);
+        cache.EstimatedCount.Should().BeLessThanOrEqualTo(maximum);
+        cache.Policy.Eviction!.WeightedSize.Should().BeLessThanOrEqualTo(maximum);
         engine.AssertInvariants();
     }
 
@@ -152,10 +152,10 @@ public sealed class EngineWriteBufferTests
 
         await Task.WhenAll(StartPublishers(cache)).WaitAsync(Watchdog, CancellationToken.None);
 
-        engine.GetPolicyWriteBufferStatistics().Queued.Should().BeLessOrEqualTo(2);
-        cache.EstimatedCount.Should().BeLessOrEqualTo(19);
+        engine.GetPolicyWriteBufferStatistics().Queued.Should().BeLessThanOrEqualTo(2);
+        cache.EstimatedCount.Should().BeLessThanOrEqualTo(19);
         cache.CleanUp();
-        cache.EstimatedCount.Should().BeLessOrEqualTo(16);
+        cache.EstimatedCount.Should().BeLessThanOrEqualTo(16);
         engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
         engine.AssertInvariants();
     }
@@ -242,7 +242,7 @@ public sealed class EngineWriteBufferTests
 
         scheduler.ObservedCacheLock.Should().BeFalse();
         engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
-        cache.EstimatedCount.Should().BeLessOrEqualTo(4);
+        cache.EstimatedCount.Should().BeLessThanOrEqualTo(4);
         engine.AssertInvariants();
     }
 
@@ -432,14 +432,14 @@ public sealed class EngineWriteBufferTests
         for (int key = 0; key < 128; key++)
         {
             cache.Put(key, key % 2 == 0 ? 0 : 6);
-            cache.EstimatedCount.Should().BeLessOrEqualTo(residentMaximum + bufferCapacity + 1);
+            cache.EstimatedCount.Should().BeLessThanOrEqualTo(residentMaximum + bufferCapacity + 1);
         }
 
         cache.Policy.Eviction!.SetMaximum(3);
         cache.CleanUp();
 
-        cache.Policy.Eviction.WeightedSize.Should().BeLessOrEqualTo(3);
-        cache.EstimatedCount.Should().BeLessOrEqualTo(residentMaximum);
+        cache.Policy.Eviction.WeightedSize.Should().BeLessThanOrEqualTo(3);
+        cache.EstimatedCount.Should().BeLessThanOrEqualTo(residentMaximum);
         cache.Policy.Eviction.Coldest(residentMaximum).Count.Should().Be((int)cache.EstimatedCount);
         engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
         engine.AssertInvariants();

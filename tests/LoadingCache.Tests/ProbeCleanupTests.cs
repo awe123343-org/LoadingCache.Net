@@ -53,7 +53,7 @@ public sealed class ProbeCleanupTests
 
             passes.Should().BeGreaterThan(256);
             cache.Statistics.MaintenanceBacklog.Should().Be(0);
-            cache.Policy.Eviction!.WeightedSize.Should().BeLessOrEqualTo(4);
+            cache.Policy.Eviction!.WeightedSize.Should().BeLessThanOrEqualTo(4);
         }
         finally
         {
@@ -119,7 +119,7 @@ public sealed class ProbeCleanupTests
                 .Should()
                 .ThrowAsync<InvalidOperationException>()
                 .WithMessage("LoadingCache cleanup did not converge*");
-            elapsed.Value.Should().BeGreaterOrEqualTo(deadline);
+            elapsed.Value.Should().BeGreaterThanOrEqualTo(deadline);
             cache.CleanupCalls.Should().BeGreaterThan(0);
             hook.Returned.IsCompleted.Should().BeFalse();
             cache.Statistics.MaintenanceBacklog.Should().Be(1);

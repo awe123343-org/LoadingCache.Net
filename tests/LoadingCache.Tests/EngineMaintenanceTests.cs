@@ -157,7 +157,7 @@ public sealed class EngineMaintenanceTests
         }
 
         ReadBufferStatistics statistics = engine.GetPolicyReadBufferStatistics();
-        statistics.Queued.Should().BeLessOrEqualTo(2);
+        statistics.Queued.Should().BeLessThanOrEqualTo(2);
         statistics.DroppedFull.Should().BeGreaterThan(0);
         scheduler.ScheduleCalls.Should().Be(1);
 
@@ -430,8 +430,8 @@ public sealed class EngineMaintenanceTests
         }
 
         sized.CleanUp();
-        sized.EstimatedCount.Should().BeLessOrEqualTo(2);
-        sized.Policy.Eviction!.WeightedSize.Should().BeLessOrEqualTo(2);
+        sized.EstimatedCount.Should().BeLessThanOrEqualTo(2);
+        sized.Policy.Eviction!.WeightedSize.Should().BeLessThanOrEqualTo(2);
         sizedEngine.AssertInvariants();
 
         CacheEngine<int, string> weightedEngine = new(
@@ -450,8 +450,8 @@ public sealed class EngineMaintenanceTests
         }
 
         weighted.CleanUp();
-        weighted.Policy.Eviction!.WeightedSize.Should().BeLessOrEqualTo(5);
-        weighted.EstimatedCount.Should().BeLessOrEqualTo(4);
+        weighted.Policy.Eviction!.WeightedSize.Should().BeLessThanOrEqualTo(5);
+        weighted.EstimatedCount.Should().BeLessThanOrEqualTo(4);
         weightedEngine.AssertInvariants();
     }
 
