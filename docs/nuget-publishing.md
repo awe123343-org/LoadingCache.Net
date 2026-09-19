@@ -27,6 +27,12 @@ CI uploads assets while the release is a draft, then publishes it as a prereleas
 
 This is **GitHub Releases**, not **GitHub Packages**. NuGet.org remains the installation feed. The user-level Packages page does not list release attachments. GitHub-hosted package restore would be a separate registry configuration and is not required to download these assets.
 
+## Release authorisation
+
+Only `awe123343` (GitHub account ID `8992564`) may initiate publication, including VERSION pushes and manual alpha/official dispatch. The version-selection, packaging and both publishing jobs check the original account identity and the current triggering actor. A different user rerunning an owner's workflow is rejected, including reruns of only failed publishing jobs. NuGet also rechecks the identities before requesting its OIDC credential.
+
+These checks control execution, not visibility of GitHub's Run workflow button. They do not prevent an administrator with permission to change the workflow or repository security settings from changing the policy. Existing runs use their original workflow revision.
+
 ## Maintainer configuration
 
 Repository: [awe123343/LoadingCache.Net](https://github.com/awe123343/LoadingCache.Net).

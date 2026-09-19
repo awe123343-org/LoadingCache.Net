@@ -27,7 +27,7 @@ concurrency:
 jobs:
   select:
     name: Select release version
-    if: github.repository == 'awe123343/LoadingCache.Net' && github.ref == 'refs/heads/main'
+    if: github.actor_id == '8992564' && github.actor == 'awe123343' && github.triggering_actor == 'awe123343' && github.repository == 'awe123343/LoadingCache.Net' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -57,7 +57,7 @@ jobs:
 
   pack:
     name: Pack release artifacts
-    if: github.repository == 'awe123343/LoadingCache.Net'
+    if: github.actor_id == '8992564' && github.actor == 'awe123343' && github.triggering_actor == 'awe123343' && github.repository == 'awe123343/LoadingCache.Net'
     needs: [select, verify]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -140,6 +140,7 @@ jobs:
 
   publish:
     name: Publish to nuget.org
+    if: github.actor_id == '8992564' && github.actor == 'awe123343' && github.triggering_actor == 'awe123343'
     needs: pack
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -160,11 +161,18 @@ jobs:
     steps:
       - name: Verify publish context
         env:
+          ACTOR_ID: ${{ github.actor_id }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
           EVENT_NAME: ${{ github.event_name }}
           REPOSITORY: ${{ github.repository }}
           REF: ${{ github.ref }}
         run: |
           test -n "$NUGET_USERNAME"
+          if [[ "$ACTOR_ID" != 8992564 || "$ACTOR" != awe123343 || "$TRIGGERING_ACTOR" != awe123343 ]]; then
+            echo "::error::Only awe123343 may start or rerun publication."
+            exit 1
+          fi
           if [[ ( "$EVENT_NAME" != push && "$EVENT_NAME" != workflow_dispatch ) || "$REF" != refs/heads/main || "$REPOSITORY" != awe123343/LoadingCache.Net ]]; then
             echo "::error::Publishing is allowed only from awe123343/LoadingCache.Net main."
             exit 1
@@ -217,7 +225,7 @@ jobs:
   github-release:
     name: Publish GitHub release
     needs: [pack, publish]
-    if: github.repository == 'awe123343/LoadingCache.Net' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+    if: github.actor_id == '8992564' && github.actor == 'awe123343' && github.triggering_actor == 'awe123343' && github.repository == 'awe123343/LoadingCache.Net' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
