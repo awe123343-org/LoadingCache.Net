@@ -18,6 +18,15 @@
       "rangeStrategy": "bump"
     },
     {
+      "description": "Local package-validation fixtures are built by this repository, not published to NuGet.",
+      "matchManagers": ["nuget"],
+      "matchPackageNames": [
+        "LoadingCache.LocalValidation",
+        "LoadingCache.Extensions.DependencyInjection.LocalValidation"
+      ],
+      "enabled": false
+    },
+    {
       "description": "Allow Node major upgrades while preserving the major-only version format.",
       "matchManagers": ["nodenv"],
       "rangeStrategy": "replace"
