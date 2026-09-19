@@ -31,6 +31,8 @@ idea {
 dependencyLocking { lockAllConfigurations() }
 
 dependencies {
+    implementation(platform(libs.kotlin.bom))
+    implementation(platform(libs.guava.bom))
     implementation(libs.caffeine)
     implementation(libs.guava)
     implementation(libs.jmh.core)
