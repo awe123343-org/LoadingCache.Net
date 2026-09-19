@@ -2,6 +2,9 @@
 
 ## Unreleased — experimental
 
+- Remove the legacy static `LoadingCache.Create` and `LoadingCacheOptions`; use
+  `CacheBuilder.Create<TKey, TValue>().BuildAsyncLoading(...)` with explicit capacity instead.
+
 - Preserve the engineering commission and establish contracts, research,
   provenance, acceptance criteria and an execution plan.
 - Implement the first bounded async ownership slice and controlled contract tests.

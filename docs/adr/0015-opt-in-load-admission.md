@@ -4,7 +4,7 @@ Accepted, 18 September 2026.
 
 Requiring `MaxConcurrentLoads` for every cache made backend protection mandatory rather than an explicit loading-cache policy. Pinned Caffeine v3.2.4 `836b65c0a83e5d1641ded9c6de578654bc04b2e9` has no equivalent built-in loader-concurrency bound, although executors/loaders may reject work. HTTP 429 belongs to this repository's service probe mapping of `CacheLoadRejectedException`, not the cache API.
 
-All four builders now omit the concurrency bound by default. Legacy `LoadingCache.Create` options use `int?`: omitted and explicit null are equivalent; zero/negative values remain invalid. Explicit C retains fail-fast, no-queue admission shared by cold loads, refresh and bulk. Hits and joins take no new permit. Cache-owned cancellation and same-generation single-flight are unchanged.
+All four builders now omit the concurrency bound by default. The builder leaves the bound unset unless configured; zero/negative values remain invalid. The legacy `LoadingCache.Create`/`LoadingCacheOptions` entry point was subsequently removed in the experimental API cleanup. Explicit C retains fail-fast, no-queue admission shared by cold loads, refresh and bulk. Hits and joins take no new permit. Cache-owned cancellation and same-generation single-flight are unchanged.
 
 F (`MaxPendingLoadKeys`) independently bounds key states. Omitted F inherits explicit C, raised to a larger configured K (`MaximumBulkKeys`) where applicable. With C/F omitted there is no configured bound. True bulk still requires positive F/K with K≤F; C is optional. The separate 1,024-record fallback/bulk-mutation input limit is unchanged.
 

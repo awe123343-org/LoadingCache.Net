@@ -1,14 +1,11 @@
 # Public API and behaviour baseline
 
-The opt-in admission change makes `LoadingCacheOptions.MaxConcurrentLoads`
-from `int` to `int?` (ADR0015). This is a binary API change and can also require
-source changes where consumers read the property. Initializing a positive integer
-remains supported. On 2026-09-18 the compiler regenerated the baseline: the only
-delta is five getter/property signature lines changing to `int?`; the DI baseline
-is unchanged. The rebuilt reference assemblies match in both the isolated candidate
-and original checkout. Both sets of consumers passed on .NET 8.0.31 and 10.0.12;
-original-checkout verification is recorded separately under
-`artifacts/opt-in-load-limits-20260918/integration01/validation/`.
+The legacy static `LoadingCache.Create` entry point and `LoadingCacheOptions`
+were removed during the experimental API cleanup. Use
+`CacheBuilder.Create<TKey, TValue>().MaximumSize(...).BuildAsyncLoading(loader)`
+and its fluent configuration methods instead. This intentionally breaks source
+and binary compatibility with that legacy entry point; no compatibility shim is
+retained. The generic synchronous `LoadingCache<TKey, TValue>` remains supported.
 
 The release candidate's public surface is captured from the compiler-produced
 `net8.0` reference assemblies for both core and DI. The two reviewable files are

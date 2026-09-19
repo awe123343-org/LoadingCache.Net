@@ -55,73 +55,6 @@ public interface IAsyncLoadingCache<TKey, TValue> : IAsyncCache<TKey, TValue>
 }
 
 /// <summary>
-/// Configuration for an asynchronous loading cache.
-/// </summary>
-public sealed class LoadingCacheOptions
-{
-    /// <summary>
-    /// Gets or sets the maximum number of resident values. This must be positive.
-    /// </summary>
-    [PublicAPI]
-    public int MaximumSize { get; init; }
-
-    /// <summary>
-    /// Gets or sets an optional maximum number of load flights, including retired epochs.
-    /// Null (the default) disables load concurrency limiting. An explicit limit must
-    /// be positive; a new flight is rejected immediately when the limit is reached.
-    /// </summary>
-    [PublicAPI]
-    public int? MaxConcurrentLoads { get; init; }
-
-    /// <summary>
-    /// Gets or sets the duration from a successful publication until the value expires.
-    /// </summary>
-    [PublicAPI]
-    public TimeSpan? ExpireAfterWrite { get; init; }
-
-    /// <summary>
-    /// Gets or sets the duration from the last successful access until the value expires.
-    /// </summary>
-    [PublicAPI]
-    public TimeSpan? ExpireAfterAccess { get; init; }
-
-    /// <summary>
-    /// Gets or sets the duration from a successful publication until the value becomes
-    /// eligible for request-triggered refresh.
-    /// </summary>
-    [PublicAPI]
-    public TimeSpan? RefreshAfterWrite { get; init; }
-
-    /// <summary>
-    /// Gets or sets the cache-owned deadline for a load or refresh flight.
-    /// </summary>
-    [PublicAPI]
-    public TimeSpan? LoadTimeout { get; init; }
-
-    /// <summary>Gets or sets the retry backoff after an automatic refresh failure.</summary>
-    [PublicAPI]
-    public TimeSpan RefreshFailureBackoff { get; init; } = TimeSpan.FromSeconds(1);
-
-    /// <summary>Gets or sets whether one cache-owned expiration timer is enabled.</summary>
-    [PublicAPI]
-    public bool EnableExpirationScheduler { get; init; }
-
-    /// <summary>
-    /// Gets or sets the time provider used for expiration checks.
-    /// </summary>
-    [PublicAPI]
-    public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
-
-    /// <summary>
-    /// Gets or sets whether cache operation counters are recorded. The default is false.
-    /// </summary>
-    [PublicAPI]
-    public bool RecordStatistics { get; init; }
-
-    internal LoadingCacheTestHooks? TestHooks { get; init; }
-}
-
-/// <summary>
 /// A point-in-time cache statistics snapshot.
 /// </summary>
 [PublicAPI]
@@ -345,32 +278,4 @@ public sealed class LoadingCacheReentrancyException : InvalidOperationException
     /// <param name="message">The diagnostic message.</param>
     public LoadingCacheReentrancyException(string message)
         : base(message) { }
-}
-
-/// <summary>
-/// Entry point for creating loading caches.
-/// </summary>
-public static class LoadingCache
-{
-    /// <summary>
-    /// Creates an asynchronous loading cache.
-    /// </summary>
-    /// <typeparam name="TKey">The key type.</typeparam>
-    /// <typeparam name="TValue">The value type.</typeparam>
-    /// <param name="loader">The fixed loader invoked for a distinct flight.</param>
-    /// <param name="options">The cache options.</param>
-    /// <param name="comparer">The comparer used for all key operations.</param>
-    /// <returns>A configured cache.</returns>
-    public static IAsyncLoadingCache<TKey, TValue> Create<TKey, TValue>(
-        Func<TKey, CancellationToken, Task<TValue>> loader,
-        LoadingCacheOptions options,
-        IEqualityComparer<TKey>? comparer = null
-    )
-        where TKey : notnull
-        where TValue : notnull
-    {
-        ArgumentNullException.ThrowIfNull(loader);
-        ArgumentNullException.ThrowIfNull(options);
-        return new LoadingCacheImpl<TKey, TValue>(loader, options, comparer);
-    }
 }

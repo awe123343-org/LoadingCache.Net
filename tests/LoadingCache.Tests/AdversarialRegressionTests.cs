@@ -425,11 +425,11 @@ public sealed class AdversarialRegressionTests
 
     private static IAsyncLoadingCache<TKey, TValue> Create<TKey, TValue>(
         Func<TKey, CancellationToken, Task<TValue>> loader,
-        LoadingCacheOptions? options = null,
+        LoadingTestOptions? options = null,
         IEqualityComparer<TKey>? comparer = null
     )
         where TKey : notnull
-        where TValue : notnull => LoadingCache.Create(loader, options ?? Options(), comparer);
+        where TValue : notnull => (options ?? Options()).Build(loader, comparer);
 
     private static ValueTask<TValue> Get<TKey, TValue>(
         IAsyncLoadingCache<TKey, TValue> cache,
@@ -446,7 +446,7 @@ public sealed class AdversarialRegressionTests
         where TKey : notnull
         where TValue : notnull => cache.GetAsync(key, cancellationToken);
 
-    private static LoadingCacheOptions Options(
+    private static LoadingTestOptions Options(
         int maximumSize = 128,
         int maxConcurrentLoads = 128,
         TimeSpan? expireAfterWrite = null,

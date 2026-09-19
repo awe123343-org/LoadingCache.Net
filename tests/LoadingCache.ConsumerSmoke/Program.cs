@@ -1,6 +1,5 @@
 using System.Runtime.InteropServices;
 using LoadingCache;
-using CacheFactory = LoadingCache.LoadingCache;
 
 Console.WriteLine(
     $"Consumer smoke runtime: {RuntimeInformation.FrameworkDescription}; architecture: {RuntimeInformation.ProcessArchitecture}"
@@ -26,10 +25,11 @@ static async Task SmokeAsync()
     );
     documentedBuilder.Invalidate("configuration");
 
-    await using var valueCache = CacheFactory.Create<int, int>(
-        loader: static (key, _) => Task.FromResult(key * 2),
-        options: new LoadingCacheOptions { MaximumSize = 16, MaxConcurrentLoads = 4 }
-    );
+    await using var valueCache = CacheBuilder
+        .Create<int, int>()
+        .MaximumSize(16)
+        .MaxConcurrentLoads(4)
+        .BuildAsyncLoading(static (key, _) => Task.FromResult(key * 2));
 
     Assert(await valueCache.GetAsync(21) == 42, "value loader result");
     valueCache.Set(21, 43);
@@ -37,23 +37,22 @@ static async Task SmokeAsync()
     _ = valueCache.GetStatistics();
 
     int referenceLoads = 0;
-    await using var referenceCache = CacheFactory.Create<string, string>(
-        loader: async (key, cancellationToken) =>
-        {
-            await Task.Yield();
-            cancellationToken.ThrowIfCancellationRequested();
-            referenceLoads++;
-            return $"Value for {key}";
-        },
-        options: new LoadingCacheOptions
-        {
-            MaximumSize = 1_000,
-            MaxConcurrentLoads = 16,
-            ExpireAfterWrite = TimeSpan.FromMinutes(10),
-            ExpireAfterAccess = TimeSpan.FromMinutes(2),
-        },
-        comparer: StringComparer.OrdinalIgnoreCase
-    );
+    await using var referenceCache = CacheBuilder
+        .Create<string, string>()
+        .MaximumSize(1_000)
+        .MaxConcurrentLoads(16)
+        .ExpireAfterWrite(TimeSpan.FromMinutes(10))
+        .ExpireAfterAccess(TimeSpan.FromMinutes(2))
+        .Comparer(StringComparer.OrdinalIgnoreCase)
+        .BuildAsyncLoading(
+            async (key, cancellationToken) =>
+            {
+                await Task.Yield();
+                cancellationToken.ThrowIfCancellationRequested();
+                referenceLoads++;
+                return $"Value for {key}";
+            }
+        );
 
     Assert(
         await referenceCache.GetAsync("configuration") == "Value for configuration",

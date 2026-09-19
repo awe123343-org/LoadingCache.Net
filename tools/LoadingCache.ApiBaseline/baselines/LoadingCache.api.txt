@@ -290,12 +290,6 @@ Method: public bool global::LoadingCache.CacheValue<TValue>.TryGetValue(out TVal
 Method: public bool global::LoadingCache.CacheValue<TValue>.TryGetValue(out TValue value) | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Method: public bool global::LoadingCache.CacheValue<TValue>.TryGetValue(out TValue value) | init-only: False
 Method: public bool global::LoadingCache.CacheValue<TValue>.TryGetValue(out TValue value) | parameter 0 | attribute: System.Diagnostics.CodeAnalysis.MaybeNullWhenAttribute(false)
-Method: public bool global::LoadingCache.LoadingCacheOptions.EnableExpirationScheduler.get
-Method: public bool global::LoadingCache.LoadingCacheOptions.EnableExpirationScheduler.get | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Method: public bool global::LoadingCache.LoadingCacheOptions.EnableExpirationScheduler.get | init-only: False
-Method: public bool global::LoadingCache.LoadingCacheOptions.RecordStatistics.get
-Method: public bool global::LoadingCache.LoadingCacheOptions.RecordStatistics.get | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Method: public bool global::LoadingCache.LoadingCacheOptions.RecordStatistics.get | init-only: False
 Method: public bool global::LoadingCache.MemoryPressureSample.Equals(global::LoadingCache.MemoryPressureSample other)
 Method: public bool global::LoadingCache.MemoryPressureSample.Equals(global::LoadingCache.MemoryPressureSample other) | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Method: public bool global::LoadingCache.MemoryPressureSample.Equals(global::LoadingCache.MemoryPressureSample other) | init-only: False
@@ -492,9 +486,6 @@ Method: public global::LoadingCache.ILoadingCache<TKey, TValue> global::LoadingC
 Method: public global::LoadingCache.IMemoryPressureSource global::LoadingCache.OwnedCacheOptions<TKey, TValue>.MemoryPressureSource.get
 Method: public global::LoadingCache.IMemoryPressureSource global::LoadingCache.OwnedCacheOptions<TKey, TValue>.MemoryPressureSource.get | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Method: public global::LoadingCache.IMemoryPressureSource global::LoadingCache.OwnedCacheOptions<TKey, TValue>.MemoryPressureSource.get | init-only: False
-Method: public global::LoadingCache.LoadingCacheOptions.LoadingCacheOptions()
-Method: public global::LoadingCache.LoadingCacheOptions.LoadingCacheOptions() | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Method: public global::LoadingCache.LoadingCacheOptions.LoadingCacheOptions() | init-only: False
 Method: public global::LoadingCache.LoadingCacheReentrancyException.LoadingCacheReentrancyException(string message)
 Method: public global::LoadingCache.LoadingCacheReentrancyException.LoadingCacheReentrancyException(string message) | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Method: public global::LoadingCache.LoadingCacheReentrancyException.LoadingCacheReentrancyException(string message) | init-only: False
@@ -594,30 +585,12 @@ Method: public global::System.Threading.Tasks.ValueTask<TValue> global::LoadingC
 Method: public global::System.Threading.Tasks.ValueTask<global::System.Collections.Generic.IReadOnlyDictionary<TKey, TValue>> global::LoadingCache.AsyncLoadingCache<TKey, TValue>.GetAllAsync(global::System.Collections.Generic.IEnumerable<TKey> keys, global::System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
 Method: public global::System.Threading.Tasks.ValueTask<global::System.Collections.Generic.IReadOnlyDictionary<TKey, TValue>> global::LoadingCache.AsyncLoadingCache<TKey, TValue>.GetAllAsync(global::System.Collections.Generic.IEnumerable<TKey> keys, global::System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken)) | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Method: public global::System.Threading.Tasks.ValueTask<global::System.Collections.Generic.IReadOnlyDictionary<TKey, TValue>> global::LoadingCache.AsyncLoadingCache<TKey, TValue>.GetAllAsync(global::System.Collections.Generic.IEnumerable<TKey> keys, global::System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken)) | init-only: False
-Method: public global::System.TimeProvider global::LoadingCache.LoadingCacheOptions.TimeProvider.get
-Method: public global::System.TimeProvider global::LoadingCache.LoadingCacheOptions.TimeProvider.get | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Method: public global::System.TimeProvider global::LoadingCache.LoadingCacheOptions.TimeProvider.get | init-only: False
 Method: public global::System.TimeProvider global::LoadingCache.OwnedCacheOptions<TKey, TValue>.TimeProvider.get
 Method: public global::System.TimeProvider global::LoadingCache.OwnedCacheOptions<TKey, TValue>.TimeProvider.get | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Method: public global::System.TimeProvider global::LoadingCache.OwnedCacheOptions<TKey, TValue>.TimeProvider.get | init-only: False
 Method: public global::System.TimeSpan global::LoadingCache.CacheStatistics.TotalLoadTime.get
 Method: public global::System.TimeSpan global::LoadingCache.CacheStatistics.TotalLoadTime.get | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Method: public global::System.TimeSpan global::LoadingCache.CacheStatistics.TotalLoadTime.get | init-only: False
-Method: public global::System.TimeSpan global::LoadingCache.LoadingCacheOptions.RefreshFailureBackoff.get
-Method: public global::System.TimeSpan global::LoadingCache.LoadingCacheOptions.RefreshFailureBackoff.get | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Method: public global::System.TimeSpan global::LoadingCache.LoadingCacheOptions.RefreshFailureBackoff.get | init-only: False
-Method: public global::System.TimeSpan? global::LoadingCache.LoadingCacheOptions.ExpireAfterAccess.get
-Method: public global::System.TimeSpan? global::LoadingCache.LoadingCacheOptions.ExpireAfterAccess.get | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Method: public global::System.TimeSpan? global::LoadingCache.LoadingCacheOptions.ExpireAfterAccess.get | init-only: False
-Method: public global::System.TimeSpan? global::LoadingCache.LoadingCacheOptions.ExpireAfterWrite.get
-Method: public global::System.TimeSpan? global::LoadingCache.LoadingCacheOptions.ExpireAfterWrite.get | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Method: public global::System.TimeSpan? global::LoadingCache.LoadingCacheOptions.ExpireAfterWrite.get | init-only: False
-Method: public global::System.TimeSpan? global::LoadingCache.LoadingCacheOptions.LoadTimeout.get
-Method: public global::System.TimeSpan? global::LoadingCache.LoadingCacheOptions.LoadTimeout.get | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Method: public global::System.TimeSpan? global::LoadingCache.LoadingCacheOptions.LoadTimeout.get | init-only: False
-Method: public global::System.TimeSpan? global::LoadingCache.LoadingCacheOptions.RefreshAfterWrite.get
-Method: public global::System.TimeSpan? global::LoadingCache.LoadingCacheOptions.RefreshAfterWrite.get | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Method: public global::System.TimeSpan? global::LoadingCache.LoadingCacheOptions.RefreshAfterWrite.get | init-only: False
 Method: public global::System.TimeSpan? global::LoadingCache.OwnedCacheOptions<TKey, TValue>.ExpireAfterAccess.get
 Method: public global::System.TimeSpan? global::LoadingCache.OwnedCacheOptions<TKey, TValue>.ExpireAfterAccess.get | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Method: public global::System.TimeSpan? global::LoadingCache.OwnedCacheOptions<TKey, TValue>.ExpireAfterAccess.get | init-only: False
@@ -636,9 +609,6 @@ Method: public int global::LoadingCache.CacheDictionary<TKey, TValue>.Count.get 
 Method: public int global::LoadingCache.CacheNotificationStatistics.Queued.get
 Method: public int global::LoadingCache.CacheNotificationStatistics.Queued.get | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Method: public int global::LoadingCache.CacheNotificationStatistics.Queued.get | init-only: False
-Method: public int global::LoadingCache.LoadingCacheOptions.MaximumSize.get
-Method: public int global::LoadingCache.LoadingCacheOptions.MaximumSize.get | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Method: public int global::LoadingCache.LoadingCacheOptions.MaximumSize.get | init-only: False
 Method: public int global::LoadingCache.OwnedCache<TKey, TValue>.Invalidate(global::System.Collections.Generic.IEnumerable<TKey> keys)
 Method: public int global::LoadingCache.OwnedCache<TKey, TValue>.Invalidate(global::System.Collections.Generic.IEnumerable<TKey> keys) | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Method: public int global::LoadingCache.OwnedCache<TKey, TValue>.Invalidate(global::System.Collections.Generic.IEnumerable<TKey> keys) | init-only: False
@@ -654,9 +624,6 @@ Method: public int global::LoadingCache.OwnedCacheOptions<TKey, TValue>.MaximumA
 Method: public int global::LoadingCache.OwnedCacheOptions<TKey, TValue>.MemoryPressureMaximumTrimCount.get
 Method: public int global::LoadingCache.OwnedCacheOptions<TKey, TValue>.MemoryPressureMaximumTrimCount.get | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Method: public int global::LoadingCache.OwnedCacheOptions<TKey, TValue>.MemoryPressureMaximumTrimCount.get | init-only: False
-Method: public int? global::LoadingCache.LoadingCacheOptions.MaxConcurrentLoads.get
-Method: public int? global::LoadingCache.LoadingCacheOptions.MaxConcurrentLoads.get | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Method: public int? global::LoadingCache.LoadingCacheOptions.MaxConcurrentLoads.get | init-only: False
 Method: public int? global::LoadingCache.OwnedCacheOptions<TKey, TValue>.MaximumResidentCount.get
 Method: public int? global::LoadingCache.OwnedCacheOptions<TKey, TValue>.MaximumResidentCount.get | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Method: public int? global::LoadingCache.OwnedCacheOptions<TKey, TValue>.MaximumResidentCount.get | init-only: False
@@ -921,9 +888,6 @@ Method: public static global::LoadingCache.CacheValue<TValue> global::LoadingCac
 Method: public static global::LoadingCache.GcMemoryPressureSource global::LoadingCache.GcMemoryPressureSource.Instance.get
 Method: public static global::LoadingCache.GcMemoryPressureSource global::LoadingCache.GcMemoryPressureSource.Instance.get | accessibility: Public; abstract: False; sealed: False; static: True; virtual: False; override: False
 Method: public static global::LoadingCache.GcMemoryPressureSource global::LoadingCache.GcMemoryPressureSource.Instance.get | init-only: False
-Method: public static global::LoadingCache.IAsyncLoadingCache<TKey, TValue> global::LoadingCache.LoadingCache.Create<TKey, TValue>(global::System.Func<TKey, global::System.Threading.CancellationToken, global::System.Threading.Tasks.Task<TValue>> loader, global::LoadingCache.LoadingCacheOptions options, global::System.Collections.Generic.IEqualityComparer<TKey>? comparer = null) where TKey : notnull where TValue : notnull
-Method: public static global::LoadingCache.IAsyncLoadingCache<TKey, TValue> global::LoadingCache.LoadingCache.Create<TKey, TValue>(global::System.Func<TKey, global::System.Threading.CancellationToken, global::System.Threading.Tasks.Task<TValue>> loader, global::LoadingCache.LoadingCacheOptions options, global::System.Collections.Generic.IEqualityComparer<TKey>? comparer = null) where TKey : notnull where TValue : notnull | accessibility: Public; abstract: False; sealed: False; static: True; virtual: False; override: False
-Method: public static global::LoadingCache.IAsyncLoadingCache<TKey, TValue> global::LoadingCache.LoadingCache.Create<TKey, TValue>(global::System.Func<TKey, global::System.Threading.CancellationToken, global::System.Threading.Tasks.Task<TValue>> loader, global::LoadingCache.LoadingCacheOptions options, global::System.Collections.Generic.IEqualityComparer<TKey>? comparer = null) where TKey : notnull where TValue : notnull | init-only: False
 Method: public static global::LoadingCache.OwnedCache<TKey, TValue> global::LoadingCache.OwnedCache.Create<TKey, TValue>(global::LoadingCache.OwnedCacheOptions<TKey, TValue> options, global::System.Action<TValue> disposeValue) where TKey : notnull where TValue : class
 Method: public static global::LoadingCache.OwnedCache<TKey, TValue> global::LoadingCache.OwnedCache.Create<TKey, TValue>(global::LoadingCache.OwnedCacheOptions<TKey, TValue> options, global::System.Action<TValue> disposeValue) where TKey : notnull where TValue : class | accessibility: Public; abstract: False; sealed: False; static: True; virtual: False; override: False
 Method: public static global::LoadingCache.OwnedCache<TKey, TValue> global::LoadingCache.OwnedCache.Create<TKey, TValue>(global::LoadingCache.OwnedCacheOptions<TKey, TValue> options, global::System.Action<TValue> disposeValue) where TKey : notnull where TValue : class | init-only: False
@@ -1020,36 +984,6 @@ Method: public void global::LoadingCache.CacheNotificationStatistics.Queued.init
 Method: public void global::LoadingCache.CacheNotificationStatistics.ScheduleRejections.init
 Method: public void global::LoadingCache.CacheNotificationStatistics.ScheduleRejections.init | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Method: public void global::LoadingCache.CacheNotificationStatistics.ScheduleRejections.init | init-only: True
-Method: public void global::LoadingCache.LoadingCacheOptions.EnableExpirationScheduler.init
-Method: public void global::LoadingCache.LoadingCacheOptions.EnableExpirationScheduler.init | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Method: public void global::LoadingCache.LoadingCacheOptions.EnableExpirationScheduler.init | init-only: True
-Method: public void global::LoadingCache.LoadingCacheOptions.ExpireAfterAccess.init
-Method: public void global::LoadingCache.LoadingCacheOptions.ExpireAfterAccess.init | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Method: public void global::LoadingCache.LoadingCacheOptions.ExpireAfterAccess.init | init-only: True
-Method: public void global::LoadingCache.LoadingCacheOptions.ExpireAfterWrite.init
-Method: public void global::LoadingCache.LoadingCacheOptions.ExpireAfterWrite.init | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Method: public void global::LoadingCache.LoadingCacheOptions.ExpireAfterWrite.init | init-only: True
-Method: public void global::LoadingCache.LoadingCacheOptions.LoadTimeout.init
-Method: public void global::LoadingCache.LoadingCacheOptions.LoadTimeout.init | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Method: public void global::LoadingCache.LoadingCacheOptions.LoadTimeout.init | init-only: True
-Method: public void global::LoadingCache.LoadingCacheOptions.MaxConcurrentLoads.init
-Method: public void global::LoadingCache.LoadingCacheOptions.MaxConcurrentLoads.init | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Method: public void global::LoadingCache.LoadingCacheOptions.MaxConcurrentLoads.init | init-only: True
-Method: public void global::LoadingCache.LoadingCacheOptions.MaximumSize.init
-Method: public void global::LoadingCache.LoadingCacheOptions.MaximumSize.init | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Method: public void global::LoadingCache.LoadingCacheOptions.MaximumSize.init | init-only: True
-Method: public void global::LoadingCache.LoadingCacheOptions.RecordStatistics.init
-Method: public void global::LoadingCache.LoadingCacheOptions.RecordStatistics.init | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Method: public void global::LoadingCache.LoadingCacheOptions.RecordStatistics.init | init-only: True
-Method: public void global::LoadingCache.LoadingCacheOptions.RefreshAfterWrite.init
-Method: public void global::LoadingCache.LoadingCacheOptions.RefreshAfterWrite.init | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Method: public void global::LoadingCache.LoadingCacheOptions.RefreshAfterWrite.init | init-only: True
-Method: public void global::LoadingCache.LoadingCacheOptions.RefreshFailureBackoff.init
-Method: public void global::LoadingCache.LoadingCacheOptions.RefreshFailureBackoff.init | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Method: public void global::LoadingCache.LoadingCacheOptions.RefreshFailureBackoff.init | init-only: True
-Method: public void global::LoadingCache.LoadingCacheOptions.TimeProvider.init
-Method: public void global::LoadingCache.LoadingCacheOptions.TimeProvider.init | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Method: public void global::LoadingCache.LoadingCacheOptions.TimeProvider.init | init-only: True
 Method: public void global::LoadingCache.MemoryPressureStatistics.Deconstruct(out long Samples, out long PressureSamples, out long EvictedEntries, out long SamplingErrors, out global::System.Exception? LastSamplingError)
 Method: public void global::LoadingCache.MemoryPressureStatistics.Deconstruct(out long Samples, out long PressureSamples, out long EvictedEntries, out long SamplingErrors, out global::System.Exception? LastSamplingError) | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Method: public void global::LoadingCache.MemoryPressureStatistics.Deconstruct(out long Samples, out long PressureSamples, out long EvictedEntries, out long SamplingErrors, out global::System.Exception? LastSamplingError) | init-only: False
@@ -1225,15 +1159,9 @@ NamedType: class global::LoadingCache.CacheValue | readonly: False; ref-like: Fa
 NamedType: class global::LoadingCache.GcMemoryPressureSource
 NamedType: class global::LoadingCache.GcMemoryPressureSource | accessibility: Public; abstract: False; sealed: True; static: False; virtual: False; override: False
 NamedType: class global::LoadingCache.GcMemoryPressureSource | readonly: False; ref-like: False; record: False
-NamedType: class global::LoadingCache.LoadingCache
-NamedType: class global::LoadingCache.LoadingCache | accessibility: Public; abstract: False; sealed: False; static: True; virtual: False; override: False
-NamedType: class global::LoadingCache.LoadingCache | readonly: False; ref-like: False; record: False
 NamedType: class global::LoadingCache.LoadingCache<TKey, TValue> where TKey : notnull where TValue : notnull
 NamedType: class global::LoadingCache.LoadingCache<TKey, TValue> where TKey : notnull where TValue : notnull | accessibility: Public; abstract: False; sealed: True; static: False; virtual: False; override: False
 NamedType: class global::LoadingCache.LoadingCache<TKey, TValue> where TKey : notnull where TValue : notnull | readonly: False; ref-like: False; record: False
-NamedType: class global::LoadingCache.LoadingCacheOptions
-NamedType: class global::LoadingCache.LoadingCacheOptions | accessibility: Public; abstract: False; sealed: True; static: False; virtual: False; override: False
-NamedType: class global::LoadingCache.LoadingCacheOptions | readonly: False; ref-like: False; record: False
 NamedType: class global::LoadingCache.LoadingCacheReentrancyException
 NamedType: class global::LoadingCache.LoadingCacheReentrancyException | accessibility: Public; abstract: False; sealed: True; static: False; virtual: False; override: False
 NamedType: class global::LoadingCache.LoadingCacheReentrancyException | readonly: False; ref-like: False; record: False
@@ -1371,10 +1299,6 @@ Property: public bool global::LoadingCache.CacheNotificationStatistics.IsDispose
 Property: public bool global::LoadingCache.CacheNotificationStatistics.IsDisposed | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Property: public bool global::LoadingCache.CacheValue<TValue>.HasValue
 Property: public bool global::LoadingCache.CacheValue<TValue>.HasValue | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Property: public bool global::LoadingCache.LoadingCacheOptions.EnableExpirationScheduler
-Property: public bool global::LoadingCache.LoadingCacheOptions.EnableExpirationScheduler | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Property: public bool global::LoadingCache.LoadingCacheOptions.RecordStatistics
-Property: public bool global::LoadingCache.LoadingCacheOptions.RecordStatistics | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Property: public bool global::LoadingCache.OwnedCacheOptions<TKey, TValue>.EnableExpirationScheduler
 Property: public bool global::LoadingCache.OwnedCacheOptions<TKey, TValue>.EnableExpirationScheduler | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Property: public bool global::LoadingCache.OwnedCacheOptions<TKey, TValue>.RecordStatistics
@@ -1411,22 +1335,10 @@ Property: public global::System.Exception? global::LoadingCache.OwnedCacheDispos
 Property: public global::System.Exception? global::LoadingCache.OwnedCacheDisposalStatistics.LastDisposalError | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Property: public global::System.Func<TKey, TValue, long>? global::LoadingCache.OwnedCacheOptions<TKey, TValue>.Weigher
 Property: public global::System.Func<TKey, TValue, long>? global::LoadingCache.OwnedCacheOptions<TKey, TValue>.Weigher | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Property: public global::System.TimeProvider global::LoadingCache.LoadingCacheOptions.TimeProvider
-Property: public global::System.TimeProvider global::LoadingCache.LoadingCacheOptions.TimeProvider | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Property: public global::System.TimeProvider global::LoadingCache.OwnedCacheOptions<TKey, TValue>.TimeProvider
 Property: public global::System.TimeProvider global::LoadingCache.OwnedCacheOptions<TKey, TValue>.TimeProvider | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Property: public global::System.TimeSpan global::LoadingCache.CacheStatistics.TotalLoadTime
 Property: public global::System.TimeSpan global::LoadingCache.CacheStatistics.TotalLoadTime | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Property: public global::System.TimeSpan global::LoadingCache.LoadingCacheOptions.RefreshFailureBackoff
-Property: public global::System.TimeSpan global::LoadingCache.LoadingCacheOptions.RefreshFailureBackoff | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Property: public global::System.TimeSpan? global::LoadingCache.LoadingCacheOptions.ExpireAfterAccess
-Property: public global::System.TimeSpan? global::LoadingCache.LoadingCacheOptions.ExpireAfterAccess | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Property: public global::System.TimeSpan? global::LoadingCache.LoadingCacheOptions.ExpireAfterWrite
-Property: public global::System.TimeSpan? global::LoadingCache.LoadingCacheOptions.ExpireAfterWrite | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Property: public global::System.TimeSpan? global::LoadingCache.LoadingCacheOptions.LoadTimeout
-Property: public global::System.TimeSpan? global::LoadingCache.LoadingCacheOptions.LoadTimeout | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Property: public global::System.TimeSpan? global::LoadingCache.LoadingCacheOptions.RefreshAfterWrite
-Property: public global::System.TimeSpan? global::LoadingCache.LoadingCacheOptions.RefreshAfterWrite | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Property: public global::System.TimeSpan? global::LoadingCache.OwnedCacheOptions<TKey, TValue>.ExpireAfterAccess
 Property: public global::System.TimeSpan? global::LoadingCache.OwnedCacheOptions<TKey, TValue>.ExpireAfterAccess | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Property: public global::System.TimeSpan? global::LoadingCache.OwnedCacheOptions<TKey, TValue>.ExpireAfterWrite
@@ -1437,16 +1349,12 @@ Property: public int global::LoadingCache.CacheDictionary<TKey, TValue>.Count
 Property: public int global::LoadingCache.CacheDictionary<TKey, TValue>.Count | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Property: public int global::LoadingCache.CacheNotificationStatistics.Queued
 Property: public int global::LoadingCache.CacheNotificationStatistics.Queued | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Property: public int global::LoadingCache.LoadingCacheOptions.MaximumSize
-Property: public int global::LoadingCache.LoadingCacheOptions.MaximumSize | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Property: public int global::LoadingCache.OwnedCacheDisposalStatistics.ActiveValueCount
 Property: public int global::LoadingCache.OwnedCacheDisposalStatistics.ActiveValueCount | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Property: public int global::LoadingCache.OwnedCacheOptions<TKey, TValue>.MaximumActiveValues
 Property: public int global::LoadingCache.OwnedCacheOptions<TKey, TValue>.MaximumActiveValues | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Property: public int global::LoadingCache.OwnedCacheOptions<TKey, TValue>.MemoryPressureMaximumTrimCount
 Property: public int global::LoadingCache.OwnedCacheOptions<TKey, TValue>.MemoryPressureMaximumTrimCount | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
-Property: public int? global::LoadingCache.LoadingCacheOptions.MaxConcurrentLoads
-Property: public int? global::LoadingCache.LoadingCacheOptions.MaxConcurrentLoads | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Property: public int? global::LoadingCache.OwnedCacheOptions<TKey, TValue>.MaximumResidentCount
 Property: public int? global::LoadingCache.OwnedCacheOptions<TKey, TValue>.MaximumResidentCount | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Property: public int? global::LoadingCache.OwnedCacheOptions<TKey, TValue>.MaximumSize
@@ -1590,12 +1498,10 @@ class global::LoadingCache.CacheMutation | base: object
 class global::LoadingCache.CacheValue | base: object
 class global::LoadingCache.GcMemoryPressureSource | base: object
 class global::LoadingCache.GcMemoryPressureSource | interface: interface global::LoadingCache.IMemoryPressureSource
-class global::LoadingCache.LoadingCache | base: object
 class global::LoadingCache.LoadingCache<TKey, TValue> where TKey : notnull where TValue : notnull | base: class global::LoadingCache.Cache<TKey, TValue> where TKey : notnull where TValue : notnull
 class global::LoadingCache.LoadingCache<TKey, TValue> where TKey : notnull where TValue : notnull | interface: interface global::LoadingCache.ICache<TKey, TValue> where TKey : notnull where TValue : notnull
 class global::LoadingCache.LoadingCache<TKey, TValue> where TKey : notnull where TValue : notnull | interface: interface global::LoadingCache.ILoadingCache<TKey, TValue> where TKey : notnull where TValue : notnull
 class global::LoadingCache.LoadingCache<TKey, TValue> where TKey : notnull where TValue : notnull | interface: interface global::System.IDisposable
-class global::LoadingCache.LoadingCacheOptions | base: object
 class global::LoadingCache.LoadingCacheReentrancyException | base: class global::System.InvalidOperationException
 class global::LoadingCache.OwnedCache | base: object
 class global::LoadingCache.OwnedCache<TKey, TValue> where TKey : notnull where TValue : class | base: object

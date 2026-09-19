@@ -34,8 +34,6 @@ public sealed class LoadLimitOptionsTests
 
     [TestCase(0)]
     [TestCase(1)]
-    [TestCase(2)]
-    [TestCase(3)]
     public async Task UnsetLimitAllowsDistinctFlightsAndPreservesJoinsAndCallerCancellation(
         int configuration
     )
@@ -45,15 +43,7 @@ public sealed class LoadLimitOptionsTests
         await using IAsyncCache<int, int> cache = configuration switch
         {
             0 => CacheBuilder.Create<int, int>().MaximumSize(1).BuildAsync(),
-            1 => CacheBuilder.Create<int, int>().MaximumSize(1).BuildAsyncLoading(loader.LoadAsync),
-            2 => LoadingCache.Create<int, int>(
-                loader.LoadAsync,
-                new LoadingCacheOptions { MaximumSize = 1 }
-            ),
-            _ => LoadingCache.Create<int, int>(
-                loader.LoadAsync,
-                new LoadingCacheOptions { MaximumSize = 1, MaxConcurrentLoads = null }
-            ),
+            _ => CacheBuilder.Create<int, int>().MaximumSize(1).BuildAsyncLoading(loader.LoadAsync),
         };
         using var cancellation = new CancellationTokenSource();
         var pending = new List<Task<int>>();
