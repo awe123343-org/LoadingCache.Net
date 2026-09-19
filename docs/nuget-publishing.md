@@ -13,7 +13,7 @@ The root `VERSION` file contains the official base version, initially `0.1.0`.
 
 Both paths call the same correctness, pack, package-consumer and publication jobs. The version is selected once, then carried with the immutable artifact ID. Alpha is a development snapshot newer than the base, not a compatibility promise or a release candidate for that base. Publication is serialised; running publication is never cancelled by a newer request.
 
-Windows/Linux verification runs actual .NET 8/10 tests and smoke checks. Package consumers use an isolated NuGet cache and PackageReference only; DI resolves core transitively. Restored archives must match feed SHA-256. Preserve nupkg/snupkg and validation manifests. These checks do not replace long stress, performance, architecture or provenance qualification.
+The correctness matrix covers Windows, Linux and macOS 15 ARM64, running .NET 8/10 tests and smoke checks. Package consumers use an isolated NuGet cache and PackageReference only; DI resolves core transitively. Restored archives must match feed SHA-256. Preserve nupkg/snupkg and validation manifests. These checks do not replace long stress, performance, architecture or provenance qualification.
 
 Only the publish job obtains OIDC permission, in the `nuget.org` environment. It rechecks the original repository/main/push context, downloads the already validated artifact and exchanges a short-lived credential with `NuGet/login`. It does not rebuild or persist credentials in manifests, packages or NuGet.Config.
 

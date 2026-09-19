@@ -49,3 +49,7 @@ The initial hosted Windows failure was LF/checkout handling and was fixed in the
 ## Release decision
 
 Use the fixed [performance gates](v1-performance-gates.md), [acceptance matrix](acceptance-matrix.md), package checks and source-bound evidence. Fix known contract/resource failures before stable release. Do not silently move budgets, count interrupted runs cumulatively, extrapolate aggregate ns/op to p99, or infer Passed from exit code/configuration alone. Internal optimisation within preserved contracts can continue after release; winning every competitor microbenchmark is not a 1.0 gate.
+
+## macOS hosted CI
+
+The correctness matrix includes the standard `macos-15` ARM64 runner, with the same .NET 8/10 core, DI, short stress, source/package consumer, host smoke and API baseline checks as Windows/Linux. Hosted results are pending the first run; this does not claim macOS Intel or Native AOT qualification.
