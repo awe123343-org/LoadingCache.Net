@@ -39,7 +39,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           version: "0.9.11"
       - name: Select version from VERSION
@@ -106,7 +106,7 @@ jobs:
           dotnet-quality: ga
       - name: Build package inputs
         run: dotnet build LoadingCache.slnx -c Release
-      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           version: "0.9.11"
       - name: Pack and inspect packages
@@ -200,7 +200,7 @@ jobs:
           artifact-ids: ${{ needs.pack.outputs.artifact-id }}
           path: artifacts/nuget
           merge-multiple: true
-      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           version: "0.9.11"
       - name: Verify immutable release manifest
@@ -261,7 +261,7 @@ jobs:
           artifact-ids: ${{ needs.pack.outputs.artifact-id }}
           path: artifacts/nuget
           merge-multiple: true
-      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           version: "0.9.11"
       - name: Verify immutable release manifest
