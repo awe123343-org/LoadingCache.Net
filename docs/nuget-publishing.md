@@ -7,7 +7,7 @@ One managed core package contains `lib/net8.0/LoadingCache.dll` for .NET 8 and .
 The root `VERSION` file contains the official base version, initially `0.1.0`.
 
 - Push a changed `VERSION` to `main` to publish that official version. It must increase over the previous value and must not precede existing official version tags. Adding the file starts the first release.
-- Run [NuGet release](https://github.com/awe123343/LoadingCache.Net/actions/workflows/publish-nuget.yml) manually on `main` to publish the next patch with `-alpha.<run_number>.<run_attempt>`. No version input is required: base `0.1.0` produces `0.1.1-alpha.<run>.<attempt>`.
+- Run [NuGet release](https://github.com/awe123343-org/LoadingCache.Net/actions/workflows/publish-nuget.yml) manually on `main` to publish the next patch with `-alpha.<run_number>.<run_attempt>`. No version input is required: base `0.1.0` produces `0.1.1-alpha.<run>.<attempt>`.
 - Manual dispatch defaults to `alpha`; the explicit `official` choice retries publication of the current VERSION after inspection of any partial uploads. An existing reserved tag is accepted only for the same source SHA and only when no draft or published GitHub Release exists.
 - Other pushes run correctness CI without publishing. PRs, other branches, tags and forks cannot publish.
 
@@ -19,7 +19,7 @@ Only the publish job obtains OIDC permission, in the `nuget.org` environment. It
 
 ## GitHub Releases
 
-The same workflow publishes to [GitHub Releases](https://github.com/awe123343/LoadingCache.Net/releases) after both NuGet packages and their adjacent symbols have been submitted successfully. A separate job has `contents: write`; the NuGet job retains read-only repository access and its own OIDC permission.
+The same workflow publishes to [GitHub Releases](https://github.com/awe123343-org/LoadingCache.Net/releases) after both NuGet packages and their adjacent symbols have been submitted successfully. A separate job has `contents: write`; the NuGet job retains read-only repository access and its own OIDC permission.
 
 The release job downloads the same immutable artifact ID and reruns the shared source/version/archive-hash verifier. It does not rebuild. Tag `v<package-version>` targets the full package source commit, never the current branch tip. The selection job reserves a lightweight tag before validation. Existing tags must point directly to the exact source SHA; mismatches and annotated tags fail. Tags are never moved. Before NuGet upload and GitHub Release creation, CI rechecks the tag and rejects any existing draft or published Release. Assets are the two nupkg files, two snupkg files and results.json. GitHub automatically supplies source ZIP/tar.gz links for the tag, so no duplicate source archive is maintained.
 
@@ -35,7 +35,7 @@ These checks control execution, not visibility of GitHub's Run workflow button. 
 
 ## Maintainer configuration
 
-Repository: [awe123343/LoadingCache.Net](https://github.com/awe123343/LoadingCache.Net).
+Repository: [awe123343-org/LoadingCache.Net](https://github.com/awe123343-org/LoadingCache.Net).
 
 | Repository Actions variable | Configured value                                  |
 | --------------------------- | ------------------------------------------------- |
@@ -46,7 +46,7 @@ Repository: [awe123343/LoadingCache.Net](https://github.com/awe123343/LoadingCac
 
 All four must exist at repository scope so pack can validate first. Missing/invalid identity fails explicitly, without invented metadata. Core/DI IDs must differ case-insensitively. Repository URL/revision come from the actual checkout/context. Package IDs do not rename namespaces/assemblies or raise the runtime minimum.
 
-The GitHub environment is `nuget.org`, limited to the `main` deployment branch. NuGet Trusted Publishing is configured for owner `awe123343`, repository `LoadingCache.Net`, workflow filename **`publish-nuget.yml`** (not its full path) and environment **`nuget.org`**. Scope is Push new packages/versions for the exact two package IDs; publishing does not require unlist/relist authority. No long-lived API key is needed. [NuGet configuration](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing).
+The GitHub environment is `nuget.org`, limited to the `main` deployment branch. NuGet Trusted Publishing is configured for repository owner `awe123343-org`, repository `LoadingCache.Net`, workflow filename **`publish-nuget.yml`** (not its full path) and environment **`nuget.org`**. The NuGet package owner remains `awe123343`. Scope is Push new packages/versions for the exact two package IDs; publishing does not require unlist/relist authority. No long-lived API key is needed. [NuGet configuration](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing).
 
 ## Artifact checks and failure handling
 

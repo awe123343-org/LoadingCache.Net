@@ -24,7 +24,7 @@ class ReleaseArtifactTests(unittest.TestCase):
                 "core_id": "LoadingCache.Net",
                 "di_id": "LoadingCache.Net.Extensions.DependencyInjection",
                 "authors": "Maintainer",
-                "repository_url": "https://github.com/awe123343/LoadingCache.Net",
+                "repository_url": "https://github.com/awe123343-org/LoadingCache.Net",
                 "repository_commit": "a" * 40,
             }
             entries = []

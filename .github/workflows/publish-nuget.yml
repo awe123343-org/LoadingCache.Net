@@ -29,7 +29,7 @@ jobs:
     name: Select release version
     permissions:
       contents: write
-    if: github.actor_id == '8992564' && github.actor == 'awe123343' && github.triggering_actor == 'awe123343' && github.repository == 'awe123343/LoadingCache.Net' && github.ref == 'refs/heads/main'
+    if: github.actor_id == '8992564' && github.actor == 'awe123343' && github.triggering_actor == 'awe123343' && github.repository == 'awe123343-org/LoadingCache.Net' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -67,7 +67,7 @@ jobs:
 
   pack:
     name: Pack release artifacts
-    if: github.actor_id == '8992564' && github.actor == 'awe123343' && github.triggering_actor == 'awe123343' && github.repository == 'awe123343/LoadingCache.Net'
+    if: github.actor_id == '8992564' && github.actor == 'awe123343' && github.triggering_actor == 'awe123343' && github.repository == 'awe123343-org/LoadingCache.Net'
     needs: [select, verify]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -183,8 +183,8 @@ jobs:
             echo "::error::Only awe123343 may start or rerun publication."
             exit 1
           fi
-          if [[ ( "$EVENT_NAME" != push && "$EVENT_NAME" != workflow_dispatch ) || "$REF" != refs/heads/main || "$REPOSITORY" != awe123343/LoadingCache.Net ]]; then
-            echo "::error::Publishing is allowed only from awe123343/LoadingCache.Net main."
+          if [[ ( "$EVENT_NAME" != push && "$EVENT_NAME" != workflow_dispatch ) || "$REF" != refs/heads/main || "$REPOSITORY" != awe123343-org/LoadingCache.Net ]]; then
+            echo "::error::Publishing is allowed only from awe123343-org/LoadingCache.Net main."
             exit 1
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -240,7 +240,7 @@ jobs:
   github-release:
     name: Publish GitHub release
     needs: [pack, publish]
-    if: github.actor_id == '8992564' && github.actor == 'awe123343' && github.triggering_actor == 'awe123343' && github.repository == 'awe123343/LoadingCache.Net' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+    if: github.actor_id == '8992564' && github.actor == 'awe123343' && github.triggering_actor == 'awe123343' && github.repository == 'awe123343-org/LoadingCache.Net' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
