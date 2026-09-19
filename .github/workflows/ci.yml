@@ -3,6 +3,8 @@ name: Correctness
 on:
   workflow_call:
   push:
+    branches-ignore: [main]
+    tags: ["**"]
   pull_request:
   workflow_dispatch:
 
@@ -33,6 +35,8 @@ jobs:
           cache-dependency-glob: .pre-commit-config.yaml
       - name: Validate formatting
         run: bash pre-commit.sh
+      - name: Test release tooling
+        run: uv run --no-project python -m unittest discover -s tools -p 'test_*.py'
 
   correctness:
     strategy:
