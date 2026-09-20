@@ -1,5 +1,4 @@
 minimum_prek_version: "0.4.14"
-default_stages: [pre-commit]
 # Dated benchmark runs include hash-bound reports, scripts and source snapshots.
 # Keep their archived bytes intact; ordinary documentation remains checked.
 exclude: >-
@@ -47,19 +46,26 @@ repos:
         files: '\.(js|jsx|ts|tsx|mjs|cjs|css|json|jsonc|md|mdx|markdown|toml|yaml|yml|html)$'
         require_serial: true
       - id: dotnet-tool-restore
-        name: Restore repository .NET tools
+        name: Install .NET tools
         entry: dotnet tool restore
         language: system
-        files: '(\.(cs|csproj|props|targets|slnx|xml|config)$|^\.config/dotnet-tools\.json$)'
+        always_run: true
         pass_filenames: false
-        stages: [pre-commit, manual]
+        stages:
+          - pre-commit
+          - pre-push
+          - post-checkout
+          - post-rewrite
+          - manual
       - id: dotnet-format-style
-        name: Remove unused C# imports (IDE0005 only)
-        entry: bash tools/hooks/dotnet-format-style.sh
+        name: Run dotnet format style
+        entry: make format-dotnet-style
+        verbose: true
         language: system
+        pass_filenames: false
         types: ["c#"]
-        require_serial: true
         stages: [manual]
+        description: Clean up unused C# imports only (IDE0005)
       - id: csharpier
         name: CSharpier
         entry: dotnet csharpier format

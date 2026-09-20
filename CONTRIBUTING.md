@@ -13,7 +13,9 @@ The API is experimental and has not been frozen.
 
 Set up the [formatting hooks](docs/formatting.md) with `make install-tools` and
 `make install-hooks`. Fast formatters run on pre-commit and in the `format` CI
-job; unused C# imports are detected by the existing build. Run
+job. We intentionally leave automatic unused C# usings checks to CI rather than
+local Git hooks because full-solution analysis takes about 11 seconds. Local
+builds still enforce IDE0005, and manual checks remain available. Run
 `make format-dotnet-style` to remove them automatically.
 
 Run from the repository root:
