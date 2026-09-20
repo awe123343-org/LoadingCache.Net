@@ -6,6 +6,7 @@ import java.util.concurrent.BrokenBarrierException
 import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import kotlin.concurrent.thread
 import org.openjdk.jmh.annotations.Benchmark
 import org.openjdk.jmh.annotations.BenchmarkMode
 import org.openjdk.jmh.annotations.Fork
@@ -142,10 +143,7 @@ open class CaffeineWriteDrainBenchmark {
         private lateinit var values: Array<Any>
         private val threads =
             Array(workers) { worker ->
-                Thread({ run(worker) }, "caffeine-write-worker-$worker").apply {
-                    isDaemon = true
-                    start()
-                }
+                thread(isDaemon = true, name = "caffeine-write-worker-$worker") { run(worker) }
             }
 
         fun runBatch(batchStart: Int, batchValues: Array<Any>) {

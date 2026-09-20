@@ -7,8 +7,6 @@ import com.sun.management.ThreadMXBean
 import java.io.IOException
 import java.lang.management.ManagementFactory
 import java.net.URISyntaxException
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
 import java.security.NoSuchAlgorithmException
@@ -16,6 +14,12 @@ import java.util.concurrent.BrokenBarrierException
 import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import kotlin.concurrent.thread
+import kotlin.io.path.Path
+import kotlin.io.path.createDirectories
+import kotlin.io.path.inputStream
+import kotlin.io.path.isRegularFile
+import kotlin.io.path.writeText
 import kotlin.system.exitProcess
 
 /**
@@ -83,8 +87,8 @@ object HitProbe {
             if (output == null) {
                 println(report)
             } else {
-                output.parent?.let { Files.createDirectories(it) }
-                Files.writeString(output, report + System.lineSeparator(), StandardCharsets.UTF_8)
+                output.parent?.createDirectories()
+                output.writeText(report + System.lineSeparator())
                 System.err.println("wrote $output")
             }
         } catch (exception: IOException) {
@@ -276,7 +280,7 @@ object HitProbe {
         @Volatile private var failure: Throwable? = null
         private val threads =
             Array(options.workers) { worker ->
-                Thread.ofPlatform().daemon(true).name("LoadingCache.HitProbe.worker-$worker").unstarted {
+                thread(start = false, isDaemon = true, name = "LoadingCache.HitProbe.worker-$worker") {
                     val caffeine = cache.caffeine
                     if (caffeine != null) {
                         runWorker(worker) { caffeine.getIfPresent(it) }
@@ -525,7 +529,7 @@ object HitProbe {
 
                         "--duration-ms" -> options.durationMillis = parseLong(argument, value)
 
-                        "--output" -> options.output = Path.of(value)
+                        "--output" -> options.output = Path(value)
 
                         else -> throw IllegalArgumentException("unknown flag: $argument")
                     }
@@ -637,7 +641,7 @@ object HitProbe {
         private fun cacheArtifact(type: Class<*>): Artifact =
             try {
                 val path = Path.of(type.protectionDomain.codeSource.location.toURI()).toAbsolutePath()
-                Artifact(path.toString(), if (Files.isRegularFile(path)) sha256(path) else null)
+                Artifact(path.toString(), if (path.isRegularFile()) sha256(path) else null)
             } catch (_: URISyntaxException) {
                 Artifact(null, null)
             } catch (_: RuntimeException) {
@@ -647,7 +651,7 @@ object HitProbe {
         private fun sha256(path: Path): String? =
             try {
                 val digest = MessageDigest.getInstance("SHA-256")
-                Files.newInputStream(path).use { input ->
+                path.inputStream().use { input ->
                     val buffer = ByteArray(16_384)
                     while (true) {
                         val read = input.read(buffer)
@@ -655,7 +659,7 @@ object HitProbe {
                         if (read > 0) digest.update(buffer, 0, read)
                     }
                 }
-                digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
+                digest.digest().toHexString()
             } catch (_: IOException) {
                 null
             } catch (_: NoSuchAlgorithmException) {
@@ -697,7 +701,11 @@ object HitProbe {
                     '\t' -> json.append("\\t")
 
                     else ->
-                        if (character < ' ') json.append("\\u%04x".format(character.code)) else json.append(character)
+                        if (character < ' ') {
+                            json.append("\\u${character.code.toString(16).padStart(4, '0')}")
+                        } else {
+                            json.append(character)
+                        }
                 }
             }
             json.append('"')

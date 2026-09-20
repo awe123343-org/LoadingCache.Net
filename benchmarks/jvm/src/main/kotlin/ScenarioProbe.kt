@@ -8,26 +8,30 @@ import com.github.benmanes.caffeine.cache.LoadingCache
 import java.lang.management.ManagementFactory
 import java.lang.ref.Reference
 import java.lang.ref.WeakReference
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
 import java.time.Duration
-import java.time.Instant
-import java.util.HexFormat
 import java.util.Locale
-import java.util.TreeMap
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicLong
-import java.util.function.BooleanSupplier
-import java.util.function.Function
 import java.util.jar.JarFile
+import kotlin.concurrent.atomics.AtomicLong
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
+import kotlin.concurrent.thread
+import kotlin.io.path.Path
+import kotlin.io.path.createDirectories
+import kotlin.io.path.isDirectory
+import kotlin.io.path.readBytes
+import kotlin.io.path.readText
+import kotlin.io.path.useDirectoryEntries
+import kotlin.io.path.writeText
+import kotlin.time.Clock
 
 /** Matched, validated closed-loop scenario driver; see methodology.md. */
+@OptIn(ExperimentalAtomicApi::class)
 object ScenarioProbe {
     private val names =
         listOf(
@@ -85,14 +89,9 @@ object ScenarioProbe {
             for (index in 0 until options.warmups + options.runs) {
                 val sample = run(name, options, index)
                 samples.add(sample)
-                System.err.printf(
-                    Locale.ROOT,
-                    "%s sample=%d operations=%d backend=%d seconds=%.6f%n",
-                    name,
-                    index,
-                    sample.operations,
-                    sample.backendCalls,
-                    sample.seconds,
+                val seconds = "%.6f".format(Locale.ROOT, sample.seconds)
+                System.err.println(
+                    "$name sample=$index operations=${sample.operations} backend=${sample.backendCalls} seconds=$seconds",
                 )
             }
         }
@@ -110,10 +109,10 @@ object ScenarioProbe {
             )
         val classHashes = classHashes(Path.of(ScenarioProbe::class.java.protectionDomain.codeSource.location.toURI()))
         report["harnessClassHashes"] = classHashes
-        report["harnessSha256"] = hash(json(classHashes).toByteArray(StandardCharsets.UTF_8))
+        report["harnessSha256"] = hash(json(classHashes).toByteArray())
         report["argv"] = args.toList()
         report["options"] = options
-        report["traceSha256"] = options.traceFile?.let { hash(Path.of(it)) }
+        report["traceSha256"] = options.traceFile?.let { hash(Path(it)) }
         report["allocationScope"] =
             "driver-thread allocated bytes during timed scenario; excludes background maintenance, loader and callback workers; not directly comparable to .NET whole-process bytes; -1 if unavailable"
         report["timingScope"] =
@@ -123,17 +122,17 @@ object ScenarioProbe {
         if (options.output == null) {
             println(output)
         } else {
-            val path = Path.of(options.output).toAbsolutePath()
-            Files.createDirectories(path.parent)
-            Files.writeString(path, output + System.lineSeparator(), StandardCharsets.UTF_8)
+            val path = Path(options.output).toAbsolutePath()
+            path.parent.createDirectories()
+            path.writeText(output + System.lineSeparator())
         }
     }
 
     private fun classHashes(location: Path): Map<String, String> {
-        val hashes = TreeMap<String, String>()
+        val hashes = sortedMapOf<String, String>()
         fun harnessClass(name: String) = name.startsWith("ScenarioProbe") && name.endsWith(".class")
-        if (Files.isDirectory(location)) {
-            Files.list(location).use { paths ->
+        if (location.isDirectory()) {
+            location.useDirectoryEntries { paths ->
                 paths
                     .filter { harnessClass(it.fileName.toString()) }
                     .forEach { hashes[it.fileName.toString()] = hash(it) }
@@ -142,7 +141,7 @@ object ScenarioProbe {
             JarFile(location.toFile()).use { jar ->
                 for (entry in jar.entries()) {
                     if (harnessClass(entry.name)) {
-                        hashes[entry.name] = jar.getInputStream(entry).use { hash(it.readAllBytes()) }
+                        hashes[entry.name] = jar.getInputStream(entry).use { hash(it.readBytes()) }
                     }
                 }
             }
@@ -156,7 +155,7 @@ object ScenarioProbe {
             return syncFanIn(name, options, index)
         }
         if (name == "weak-key-cleanup" || name == "weak-value-cleanup") return referenceCleanup(name, options, index)
-        val clock = AtomicLong()
+        val clock = AtomicLong(0)
         val trace = options.traceFile?.let(::readTrace) ?: trace(options.cycles, options.seed, options.capacity * 4)
         check(trace.size == options.cycles && trace.all { it in 0..1_000_000 }, "trace length/key bounds")
         val keys = Array(maxOf(options.capacity * 4 + 32, trace.max() + 1)) { Key(it) }
@@ -171,7 +170,7 @@ object ScenarioProbe {
             } else {
                 0
             }
-        val callbacks = AtomicLong()
+        val callbacks = AtomicLong(0)
         // A fresh builder keeps the size cases unweighted; no weigher on their hit path.
         val builder =
             if (name.startsWith("weight")) {
@@ -181,7 +180,7 @@ object ScenarioProbe {
             } else {
                 Caffeine.newBuilder().maximumSize(options.capacity.toLong())
             }
-        builder.ticker(clock::get)
+        builder.ticker(clock::load)
         if (options.statistics) builder.recordStats()
         if (name in listOf("ttl", "ttl-cleanup", "runtime-expiry")) builder.expireAfterWrite(duration)
         if (name in listOf("tti", "tti-cleanup", "runtime-access")) builder.expireAfterAccess(duration)
@@ -191,8 +190,8 @@ object ScenarioProbe {
         if (name == "refresh-auto" || name == "runtime-refresh") builder.refreshAfterWrite(duration)
         if (name == "weak-key-lookup") builder.weakKeys()
         if (name == "weak-value-lookup") builder.weakValues()
-        if (name == "eviction-listener") builder.evictionListener<Key, Value> { _, _, _ -> callbacks.incrementAndGet() }
-        if (name == "removal-listener") builder.removalListener<Key, Value> { _, _, _ -> callbacks.incrementAndGet() }
+        if (name == "eviction-listener") builder.evictionListener<Key, Value> { _, _, _ -> callbacks.addAndFetch(1) }
+        if (name == "removal-listener") builder.removalListener<Key, Value> { _, _, _ -> callbacks.addAndFetch(1) }
         val asyncMode = name.contains("async")
         val loader = Loader(values, name.startsWith("prefetch"), name.contains("gated"))
         val asyncCache: AsyncCache<Key, Value>? =
@@ -230,7 +229,7 @@ object ScenarioProbe {
         val c = Counters()
         var weightChanges = 0
         var drains = 0
-        val utcStarted = Instant.now()
+        val utcStarted = Clock.System.now()
         val allocationBefore = allocation()
         val started = System.nanoTime()
         for (cycle in 0 until options.cycles) {
@@ -308,23 +307,23 @@ object ScenarioProbe {
                 -> {
                     cache.put(keys[0], values[0])
                     c.operations++
-                    clock.addAndGet(6_000_000)
+                    clock.addAndFetch(6_000_000)
                     read(cache, keys[0], values[0], true, c)
-                    clock.addAndGet(6_000_000)
+                    clock.addAndFetch(6_000_000)
                     read(cache, keys[0], values[0], name != "ttl", c)
-                    clock.addAndGet(11_000_000)
+                    clock.addAndFetch(11_000_000)
                     read(cache, keys[0], values[0], false, c)
                 }
 
                 "variable-update" -> {
                     cache.put(keys[0], values[0])
                     c.operations++
-                    clock.addAndGet(6_000_000)
+                    clock.addAndFetch(6_000_000)
                     cache.put(keys[0], alternate[0])
                     c.operations++
-                    clock.addAndGet(6_000_000)
+                    clock.addAndFetch(6_000_000)
                     read(cache, keys[0], alternate[0], true, c)
-                    clock.addAndGet(11_000_000)
+                    clock.addAndFetch(11_000_000)
                     read(cache, keys[0], alternate[0], false, c)
                 }
 
@@ -339,7 +338,7 @@ object ScenarioProbe {
                     drains += drain(cache)
                     c.operations++
                     check(cache.estimatedSize() == 16L, "expiry prefill not fully registered")
-                    clock.addAndGet(2_000_000_000)
+                    clock.addAndFetch(2_000_000_000)
                     drains += drain(cache)
                     c.operations++
                     check(cache.estimatedSize() == 0L, "expired entries survived cleanup")
@@ -368,7 +367,7 @@ object ScenarioProbe {
                     c.operations++
                     cache.put(keys[0], values[0])
                     c.operations++
-                    clock.addAndGet(6_000_000)
+                    clock.addAndFetch(6_000_000)
                     fixedPolicy.expiresAfter = Duration.ofMillis(5)
                     c.operations++
                     read(cache, keys[0], values[0], false, c)
@@ -379,7 +378,7 @@ object ScenarioProbe {
                     c.operations++
                     cache.policy().expireVariably().orElseThrow().setExpiresAfter(keys[0], Duration.ofMillis(5))
                     c.operations++
-                    clock.addAndGet(6_000_000)
+                    clock.addAndFetch(6_000_000)
                     read(cache, keys[0], values[0], false, c)
                 }
 
@@ -391,7 +390,7 @@ object ScenarioProbe {
                 "variable-put" -> {
                     cache.policy().expireVariably().orElseThrow().put(keys[0], values[0], Duration.ofMillis(5))
                     c.operations++
-                    clock.addAndGet(6_000_000)
+                    clock.addAndFetch(6_000_000)
                     read(cache, keys[0], values[0], false, c)
                 }
 
@@ -470,7 +469,7 @@ object ScenarioProbe {
                     c.operations++
                     val refreshing = cache as LoadingCache<Key, Value>
                     if (name != "refresh-explicit") {
-                        clock.addAndGet(if (name == "runtime-refresh") 6_000_000 else 11_000_000)
+                        clock.addAndFetch(if (name == "runtime-refresh") 6_000_000 else 11_000_000)
                         if (name == "runtime-refresh") {
                             cache.policy().refreshAfterWrite().orElseThrow().refreshesAfter = Duration.ofMillis(5)
                             c.operations++
@@ -521,11 +520,11 @@ object ScenarioProbe {
         }
         val view = if (asyncMode) asyncCache!!.synchronous() else cache
         drains += drain(view)
-        if (name == "removal-listener") until { callbacks.get() == options.cycles - 1L }
+        if (name == "removal-listener") until { callbacks.load() == options.cycles - 1L }
         val ended = System.nanoTime()
         val allocationAfter = allocation()
         val allocated = if (allocationBefore < 0 || allocationAfter < 0) -1 else allocationAfter - allocationBefore
-        val utcEnded = Instant.now()
+        val utcEnded = Clock.System.now()
         if (name == "weight-replace") {
             check(weightChanges == expectedWeightChanges, "weighted replacement transition count")
         }
@@ -559,9 +558,9 @@ object ScenarioProbe {
             } else {
                 0L
             }
-        check(loader.calls.get() == expectedBackend, "backend invocation count")
+        check(loader.calls.load() == expectedBackend, "backend invocation count")
         val expectedBulk = if (name.startsWith("bulk") || name.startsWith("prefetch")) options.cycles.toLong() else 0L
-        check(loader.bulkCalls.get() == expectedBulk, "true bulk count")
+        check(loader.bulkCalls.load() == expectedBulk, "true bulk count")
         if (name in listOf("size-churn", "weight-churn", "eviction-listener", "runtime-maximum")) {
             for ((key, value) in policy.coldest(options.capacity * 4)) {
                 check(value === values[key.id], "resident value corrupt")
@@ -579,9 +578,9 @@ object ScenarioProbe {
             c.checksum,
             c.hits,
             c.misses,
-            loader.calls.get(),
-            loader.bulkCalls.get(),
-            callbacks.get(),
+            loader.calls.load(),
+            loader.bulkCalls.load(),
+            callbacks.load(),
             finalCount,
             weight,
             policy.maximum,
@@ -617,7 +616,7 @@ object ScenarioProbe {
         if (options.statistics) builder.recordStats()
         val cache: Cache<Key, Value> = builder.build()
         val fixture = populateUnrooted(cache, weakKey)
-        val utcStart = Instant.now()
+        val utcStart = Clock.System.now()
         val start = System.nanoTime()
         var passes = 0
         do {
@@ -648,7 +647,7 @@ object ScenarioProbe {
             null,
             passes,
             utcStart.toString(),
-            Instant.now().toString(),
+            Clock.System.now().toString(),
             start,
             end,
             (end - start) / 1e9,
@@ -664,37 +663,36 @@ object ScenarioProbe {
         val completed = CountDownLatch(options.fanIn)
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
-        val calls = AtomicLong()
+        val calls = AtomicLong(0)
         val key = Key(0)
         val expected = Value(1, 1)
-        val load =
-            Function<Key, Value> {
-                calls.incrementAndGet()
-                entered.countDown()
-                try {
-                    check(release.await(30, TimeUnit.SECONDS), "loader gate timeout")
-                } catch (exception: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    throw IllegalStateException(exception)
-                }
-                expected
+        val load: (Key) -> Value = {
+            calls.addAndFetch(1)
+            entered.countDown()
+            try {
+                check(release.await(30, TimeUnit.SECONDS), "loader gate timeout")
+            } catch (exception: InterruptedException) {
+                Thread.currentThread().interrupt()
+                throw IllegalStateException(exception)
             }
+            expected
+        }
         val builder = Caffeine.newBuilder().maximumSize(options.capacity.toLong())
         if (options.statistics) builder.recordStats()
-        val cache: Cache<Key, Value> =
-            if (name == "sync-fanin-contract") builder.build(load::apply) else builder.build()
+        val cache: Cache<Key, Value> = if (name == "sync-fanin-contract") builder.build(load) else builder.build()
         val values = arrayOfNulls<Value>(options.fanIn)
         val failures = ConcurrentLinkedQueue<Throwable>()
         val threads = arrayOfNulls<Thread>(options.fanIn)
-        val utcStart = Instant.now()
+        val utcStart = Clock.System.now()
         val start = System.nanoTime()
         try {
             for (worker in threads.indices) {
                 val thread =
-                    Thread {
+                    thread(start = false, isDaemon = true) {
                         invoked.countDown()
                         try {
-                            values[worker] = if (cache is LoadingCache<Key, Value>) cache.get(key) else cache.get(key, load)
+                            values[worker] =
+                                if (cache is LoadingCache<Key, Value>) cache.get(key) else cache.get(key, load)
                         } catch (failure: Throwable) {
                             failures.add(failure)
                         } finally {
@@ -702,7 +700,6 @@ object ScenarioProbe {
                         }
                     }
                 threads[worker] = thread
-                thread.isDaemon = true
                 thread.start()
             }
             check(invoked.await(30, TimeUnit.SECONDS) && entered.await(30, TimeUnit.SECONDS), "callers did not enter")
@@ -710,7 +707,7 @@ object ScenarioProbe {
             release.countDown()
             check(completed.await(30, TimeUnit.SECONDS), "callers failed to finish")
             check(
-                failures.isEmpty() && calls.get() == 1L && values.all { it === expected },
+                failures.isEmpty() && calls.load() == 1L && values.all { it === expected },
                 "sync fan-in result/backend",
             )
             val drains = drain(cache)
@@ -723,7 +720,7 @@ object ScenarioProbe {
                 options.fanIn.toLong(),
                 0,
                 0,
-                calls.get(),
+                calls.load(),
                 0,
                 0,
                 cache.estimatedSize(),
@@ -732,7 +729,7 @@ object ScenarioProbe {
                 null,
                 drains,
                 utcStart.toString(),
-                Instant.now().toString(),
+                Clock.System.now().toString(),
                 start,
                 end,
                 (end - start) / 1e9,
@@ -775,9 +772,9 @@ object ScenarioProbe {
         throw IllegalStateException("maintenance failed to converge")
     }
 
-    private fun until(predicate: BooleanSupplier) {
+    private fun until(predicate: () -> Boolean) {
         val start = System.nanoTime()
-        while (!predicate.asBoolean) {
+        while (!predicate()) {
             if (System.nanoTime() - start > 30_000_000_000L) {
                 throw IllegalStateException("callback/refresh failed to finish")
             }
@@ -789,7 +786,7 @@ object ScenarioProbe {
         var state = seed
         return IntArray(count) {
             state = state * 1664525 + 1013904223
-            Integer.remainderUnsigned(state, bound)
+            (state.toUInt() % bound.toUInt()).toInt()
         }
     }
 
@@ -803,7 +800,7 @@ object ScenarioProbe {
     }
 
     private fun readTrace(path: String): IntArray {
-        val text = Files.readString(Path.of(path), StandardCharsets.UTF_8).trim()
+        val text = Path(path).readText().trim()
         check(text.startsWith("[") && text.endsWith("]"), "trace must be a JSON integer array")
         val body = text.substring(1, text.length - 1).trim()
         if (body.isEmpty()) return IntArray(0)
@@ -819,9 +816,9 @@ object ScenarioProbe {
         return -1
     }
 
-    private fun hash(path: Path) = hash(Files.readAllBytes(path))
+    private fun hash(path: Path) = hash(path.readBytes())
 
-    private fun hash(bytes: ByteArray) = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes))
+    private fun hash(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes).toHexString()
 
     private fun check(condition: Boolean, message: String) {
         if (!condition) throw IllegalStateException(message)
@@ -850,23 +847,23 @@ object ScenarioProbe {
 
     private class Loader(private val values: Array<Value>, private val prefetch: Boolean, private val gated: Boolean) :
         CacheLoader<Key, Value> {
-        val calls = AtomicLong()
-        val bulkCalls = AtomicLong()
+        val calls = AtomicLong(0)
+        val bulkCalls = AtomicLong(0)
         val prefetchKey = Key(16)
         var gate: CompletableFuture<Value>? = null
 
         override fun load(key: Key): Value {
-            calls.incrementAndGet()
+            calls.addAndFetch(1)
             return values[key.id]
         }
 
         override fun asyncLoad(key: Key, executor: Executor): CompletableFuture<Value> {
-            calls.incrementAndGet()
+            calls.addAndFetch(1)
             return if (gated) gate!! else CompletableFuture.completedFuture(values[key.id])
         }
 
         override fun loadAll(keys: Set<Key>): Map<Key, Value> {
-            bulkCalls.incrementAndGet()
+            bulkCalls.addAndFetch(1)
             val result = HashMap<Key, Value>()
             for (key in keys) result[key] = values[key.id]
             if (prefetch) result[prefetchKey] = values[16]
@@ -1025,7 +1022,7 @@ object ScenarioProbe {
                 '\n' -> out.append("\\n")
                 '\r' -> out.append("\\r")
                 '\t' -> out.append("\\t")
-                else -> if (ch.code < 32) out.append(String.format(Locale.ROOT, "\\u%04x", ch.code)) else out.append(ch)
+                else -> if (ch.code < 32) out.append("\\u${ch.code.toString(16).padStart(4, '0')}") else out.append(ch)
             }
         }
         return out.append('"').toString()
