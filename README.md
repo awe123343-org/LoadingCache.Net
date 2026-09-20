@@ -1,5 +1,10 @@
 # LoadingCache
 
+[![CI](https://github.com/awe123343-org/LoadingCache.Net/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/awe123343-org/LoadingCache.Net/actions/workflows/ci.yml)
+[![NuGet](https://img.shields.io/nuget/v/LoadingCache.Net)](https://www.nuget.org/packages/LoadingCache.Net)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![pre-commit: prek](https://img.shields.io/badge/pre--commit-prek-white?logo=precommit&logoColor=FAB040&labelColor=white)](https://github.com/j178/prek)
+
 A typed, in-process cache for **.NET 8+**: adaptive Window TinyLFU eviction,
 single-flight loading, expiration and refresh, with a BCL-only core.
 
