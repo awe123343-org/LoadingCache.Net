@@ -443,6 +443,7 @@ public sealed class MaintenanceTests
         const int producerCount = 8;
         const int eventsPerProducer = 128;
         StripedReadBuffer<int> buffer = new(8, 16);
+        // Blocking peers must have their own threads: ThreadPool injection is not a test gate.
         using Barrier start = new(producerCount + 1);
         List<Task> workers = [];
         try
@@ -481,7 +482,7 @@ public sealed class MaintenanceTests
                         },
                         (buffer, start, producerId, eventsPerProducer, TestTimeout),
                         CancellationToken.None,
-                        TaskCreationOptions.DenyChildAttach,
+                        TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
                         TaskScheduler.Default
                     )
                 );
@@ -507,7 +508,7 @@ public sealed class MaintenanceTests
                     },
                     (buffer, start, TestTimeout),
                     CancellationToken.None,
-                    TaskCreationOptions.DenyChildAttach,
+                    TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
                     TaskScheduler.Default
                 )
             );
@@ -594,7 +595,7 @@ public sealed class MaintenanceTests
                     },
                     (buffer, start),
                     CancellationToken.None,
-                    TaskCreationOptions.DenyChildAttach,
+                    TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
                     TaskScheduler.Default
                 );
                 disposer = Task.Factory.StartNew(
@@ -616,7 +617,7 @@ public sealed class MaintenanceTests
                     },
                     (buffer, start),
                     CancellationToken.None,
-                    TaskCreationOptions.DenyChildAttach,
+                    TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
                     TaskScheduler.Default
                 );
 
@@ -699,7 +700,12 @@ public sealed class MaintenanceTests
         );
 
         coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
-        Task worker = Task.Run(scheduler.RunNext);
+        Task worker = Task.Factory.StartNew(
+            scheduler.RunNext,
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
+            TaskScheduler.Default
+        );
         try
         {
             await entered.Task.WaitAsync(TestTimeout, TestContext.CurrentContext.CancellationToken);
@@ -1090,6 +1096,7 @@ public sealed class MaintenanceTests
     private static TaskCompletionSource<T> NewCompletionSource<T>() =>
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    // Publication/reservation hooks can block until another worker or the test releases them.
     private static Task<bool> StartEnqueue<T>(StripedReadBuffer<T> buffer, T value)
     {
         return Task.Factory.StartNew(
@@ -1101,7 +1108,7 @@ public sealed class MaintenanceTests
             },
             (buffer, value),
             CancellationToken.None,
-            TaskCreationOptions.DenyChildAttach,
+            TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
             TaskScheduler.Default
         );
     }
@@ -1120,7 +1127,7 @@ public sealed class MaintenanceTests
             },
             buffer,
             CancellationToken.None,
-            TaskCreationOptions.DenyChildAttach,
+            TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
             TaskScheduler.Default
         );
     }
