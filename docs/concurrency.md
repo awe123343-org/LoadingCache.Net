@@ -113,3 +113,10 @@ Coordinator states are Idle/Scheduled/Running/RunningRequired/Disposed. Each act
 A pass replays available reads before queued writes/eviction; this is approximate policy ordering, not a total access order. Write-pressure flush has its own reliable boundary. Handoff checks consumable heads, not reservations, avoiding infinite re-arm on paused producers. Rejected fallback clears read retry state so later full offers can schedule again. Quiescent cleanup drains completed publications; no freshness depends on read replay. Variable-expiry callback commit still uses the engine gate and has a distinct contention cost.
 
 Controlled tests cover ABA, installer pauses, finalisation, shutdown publication ordering, counter wrap, stale epochs, full queues, re-arm rejection, owner reuse, wheel tails and weight overflow. Keep hardware/platform evidence separate from abstract ordering counterexamples and deterministic schedules. [Release readiness](release-readiness.md) identifies what actually ran.
+
+## Maintenance test scheduling
+
+Workers that deliberately block on publication hooks, barriers or a manual scheduler gate
+use `TaskCreationOptions.LongRunning` with `TaskScheduler.Default`. Their peers must be able
+to start without ThreadPool worker injection. Default-scheduler tests still exercise the
+real ThreadPool; the five-second watchdogs and concurrency assertions remain unchanged.
