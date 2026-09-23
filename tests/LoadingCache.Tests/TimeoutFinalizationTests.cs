@@ -1,6 +1,4 @@
-using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
@@ -23,15 +21,17 @@ public sealed class TimeoutFinalizationTests
                     return key;
                 }
             );
-
         for (int key = 0; key < 256; key++)
         {
-            (await cache.GetAsync(key).AsTask().WaitAsync(Watchdog)).Should().Be(key);
+            await Assert
+                .That((await cache.GetAsync(key).AsTask().WaitAsync(Watchdog)))
+                .IsEqualTo(key);
         }
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task ThrowingRetirementCleanupEndsWaitersAndReleasesReservation(bool statistics)
     {
         var time = new ThrowingDisposeTimeProvider();
@@ -52,20 +52,19 @@ public sealed class TimeoutFinalizationTests
                     ? Task.FromException<int>(new InvalidOperationException("Backend failure."))
                     : Task.FromResult(key)
         );
-
         Task<int> first = cache.GetAsync(1).AsTask();
-        await FluentActions
-            .Awaiting(() => first.WaitAsync(Watchdog))
-            .Should()
-            .ThrowExactlyAsync<InvalidOperationException>()
+        await Assert
+            .That(() => first.WaitAsync(Watchdog))
+            .ThrowsExactly<InvalidOperationException>()
             .WithMessage("Backend failure.");
-        (await cache.GetAsync(2).AsTask().WaitAsync(Watchdog)).Should().Be(2);
-        time.DisposeCalls.Should().Be(2);
-        cache.GetStatistics().MaintenanceFaults.Should().Be(statistics ? 1 : 0);
+        await Assert.That((await cache.GetAsync(2).AsTask().WaitAsync(Watchdog))).IsEqualTo(2);
+        await Assert.That(time.DisposeCalls).IsEqualTo(2);
+        await Assert.That(cache.GetStatistics().MaintenanceFaults).IsEqualTo(statistics ? 1 : 0);
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task TimerCleanupFailurePreservesSuccessfulValueAndTask(bool replaceValue)
     {
         var disposal = new BlockingTestHook(Watchdog);
@@ -92,13 +91,14 @@ public sealed class TimeoutFinalizationTests
             }
 
             disposal.Release();
-            (await pending.WaitAsync(Watchdog)).Should().Be(42);
+            await Assert.That((await pending.WaitAsync(Watchdog))).IsEqualTo(42);
             int expected = replaceValue ? 99 : 42;
-            cache.TryGet(1, out int value).Should().BeTrue();
-            value.Should().Be(expected);
-            cache.TryGetTask(1, out Task<int>? valueTask).Should().BeTrue();
-            (await valueTask!.WaitAsync(Watchdog)).Should().Be(expected);
-            cache.GetStatistics().MaintenanceFaults.Should().Be(1);
+            await Assert.That(cache.TryGet(1, out int value)).IsTrue();
+            await Assert.That(value).IsEqualTo(expected);
+            await Assert.That(cache.TryGetTask(1, out Task<int>? valueTask)).IsTrue();
+            Assert.NotNull(valueTask);
+            await Assert.That((await valueTask!.WaitAsync(Watchdog))).IsEqualTo(expected);
+            await Assert.That(cache.GetStatistics().MaintenanceFaults).IsEqualTo(1);
         }
         finally
         {
@@ -118,7 +118,7 @@ public sealed class TimeoutFinalizationTests
             }
         }
 
-        disposal.TimedOut.Should().BeFalse();
+        await Assert.That(disposal.TimedOut).IsFalse();
     }
 
     [Test]
@@ -143,17 +143,16 @@ public sealed class TimeoutFinalizationTests
         Task<int> pending = cache.GetAsync(1).AsTask();
         try
         {
-            FluentActions.Invoking(time.AdvanceToTimeout).Should().NotThrow();
-            pending.IsCompleted.Should().BeTrue();
-            await FluentActions
-                .Awaiting(() => pending)
-                .Should()
-                .ThrowExactlyAsync<TimeoutException>();
+            await Assert.That(time.AdvanceToTimeout).ThrowsNothing();
+            await Assert.That(pending.IsCompleted).IsTrue();
+            await Assert.That(() => pending).ThrowsExactly<TimeoutException>();
             backend.TrySetResult(42);
-            SpinWait.SpinUntil(() => !engine.HasActiveFlights, Watchdog).Should().BeTrue();
-            (await cache.GetAsync(2).AsTask().WaitAsync(Watchdog)).Should().Be(2);
-            cache.GetStatistics().MaintenanceFaults.Should().Be(1);
-            cache.GetStatistics().LoadTimeouts.Should().Be(1);
+            await Assert
+                .That(SpinWait.SpinUntil(() => !engine.HasActiveFlights, Watchdog))
+                .IsTrue();
+            await Assert.That((await cache.GetAsync(2).AsTask().WaitAsync(Watchdog))).IsEqualTo(2);
+            await Assert.That(cache.GetStatistics().MaintenanceFaults).IsEqualTo(1);
+            await Assert.That(cache.GetStatistics().LoadTimeouts).IsEqualTo(1);
         }
         finally
         {
@@ -171,8 +170,9 @@ public sealed class TimeoutFinalizationTests
         }
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task DisposeCompletesTimedOutWaitersAfterLateBackendCompletion(bool backendFails)
     {
         var time = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
@@ -191,7 +191,6 @@ public sealed class TimeoutFinalizationTests
             hasFixedLoader: true
         );
         var cache = new AsyncLoadingCache<int, int>(engine, (_, _) => backend.Task);
-
         Task<int> pending = cache.GetAsync(1).AsTask();
         Task<int> joined = cache.GetAsync(1).AsTask();
         Task timeout = Task.Run(() => time.Advance(TimeSpan.FromSeconds(1)));
@@ -208,24 +207,20 @@ public sealed class TimeoutFinalizationTests
             }
 
             WaitForBackendCompletion(cache);
-            pending.IsCompleted.Should().BeFalse();
-            joined.IsCompleted.Should().BeFalse();
-
+            await Assert.That(pending.IsCompleted).IsFalse();
+            await Assert.That(joined.IsCompleted).IsFalse();
             await cache.DisposeAsync().AsTask().WaitAsync(Watchdog);
-
-            pending
-                .IsCompleted.Should()
-                .BeTrue("backend completion must not hide pending timeout promises from shutdown");
-            joined.IsCompleted.Should().BeTrue();
-            await FluentActions
-                .Awaiting(() => pending)
-                .Should()
-                .ThrowExactlyAsync<ObjectDisposedException>();
-            await FluentActions
-                .Awaiting(() => joined)
-                .Should()
-                .ThrowExactlyAsync<ObjectDisposedException>();
-            timeout.IsCompleted.Should().BeFalse("shutdown cannot wait for timeout finalization");
+            await Assert
+                .That(pending.IsCompleted)
+                .IsTrue()
+                .Because("backend completion must not hide pending timeout promises from shutdown");
+            await Assert.That(joined.IsCompleted).IsTrue();
+            await Assert.That(() => pending).ThrowsExactly<ObjectDisposedException>();
+            await Assert.That(() => joined).ThrowsExactly<ObjectDisposedException>();
+            await Assert
+                .That(timeout.IsCompleted)
+                .IsFalse()
+                .Because("shutdown cannot wait for timeout finalization");
         }
         finally
         {
@@ -255,14 +250,14 @@ public sealed class TimeoutFinalizationTests
             }
         }
 
-        completion.TimedOut.Should().BeFalse();
+        await Assert.That(completion.TimedOut).IsFalse();
     }
 
-    private static void WaitForBackendCompletion(AsyncLoadingCache<int, int> cache) =>
-        SpinWait
-            .SpinUntil(() => cache.GetStatistics().InFlightLoads == 0, Watchdog)
-            .Should()
-            .BeTrue();
+    private static void WaitForBackendCompletion(AsyncLoadingCache<int, int> cache)
+    {
+        if (!(SpinWait.SpinUntil(() => cache.GetStatistics().InFlightLoads == 0, Watchdog)))
+            Assert.Fail("Timed out waiting for the controlled condition.");
+    }
 
     private sealed class RetirementCleanupException : Exception;
 
@@ -272,7 +267,6 @@ public sealed class TimeoutFinalizationTests
         private readonly FakeTimeProvider _inner = new(DateTimeOffset.UnixEpoch);
         private readonly BlockingTestHook? _disposal = disposal;
         private int _disposeCalls;
-
         internal int DisposeCalls => Volatile.Read(ref _disposeCalls);
 
         internal void AdvanceToTimeout() => _inner.Advance(TimeSpan.FromSeconds(1));

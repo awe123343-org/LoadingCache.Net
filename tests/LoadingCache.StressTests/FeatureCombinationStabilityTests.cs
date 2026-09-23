@@ -2,14 +2,10 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using FluentAssertions;
-using NUnit.Framework;
 
 namespace LoadingCache.StressTests;
 
 /// <summary>Exercises true bulk loading, weak references, and listeners under concurrent traffic.</summary>
-[TestFixture]
-[Parallelizable(ParallelScope.All)]
 public sealed class FeatureCombinationStabilityTests
 {
     private const int Seed = 20260914;
@@ -26,18 +22,19 @@ public sealed class FeatureCombinationStabilityTests
     ];
 
     /// <summary>Rotates three feature combinations while checking ownership and resource bounds.</summary>
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task BulkWeakReferencesAndListenersRemainConsistent(bool statistics)
     {
         string? configured = Environment.GetEnvironmentVariable(
             "LOADINGCACHE_FEATURE_SOAK_SECONDS"
         );
         int seconds = configured is null ? 5 : int.Parse(configured, CultureInfo.InvariantCulture);
-        seconds.Should().BeInRange(1, 86_400);
+        await Assert.That(seconds).IsBetween(1, 86_400);
         string directory =
             Environment.GetEnvironmentVariable("LOADINGCACHE_SOAK_OUTPUT")
-            ?? Path.Combine(TestContext.CurrentContext.WorkDirectory, "artifacts", "soak");
+            ?? Path.Combine(Environment.CurrentDirectory, "artifacts", "soak");
         Directory.CreateDirectory(directory);
         string output = Path.Combine(
             directory,
@@ -137,6 +134,7 @@ public sealed class FeatureCombinationStabilityTests
                 {
                     await cache.AssertQuiescentAsync().ConfigureAwait(false);
                 }
+
                 if (batch % 16 == 0)
                 {
                     foreach (FeatureCache cache in caches)
@@ -154,11 +152,13 @@ public sealed class FeatureCombinationStabilityTests
                         await cache.AssertQuiescentAsync().ConfigureAwait(false);
                     }
                 }
+
                 if (elapsed.Elapsed >= nextProgress)
                 {
                     Progress(log, "progress", elapsed, batch, cycle, caches, outcomes);
                     nextProgress = elapsed.Elapsed + TimeSpan.FromSeconds(1);
                 }
+
                 if (elapsed.Elapsed < nextRotation)
                     continue;
                 foreach (FeatureCache cache in caches)
@@ -167,6 +167,7 @@ public sealed class FeatureCombinationStabilityTests
                 caches = CreateCaches(statistics, ++cycle);
                 nextRotation = elapsed.Elapsed + interval;
             }
+
             Progress(log, "workload-complete", elapsed, batch, cycle, caches, outcomes);
         }
         catch (Exception exception)
@@ -206,6 +207,7 @@ public sealed class FeatureCombinationStabilityTests
                     await cache.DisposeAsync().ConfigureAwait(false);
             }
         }
+
         Write(
             log,
             new
@@ -218,7 +220,7 @@ public sealed class FeatureCombinationStabilityTests
             }
         );
         await TestContext
-            .Progress.WriteLineAsync(
+            .Current!.OutputWriter.WriteLineAsync(
                 $"feature soak stats={statistics}; batches={batch}; cycles={cycle}; output={output}"
             )
             .ConfigureAwait(false);
@@ -244,6 +246,7 @@ public sealed class FeatureCombinationStabilityTests
                     cancellation.Cancel();
                     cache.Validate(await pending.ConfigureAwait(false));
                 }
+
                 break;
             case < 45:
                 cache.Validate(
@@ -275,14 +278,18 @@ public sealed class FeatureCombinationStabilityTests
                 cache.Engine.CleanUp();
                 break;
         }
-        cache.Error.Should().BeNull();
+
+        await Assert.That((cache.Error) is null).IsTrue();
     }
 
     private static void Validate(Payload value, int id, int instance)
     {
-        value.KeyId.Should().Be(id);
-        value.Instance.Should().Be(instance);
-        value.Complement.Should().Be(~value.Version);
+        if ((value.KeyId) != (id))
+            Assert.Fail("Expected value.KeyId to equal (id).");
+        if ((value.Instance) != (instance))
+            Assert.Fail("Expected value.Instance to equal (instance).");
+        if ((value.Complement) != (~value.Version))
+            Assert.Fail("Expected value.Complement to equal (~value.Version).");
     }
 
     private static void Progress(
@@ -399,7 +406,8 @@ public sealed class FeatureCombinationStabilityTests
 
         internal void Validate(IReadOnlyDictionary<Key, Payload> values)
         {
-            values.Count.Should().Be(2);
+            if ((values.Count) != (2))
+                Assert.Fail("Expected values.Count to equal (2).");
             foreach (var pair in values)
                 FeatureCombinationStabilityTests.Validate(pair.Value, pair.Key.Id, Instance);
         }
@@ -414,7 +422,8 @@ public sealed class FeatureCombinationStabilityTests
             } while (
                 prior < active && Interlocked.CompareExchange(ref _peak, active, prior) != prior
             );
-            active.Should().BeLessThanOrEqualTo(LoadLimit);
+            if ((active) > (LoadLimit))
+                Assert.Fail("Expected active to be at most (LoadLimit).");
         }
 
         private Payload Load(Key key)
@@ -510,17 +519,17 @@ public sealed class FeatureCombinationStabilityTests
                     int count = eviction
                         ? Interlocked.Increment(ref value.Evictions)
                         : Interlocked.Increment(ref value.Removals);
-                    count
-                        .Should()
-                        .Be(
-                            1,
-                            "each payload is published only once and must not be notified twice"
+                    if ((count) != (1))
+                        Assert.Fail(
+                            "Expected count to equal ( 1, \"each payload is published only once and must not be notified twice\" )."
                         );
                 }
+
                 if (notification.Cause == RemovalCause.Collected)
                     Interlocked.Increment(ref _collected);
                 if (eviction)
-                    notification.Cause.Should().BeOneOf(RemovalCause.Size, RemovalCause.Collected);
+                    if (notification.Cause is not (RemovalCause.Size or RemovalCause.Collected))
+                        Assert.Fail($"Unexpected removal cause: {notification.Cause}");
                 if (notification.Key is not { } key)
                     return;
                 try
@@ -560,18 +569,19 @@ public sealed class FeatureCombinationStabilityTests
                     throw new TimeoutException("Feature cache loads did not quiesce.");
                 await Task.Yield();
             }
+
             Engine.CleanUp();
             Engine.AssertInvariants();
-            Engine.EstimatedCount.Should().BeLessThanOrEqualTo(Maximum);
-            Engine.GetStatistics().InFlightLoads.Should().Be(0);
-            Volatile.Read(ref _active).Should().Be(0);
-            Volatile.Read(ref _peak).Should().BeLessThanOrEqualTo(LoadLimit);
-            Engine.GetNotificationStatistics().Queued.Should().BeLessThanOrEqualTo(32);
+            await Assert.That(Engine.EstimatedCount).IsLessThanOrEqualTo(Maximum);
+            await Assert.That(Engine.GetStatistics().InFlightLoads).IsEqualTo(0);
+            await Assert.That(Volatile.Read(ref _active)).IsEqualTo(0);
+            await Assert.That(Volatile.Read(ref _peak)).IsLessThanOrEqualTo(LoadLimit);
+            await Assert.That(Engine.GetNotificationStatistics().Queued).IsLessThanOrEqualTo(32);
             foreach (var pair in Engine.DictionarySnapshot())
                 FeatureCombinationStabilityTests.Validate(pair.Value, pair.Key.Id, Instance);
-            Error.Should().BeNull();
+            await Assert.That((Error) is null).IsTrue();
             if (!_statistics)
-                Engine.GetStatistics().BulkLoads.Should().Be(0);
+                await Assert.That(Engine.GetStatistics().BulkLoads).IsEqualTo(0);
         }
 
         internal object Snapshot() =>
@@ -603,8 +613,9 @@ public sealed class FeatureCombinationStabilityTests
                     throw new TimeoutException("Feature listener did not finish after disposal.");
                 await Task.Yield();
             }
-            Error.Should().BeNull();
-            Engine.GetNotificationStatistics().Queued.Should().Be(0);
+
+            await Assert.That((Error) is null).IsTrue();
+            await Assert.That(Engine.GetNotificationStatistics().Queued).IsEqualTo(0);
         }
     }
 
@@ -616,6 +627,7 @@ public sealed class FeatureCombinationStabilityTests
         internal int Instance { get; } = instance;
         internal long Version { get; } = version;
         internal long Complement { get; } = ~version;
+
         internal int Removals;
         internal int Evictions;
     }

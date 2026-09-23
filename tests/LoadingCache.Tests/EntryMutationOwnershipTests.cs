@@ -1,17 +1,14 @@
 using System.Collections.Concurrent;
-using FluentAssertions;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class EntryMutationOwnershipTests
 {
-    [TestCase("update")]
-    [TestCase("remove-value")]
-    [TestCase("remove-comparison")]
-    [Parallelizable(ParallelScope.All)]
-    public void ConditionalMutationOwnsTheEntryThroughCommit(string operation)
+    [Test]
+    [Arguments("update")]
+    [Arguments("remove-value")]
+    [Arguments("remove-comparison")]
+    public async Task ConditionalMutationOwnsTheEntryThroughCommit(string operation)
     {
         var probe = new OwnershipProbe();
         CacheEngine<int, string> engine = CreateEngine(probe);
@@ -19,27 +16,26 @@ public sealed class EntryMutationOwnershipTests
         cache.Put(1, "old");
         cache.CleanUp();
         SyncCacheDictionary<int, string> dictionary = cache.AsDictionary();
-
         probe.Start();
         try
         {
             switch (operation)
             {
                 case "update":
-                    dictionary.TryUpdate(1, "new", "old").Should().BeTrue();
-                    dictionary[1].Should().Be("new");
-                    cache.Statistics.ReplacedRemovals.Should().Be(1);
+                    await Assert.That(dictionary.TryUpdate(1, "new", "old")).IsTrue();
+                    await Assert.That(dictionary[1]).IsEqualTo("new");
+                    await Assert.That(cache.Statistics.ReplacedRemovals).IsEqualTo(1);
                     break;
                 case "remove-value":
-                    dictionary.TryRemove(1, out string? removed).Should().BeTrue();
-                    removed.Should().Be("old");
-                    dictionary.ContainsKey(1).Should().BeFalse();
-                    cache.Statistics.ExplicitRemovals.Should().Be(1);
+                    await Assert.That(dictionary.TryRemove(1, out string? removed)).IsTrue();
+                    await Assert.That(removed).IsEqualTo("old");
+                    await Assert.That(dictionary.ContainsKey(1)).IsFalse();
+                    await Assert.That(cache.Statistics.ExplicitRemovals).IsEqualTo(1);
                     break;
                 case "remove-comparison":
-                    dictionary.TryRemove(1, "old").Should().BeTrue();
-                    dictionary.ContainsKey(1).Should().BeFalse();
-                    cache.Statistics.ExplicitRemovals.Should().Be(1);
+                    await Assert.That(dictionary.TryRemove(1, "old")).IsTrue();
+                    await Assert.That(dictionary.ContainsKey(1)).IsFalse();
+                    await Assert.That(cache.Statistics.ExplicitRemovals).IsEqualTo(1);
                     break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(operation));
@@ -55,18 +51,17 @@ public sealed class EntryMutationOwnershipTests
         probe.AssertExclusive(expectedCalls: 2);
     }
 
-    [TestCase(CacheMutationKind.Keep)]
-    [TestCase(CacheMutationKind.Set)]
-    [TestCase(CacheMutationKind.Remove)]
-    [Parallelizable(ParallelScope.All)]
-    public void PresentComputeOwnsItsFinalValidationThroughCommit(CacheMutationKind kind)
+    [Test]
+    [Arguments(CacheMutationKind.Keep)]
+    [Arguments(CacheMutationKind.Set)]
+    [Arguments(CacheMutationKind.Remove)]
+    public async Task PresentComputeOwnsItsFinalValidationThroughCommit(CacheMutationKind kind)
     {
         var probe = new OwnershipProbe();
         CacheEngine<int, string> engine = CreateEngine(probe);
         using var cache = new Cache<int, string>(engine);
         cache.Put(1, "old");
         cache.CleanUp();
-
         probe.Start();
         try
         {
@@ -76,8 +71,10 @@ public sealed class EntryMutationOwnershipTests
                     1,
                     (_, current) =>
                     {
-                        current.HasValue.Should().BeTrue();
-                        current.Value.Should().Be("old");
+                        if (!(current.HasValue))
+                            Assert.Fail("Expected current.HasValue to be true ().");
+                        if ((current.Value) != ("old"))
+                            Assert.Fail("Expected current.Value to equal (\"old\").");
                         return kind switch
                         {
                             CacheMutationKind.Keep => CacheMutation.Keep<string>(),
@@ -87,19 +84,19 @@ public sealed class EntryMutationOwnershipTests
                         };
                     }
                 );
-            result.Kind.Should().Be(kind);
+            await Assert.That(result.Kind).IsEqualTo(kind);
             if (kind == CacheMutationKind.Remove)
             {
-                cache.TryGet(1, out _).Should().BeFalse();
-                cache.Statistics.ExplicitRemovals.Should().Be(1);
+                await Assert.That(cache.TryGet(1, out _)).IsFalse();
+                await Assert.That(cache.Statistics.ExplicitRemovals).IsEqualTo(1);
             }
             else
             {
-                cache.TryGet(1, out string? value).Should().BeTrue();
-                value.Should().Be(kind == CacheMutationKind.Set ? "new" : "old");
-                cache
-                    .Statistics.ReplacedRemovals.Should()
-                    .Be(kind == CacheMutationKind.Set ? 1 : 0);
+                await Assert.That(cache.TryGet(1, out string? value)).IsTrue();
+                await Assert.That(value).IsEqualTo(kind == CacheMutationKind.Set ? "new" : "old");
+                await Assert
+                    .That(cache.Statistics.ReplacedRemovals)
+                    .IsEqualTo(kind == CacheMutationKind.Set ? 1 : 0);
             }
         }
         finally
@@ -112,8 +109,7 @@ public sealed class EntryMutationOwnershipTests
     }
 
     [Test]
-    [Parallelizable]
-    public void PressureTrimOwnsItsRevisionValidationThroughRetirement()
+    public async Task PressureTrimOwnsItsRevisionValidationThroughRetirement()
     {
         var probe = new OwnershipProbe();
         CacheEngine<int, string> engine = CreateEngine(probe);
@@ -121,30 +117,29 @@ public sealed class EntryMutationOwnershipTests
         cache.Put(1, "old");
         cache.CleanUp();
         MemoryPressureSnapshot snapshot = engine.CaptureMemoryPressureSnapshot(1, 1)!;
-        snapshot.Candidates.Should().ContainSingle();
-
+        await Assert.That(snapshot.Candidates).HasSingleItem();
         probe.Start();
         try
         {
-            engine.TrimForMemoryPressure(snapshot).Should().Be(1);
+            await Assert.That(engine.TrimForMemoryPressure(snapshot)).IsEqualTo(1);
         }
         finally
         {
             probe.Stop();
         }
 
-        cache.TryGet(1, out _).Should().BeFalse();
-        cache.Statistics.MemoryPressureRemovals.Should().Be(1);
-        cache.Statistics.Evictions.Should().Be(1);
+        await Assert.That(cache.TryGet(1, out _)).IsFalse();
+        await Assert.That(cache.Statistics.MemoryPressureRemovals).IsEqualTo(1);
+        await Assert.That(cache.Statistics.Evictions).IsEqualTo(1);
         cache.AssertInvariants();
         probe.AssertExclusive(expectedCalls: 2);
     }
 
-    [TestCase("invalidate")]
-    [TestCase("clear")]
-    [TestCase("dispose")]
-    [TestCase("dispose-async")]
-    [Parallelizable(ParallelScope.All)]
+    [Test]
+    [Arguments("invalidate")]
+    [Arguments("clear")]
+    [Arguments("dispose")]
+    [Arguments("dispose-async")]
     public async Task CommonRetirementOwnsTheExactEntry(string operation)
     {
         var probe = new OwnershipProbe();
@@ -160,7 +155,7 @@ public sealed class EntryMutationOwnershipTests
                 switch (operation)
                 {
                     case "invalidate":
-                        cache.Invalidate(1).Should().BeTrue();
+                        await Assert.That(cache.Invalidate(1)).IsTrue();
                         break;
                     case "clear":
                         cache.Clear();
@@ -182,19 +177,22 @@ public sealed class EntryMutationOwnershipTests
 
             if (operation is "invalidate" or "clear")
             {
-                cache.TryGet(1, out _).Should().BeFalse();
-                cache.EstimatedCount.Should().Be(0);
+                await Assert.That(cache.TryGet(1, out _)).IsFalse();
+                await Assert.That(cache.EstimatedCount).IsEqualTo(0);
                 CacheStatistics statistics = cache.Statistics;
-                statistics.ExplicitRemovals.Should().Be(operation == "invalidate" ? 1 : 0);
-                statistics.ClearedRemovals.Should().Be(operation == "clear" ? 1 : 0);
+                await Assert
+                    .That(statistics.ExplicitRemovals)
+                    .IsEqualTo(operation == "invalidate" ? 1 : 0);
+                await Assert
+                    .That(statistics.ClearedRemovals)
+                    .IsEqualTo(operation == "clear" ? 1 : 0);
                 cache.AssertInvariants();
             }
             else
             {
-                cache
-                    .Invoking(static current => current.TryGet(1, out _))
-                    .Should()
-                    .ThrowExactly<ObjectDisposedException>();
+                await Assert
+                    .That(() => cache.TryGet(1, out _))
+                    .ThrowsExactly<ObjectDisposedException>();
             }
 
             probe.AssertExclusive(expectedCalls: 1);
@@ -206,10 +204,10 @@ public sealed class EntryMutationOwnershipTests
         }
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    [Parallelizable(ParallelScope.All)]
-    public void FailedComparisonDoesNotReachTheCommitSeam(bool remove)
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task FailedComparisonDoesNotReachTheCommitSeam(bool remove)
     {
         var probe = new OwnershipProbe();
         CacheEngine<int, string> engine = CreateEngine(probe);
@@ -217,23 +215,22 @@ public sealed class EntryMutationOwnershipTests
         cache.Put(1, "old");
         cache.CleanUp();
         SyncCacheDictionary<int, string> dictionary = cache.AsDictionary();
-
         probe.Start();
         try
         {
             bool changed = remove
                 ? dictionary.TryRemove(1, "mismatch")
                 : dictionary.TryUpdate(1, "new", "mismatch");
-            changed.Should().BeFalse();
+            await Assert.That(changed).IsFalse();
         }
         finally
         {
             probe.Stop();
         }
 
-        dictionary[1].Should().Be("old");
-        cache.Statistics.ReplacedRemovals.Should().Be(0);
-        cache.Statistics.ExplicitRemovals.Should().Be(0);
+        await Assert.That(dictionary[1]).IsEqualTo("old");
+        await Assert.That(cache.Statistics.ReplacedRemovals).IsEqualTo(0);
+        await Assert.That(cache.Statistics.ExplicitRemovals).IsEqualTo(0);
         probe.AssertExclusive(expectedCalls: 0);
     }
 
@@ -273,6 +270,7 @@ public sealed class EntryMutationOwnershipTests
                     {
                         Monitor.Exit(entrySync);
                     }
+
                     return acquired;
                 },
                 sync,
@@ -280,25 +278,30 @@ public sealed class EntryMutationOwnershipTests
                 TaskCreationOptions.LongRunning,
                 TaskScheduler.Default
             );
-
             // The zero-wait acquisition result is the oracle; the five-second limit only
             // detects broken test infrastructure. Always join the nonblocking competitor.
             bool completedWithinWatchdog = competitor.Wait(Watchdog);
             bool competitorAcquired = competitor.GetAwaiter().GetResult();
-            completedWithinWatchdog.Should().BeTrue("the dedicated probe must complete");
+            if (!(completedWithinWatchdog))
+                Assert.Fail(
+                    "Expected completedWithinWatchdog to be true (\"the dedicated probe must complete\")."
+                );
             _observations.Enqueue((ownerHeld, competitorAcquired));
         }
 
         internal void AssertExclusive(int expectedCalls)
         {
-            _observations.Should().HaveCount(expectedCalls);
+            if (!(_observations.Count == expectedCalls))
+                Assert.Fail("Expected _observations to have count (expectedCalls).");
             if (expectedCalls != 0)
             {
-                _observations
-                    .Should()
-                    .OnlyContain(
-                        observation => observation.OwnerHeld && !observation.CompetitorAcquired,
-                        "final validation/capture and commit must share continuous entry ownership"
+                if (
+                    !_observations.All(observation =>
+                        observation.OwnerHeld && !observation.CompetitorAcquired
+                    )
+                )
+                    Assert.Fail(
+                        "Final validation/capture and commit must share continuous entry ownership."
                     );
             }
         }

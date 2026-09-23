@@ -1,11 +1,8 @@
 using System.Runtime.CompilerServices;
-using FluentAssertions;
 using LoadingCache.Maintenance;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class ReadBufferBatchTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
@@ -16,14 +13,13 @@ public sealed class ReadBufferBatchTests
         using StripedReadBuffer<int> buffer = new(2, 4);
         await using BlockingTestHook publication = new(TestTimeout);
         Action pausePublication = publication.Invoke;
-        buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
+        await Assert.That(buffer.TryOffer(0)).IsEqualTo(ReadBufferOfferResult.Success);
         buffer.SetForcedCasFailuresForTesting(3);
-        buffer.TryOffer(-1).Should().Be(ReadBufferOfferResult.Failed);
-        buffer.StripeCountForTesting.Should().Be(2);
+        await Assert.That(buffer.TryOffer(-1)).IsEqualTo(ReadBufferOfferResult.Failed);
+        await Assert.That(buffer.StripeCountForTesting).IsEqualTo(2);
         buffer.SetForcedCasFailuresForTesting(0);
-        OfferOnStripe(buffer, 10, 1).Should().Be(ReadBufferOfferResult.Success);
-        buffer.DrainTo(static _ => { }, 4).Should().Be(2);
-
+        await Assert.That(OfferOnStripe(buffer, 10, 1)).IsEqualTo(ReadBufferOfferResult.Success);
+        await Assert.That(buffer.DrainTo(static _ => { }, 4)).IsEqualTo(2);
         int publications = 0;
         buffer.SetHooksForTesting(
             beforeReserve: null,
@@ -45,24 +41,30 @@ public sealed class ReadBufferBatchTests
         try
         {
             await publication.Entered.WaitAsync(TestTimeout);
-            OfferOnStripe(buffer, 11, 1).Should().Be(ReadBufferOfferResult.Success);
-            buffer.HasPublished.Should().BeTrue();
-            buffer.GetStatistics().Queued.Should().Be(1);
-
+            await Assert
+                .That(OfferOnStripe(buffer, 11, 1))
+                .IsEqualTo(ReadBufferOfferResult.Success);
+            await Assert.That(buffer.HasPublished).IsTrue();
+            await Assert.That(buffer.GetStatistics().Queued).IsEqualTo(1);
             List<int> observed = [];
-            buffer.DrainTo(observed.Add, 4).Should().Be(1);
-            observed.Should().Equal(11);
-            buffer.HasPublished.Should().BeFalse();
-            buffer.GetStatistics().Queued.Should().Be(0);
-
+            await Assert.That(buffer.DrainTo(observed.Add, 4)).IsEqualTo(1);
+            await Assert
+                .That(observed)
+                .IsEquivalentTo([11], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+            await Assert.That(buffer.HasPublished).IsFalse();
+            await Assert.That(buffer.GetStatistics().Queued).IsEqualTo(0);
             publication.Release();
-            (await paused.WaitAsync(TestTimeout)).Should().Be(ReadBufferOfferResult.Success);
-            buffer.DrainTo(observed.Add, 4).Should().Be(1);
-            observed.Should().Equal(11, 1);
-            buffer.GetStatistics().Enqueued.Should().Be(4);
-            buffer.GetStatistics().Dequeued.Should().Be(4);
-            buffer.GetStatistics().Queued.Should().Be(0);
-            publication.TimedOut.Should().BeFalse();
+            await Assert
+                .That((await paused.WaitAsync(TestTimeout)))
+                .IsEqualTo(ReadBufferOfferResult.Success);
+            await Assert.That(buffer.DrainTo(observed.Add, 4)).IsEqualTo(1);
+            await Assert
+                .That(observed)
+                .IsEquivalentTo([11, 1], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+            await Assert.That(buffer.GetStatistics().Enqueued).IsEqualTo(4);
+            await Assert.That(buffer.GetStatistics().Dequeued).IsEqualTo(4);
+            await Assert.That(buffer.GetStatistics().Queued).IsEqualTo(0);
+            await Assert.That(publication.TimedOut).IsFalse();
         }
         finally
         {
@@ -89,53 +91,57 @@ public sealed class ReadBufferBatchTests
         }
     }
 
-    [TestCase(long.MaxValue - 2)]
-    [TestCase(-2L)]
-    public void BoundedBatchReleasesTheConsumedPrefixAcrossCounterWrap(long counter)
+    [Test]
+    [Arguments(long.MaxValue - 2)]
+    [Arguments(-2L)]
+    public async Task BoundedBatchReleasesTheConsumedPrefixAcrossCounterWrap(long counter)
     {
         using StripedReadBuffer<int> buffer = new(1, 4);
-        buffer.TryEnqueue(0).Should().BeTrue();
+        await Assert.That(buffer.TryEnqueue(0)).IsTrue();
         buffer.SetCounterForTesting(counter);
-
         for (int value = 1; value <= 4; value++)
         {
-            buffer.TryEnqueue(value).Should().BeTrue();
+            await Assert.That(buffer.TryEnqueue(value)).IsTrue();
         }
 
         List<int> observed = [];
-        buffer.DrainTo(observed.Add, 3).Should().Be(3);
-        buffer.GetStatistics().Queued.Should().Be(1);
-        buffer.GetStatistics().Dequeued.Should().Be(3);
-
+        await Assert.That(buffer.DrainTo(observed.Add, 3)).IsEqualTo(3);
+        await Assert.That(buffer.GetStatistics().Queued).IsEqualTo(1);
+        await Assert.That(buffer.GetStatistics().Dequeued).IsEqualTo(3);
         for (int value = 5; value <= 7; value++)
         {
-            buffer.TryEnqueue(value).Should().BeTrue();
+            await Assert.That(buffer.TryEnqueue(value)).IsTrue();
         }
 
-        buffer.TryOffer(8).Should().Be(ReadBufferOfferResult.Full);
-        buffer.DrainTo(observed.Add, 4).Should().Be(4);
-        observed.Should().Equal(1, 2, 3, 4, 5, 6, 7);
-        buffer.HasPublished.Should().BeFalse();
+        await Assert.That(buffer.TryOffer(8)).IsEqualTo(ReadBufferOfferResult.Full);
+        await Assert.That(buffer.DrainTo(observed.Add, 4)).IsEqualTo(4);
+        await Assert
+            .That(observed)
+            .IsEquivalentTo(
+                [1, 2, 3, 4, 5, 6, 7],
+                TUnit.Assertions.Enums.CollectionOrdering.Matching
+            );
+        await Assert.That(buffer.HasPublished).IsFalse();
         ReadBufferStatistics statistics = buffer.GetStatistics();
-        statistics.Queued.Should().Be(0);
-        statistics.Enqueued.Should().Be(7);
-        statistics.Dequeued.Should().Be(7);
-        statistics.DroppedFull.Should().Be(1);
+        await Assert.That(statistics.Queued).IsEqualTo(0);
+        await Assert.That(statistics.Enqueued).IsEqualTo(7);
+        await Assert.That(statistics.Dequeued).IsEqualTo(7);
+        await Assert.That(statistics.DroppedFull).IsEqualTo(1);
     }
 
     [Test]
-    public void ThrowingBatchCommitsItsConsumedPrefixAndKeepsTheRemainingEvent()
+    public async Task ThrowingBatchCommitsItsConsumedPrefixAndKeepsTheRemainingEvent()
     {
         using StripedReadBuffer<int> buffer = new(1, 4);
         for (int value = 1; value <= 4; value++)
         {
-            buffer.TryEnqueue(value).Should().BeTrue();
+            await Assert.That(buffer.TryEnqueue(value)).IsTrue();
         }
 
         List<int> observed = [];
-        Action drain = buffer.Invoking(current =>
+        Action drain = () =>
         {
-            current.DrainTo(
+            buffer.DrainTo(
                 value =>
                 {
                     observed.Add(value);
@@ -146,19 +152,23 @@ public sealed class ReadBufferBatchTests
                 },
                 4
             );
-        });
-        drain.Should().Throw<InvalidOperationException>();
-
+        };
+        await Assert.That(drain).Throws<InvalidOperationException>();
         ReadBufferStatistics interrupted = buffer.GetStatistics();
-        interrupted.Queued.Should().Be(1);
-        interrupted.Dequeued.Should().Be(3);
-        buffer.TryEnqueue(5).Should().BeTrue();
-        buffer.TryEnqueue(6).Should().BeTrue();
-        buffer.TryEnqueue(7).Should().BeTrue();
-        buffer.DrainTo(observed.Add, 4).Should().Be(4);
-        observed.Should().Equal(1, 2, 3, 4, 5, 6, 7);
-        buffer.GetStatistics().Queued.Should().Be(0);
-        buffer.GetStatistics().Dequeued.Should().Be(7);
+        await Assert.That(interrupted.Queued).IsEqualTo(1);
+        await Assert.That(interrupted.Dequeued).IsEqualTo(3);
+        await Assert.That(buffer.TryEnqueue(5)).IsTrue();
+        await Assert.That(buffer.TryEnqueue(6)).IsTrue();
+        await Assert.That(buffer.TryEnqueue(7)).IsTrue();
+        await Assert.That(buffer.DrainTo(observed.Add, 4)).IsEqualTo(4);
+        await Assert
+            .That(observed)
+            .IsEquivalentTo(
+                [1, 2, 3, 4, 5, 6, 7],
+                TUnit.Assertions.Enums.CollectionOrdering.Matching
+            );
+        await Assert.That(buffer.GetStatistics().Queued).IsEqualTo(0);
+        await Assert.That(buffer.GetStatistics().Dequeued).IsEqualTo(7);
     }
 
     [Test]
@@ -167,7 +177,7 @@ public sealed class ReadBufferBatchTests
         using StripedReadBuffer<int> buffer = new(1, 4);
         await using BlockingTestHook publication = new(TestTimeout);
         Action pausePublication = publication.Invoke;
-        buffer.TryEnqueue(0).Should().BeTrue();
+        await Assert.That(buffer.TryEnqueue(0)).IsTrue();
         int publishCalls = 0;
         buffer.SetHooksForTesting(
             null,
@@ -179,7 +189,6 @@ public sealed class ReadBufferBatchTests
                 }
             }
         );
-
         Task<bool> paused = Task.Factory.StartNew(
             static state => ((StripedReadBuffer<int>)state!).TryEnqueue(1),
             buffer,
@@ -190,24 +199,26 @@ public sealed class ReadBufferBatchTests
         try
         {
             await publication.Entered.WaitAsync(TestTimeout);
-            buffer.TryEnqueue(2).Should().BeTrue();
-            buffer.GetStatistics().Queued.Should().Be(2);
-            buffer.GetStatistics().Enqueued.Should().Be(2);
-
+            await Assert.That(buffer.TryEnqueue(2)).IsTrue();
+            await Assert.That(buffer.GetStatistics().Queued).IsEqualTo(2);
+            await Assert.That(buffer.GetStatistics().Enqueued).IsEqualTo(2);
             List<int> observed = [];
-            buffer.DrainTo(observed.Add, 4).Should().Be(1);
-            observed.Should().Equal(0);
-            buffer.GetStatistics().Queued.Should().Be(1);
-            buffer.HasPublished.Should().BeFalse();
-
+            await Assert.That(buffer.DrainTo(observed.Add, 4)).IsEqualTo(1);
+            await Assert
+                .That(observed)
+                .IsEquivalentTo([0], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+            await Assert.That(buffer.GetStatistics().Queued).IsEqualTo(1);
+            await Assert.That(buffer.HasPublished).IsFalse();
             publication.Release();
-            (await paused.WaitAsync(TestTimeout)).Should().BeTrue();
-            buffer.DrainTo(observed.Add, 4).Should().Be(2);
-            observed.Should().Equal(0, 1, 2);
-            buffer.GetStatistics().Queued.Should().Be(0);
-            buffer.GetStatistics().Enqueued.Should().Be(3);
-            buffer.GetStatistics().Dequeued.Should().Be(3);
-            publication.TimedOut.Should().BeFalse();
+            await Assert.That((await paused.WaitAsync(TestTimeout))).IsTrue();
+            await Assert.That(buffer.DrainTo(observed.Add, 4)).IsEqualTo(2);
+            await Assert
+                .That(observed)
+                .IsEquivalentTo([0, 1, 2], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+            await Assert.That(buffer.GetStatistics().Queued).IsEqualTo(0);
+            await Assert.That(buffer.GetStatistics().Enqueued).IsEqualTo(3);
+            await Assert.That(buffer.GetStatistics().Dequeued).IsEqualTo(3);
+            await Assert.That(publication.TimedOut).IsFalse();
         }
         finally
         {
@@ -223,8 +234,9 @@ public sealed class ReadBufferBatchTests
         }
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task DisposeReleasesOtherQueuedValuesWhileAProducerStillHoldsTheSlotArray(
         bool recordStatistics
     )
@@ -246,17 +258,15 @@ public sealed class ReadBufferBatchTests
             {
                 await publication.Entered.WaitAsync(TestTimeout);
                 buffer.Dispose();
-
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
                 GC.Collect();
-                queued.TryGetTarget(out _).Should().BeFalse();
-                paused.IsCompleted.Should().BeFalse();
-
+                await Assert.That(queued.TryGetTarget(out _)).IsFalse();
+                await Assert.That(paused.IsCompleted).IsFalse();
                 publication.Release();
-                (await paused.WaitAsync(TestTimeout)).Should().BeFalse();
-                buffer.GetStatistics().Queued.Should().Be(0);
-                publication.TimedOut.Should().BeFalse();
+                await Assert.That((await paused.WaitAsync(TestTimeout))).IsFalse();
+                await Assert.That(buffer.GetStatistics().Queued).IsEqualTo(0);
+                await Assert.That(publication.TimedOut).IsFalse();
                 GC.KeepAlive(buffer);
             }
             finally
@@ -282,7 +292,8 @@ public sealed class ReadBufferBatchTests
     private static WeakReference<object> EnqueueCollectibleValue(StripedReadBuffer<object> buffer)
     {
         object value = new();
-        buffer.TryEnqueue(value).Should().BeTrue();
+        if (!(buffer.TryEnqueue(value)))
+            Assert.Fail("Expected buffer.TryEnqueue(value) to be true ().");
         return new WeakReference<object>(value);
     }
 }

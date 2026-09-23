@@ -1,11 +1,7 @@
-using FluentAssertions;
-using FluentAssertions.Execution;
 using LoadingCache.Policy;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class FrequencySketchRegressionTests
 {
     private static readonly uint[] ProbeHashes =
@@ -20,12 +16,10 @@ public sealed class FrequencySketchRegressionTests
     ];
 
     [Test]
-    [Parallelizable(ParallelScope.Self)]
-    public void UninitializedIncrementsDoNotCreateCounters()
+    public async Task UninitializedIncrementsDoNotCreateCounters()
     {
         FrequencySketch actual = new(uint.MaxValue);
         UnpackedSketch expected = new(uint.MaxValue);
-
         for (int step = 0; step < ProbeHashes.Length; step++)
         {
             uint hash = ProbeHashes[step];
@@ -34,21 +28,20 @@ public sealed class FrequencySketchRegressionTests
             AssertEquivalent(actual, expected, hash, step);
         }
 
-        actual.IsInitialized.Should().BeFalse();
+        await Assert.That(actual.IsInitialized).IsFalse();
     }
 
-    [TestCase(0u)]
-    [TestCase(43u)]
-    [TestCase(uint.MaxValue)]
-    [Parallelizable(ParallelScope.Self)]
-    public void HotUniformAndChangedPhasesMatchUnpackedCounters(uint seed)
+    [Test]
+    [Arguments(0u)]
+    [Arguments(43u)]
+    [Arguments(uint.MaxValue)]
+    public async Task HotUniformAndChangedPhasesMatchUnpackedCounters(uint seed)
     {
         FrequencySketch actual = new(seed);
         UnpackedSketch expected = new(seed);
         actual.EnsureCapacity(16);
         expected.EnsureCapacity(16);
         uint random = seed ^ 0x9E3779B9;
-
         for (int step = 0; step < 1_024; step++)
         {
             random = unchecked(random * 1664525u + 1013904223u);
@@ -58,21 +51,20 @@ public sealed class FrequencySketchRegressionTests
                 < 640 => random,
                 _ => (step & 7) == 0 ? random : 0x80000000u + (uint)((step >> 5) & 3),
             };
-
             actual.Increment(hash);
             expected.Increment(hash);
             AssertEquivalent(actual, expected, hash, step);
         }
 
-        expected.ResetCount.Should().BeGreaterThan(0);
+        await Assert.That(expected.ResetCount).IsGreaterThan(0);
     }
 
-    [TestCase(0)]
-    [TestCase(1)]
-    [TestCase(2)]
-    [TestCase(3)]
-    [Parallelizable(ParallelScope.Self)]
-    public void OneSaturatedLaneDoesNotPreventTheOtherThreeUpdates(int saturatedLane)
+    [Test]
+    [Arguments(0)]
+    [Arguments(1)]
+    [Arguments(2)]
+    [Arguments(3)]
+    public async Task OneSaturatedLaneDoesNotPreventTheOtherThreeUpdates(int saturatedLane)
     {
         const uint target = 0x12345678;
         FrequencySketch actual = new(43);
@@ -80,7 +72,6 @@ public sealed class FrequencySketchRegressionTests
         actual.EnsureCapacity(8);
         expected.EnsureCapacity(8);
         uint collider = FindSingleLaneCollision(expected, target, saturatedLane);
-
         for (int step = 0; step < 15; step++)
         {
             actual.Increment(collider);
@@ -88,26 +79,24 @@ public sealed class FrequencySketchRegressionTests
             AssertEquivalent(actual, expected, collider, step);
         }
 
-        actual.Frequency(target).Should().Be(0);
+        await Assert.That(actual.Frequency(target)).IsEqualTo(0);
         for (int step = 15; step < 19; step++)
         {
             actual.Increment(target);
             expected.Increment(target);
             AssertEquivalent(actual, expected, target, step);
-            actual.Frequency(target).Should().Be(step - 14);
+            await Assert.That(actual.Frequency(target)).IsEqualTo(step - 14);
         }
     }
 
     [Test]
-    [Parallelizable(ParallelScope.Self)]
-    public void FullySaturatedCountersDoNotAdvanceTheSample()
+    public async Task FullySaturatedCountersDoNotAdvanceTheSample()
     {
         const uint hash = uint.MaxValue;
         FrequencySketch actual = new(7);
         UnpackedSketch expected = new(7);
         actual.EnsureCapacity(64);
         expected.EnsureCapacity(64);
-
         for (int step = 0; step < 96; step++)
         {
             actual.Increment(hash);
@@ -115,20 +104,18 @@ public sealed class FrequencySketchRegressionTests
             AssertEquivalent(actual, expected, hash, step);
         }
 
-        actual.SampleCount.Should().Be(15);
-        actual.Frequency(hash).Should().Be(15);
-        expected.ResetCount.Should().Be(0);
+        await Assert.That(actual.SampleCount).IsEqualTo(15);
+        await Assert.That(actual.Frequency(hash)).IsEqualTo(15);
+        await Assert.That(expected.ResetCount).IsEqualTo(0);
     }
 
     [Test]
-    [Parallelizable(ParallelScope.Self)]
-    public void ResizeClampAndSampleResetPreserveTheReferenceState()
+    public async Task ResizeClampAndSampleResetPreserveTheReferenceState()
     {
         FrequencySketch actual = new(19);
         UnpackedSketch expected = new(19);
         actual.EnsureCapacity(64);
         expected.EnsureCapacity(64);
-
         for (uint hash = 0; hash < 64; hash++)
         {
             actual.Increment(hash);
@@ -136,45 +123,41 @@ public sealed class FrequencySketchRegressionTests
             AssertEquivalent(actual, expected, hash, (int)hash);
         }
 
-        actual.SampleCount.Should().BeGreaterThan(10);
+        await Assert.That(actual.SampleCount).IsGreaterThan(10);
         actual.EnsureCapacity(0);
         expected.EnsureCapacity(0);
         AssertEquivalent(actual, expected, 63, 64);
-        actual.SampleCount.Should().Be(9);
-        actual.Capacity.Should().Be(64);
-
+        await Assert.That(actual.SampleCount).IsEqualTo(9);
+        await Assert.That(actual.Capacity).IsEqualTo(64);
         actual.Increment(uint.MaxValue);
         expected.Increment(uint.MaxValue);
         AssertEquivalent(actual, expected, uint.MaxValue, 65);
-        expected.ResetCount.Should().Be(1);
-
+        await Assert.That(expected.ResetCount).IsEqualTo(1);
         actual.EnsureCapacity(128);
         expected.EnsureCapacity(128);
         AssertEquivalent(actual, expected, 63, 66);
-        actual.Frequency(63).Should().Be(0);
-
+        await Assert.That(actual.Frequency(63)).IsEqualTo(0);
         actual.Increment(1);
         expected.Increment(1);
         AssertEquivalent(actual, expected, 1, 67);
         actual.ResetSampleCount();
         expected.ResetSampleCount();
         AssertEquivalent(actual, expected, 1, 68);
-        actual.Frequency(1).Should().Be(1);
-
+        await Assert.That(actual.Frequency(1)).IsEqualTo(1);
         actual.EnsureCapacity(16);
         expected.EnsureCapacity(16);
         AssertEquivalent(actual, expected, 1, 69);
-        actual.Capacity.Should().Be(128);
+        await Assert.That(actual.Capacity).IsEqualTo(128);
     }
 
-    [TestCase(0L, 8, 10L)]
-    [TestCase(1L, 8, 10L)]
-    [TestCase(8L, 8, 80L)]
-    [TestCase(9L, 16, 90L)]
-    [TestCase(65L, 128, 650L)]
-    [TestCase(long.MaxValue, 1 << 20, (long)int.MaxValue)]
-    [Parallelizable(ParallelScope.Self)]
-    public void CapacityBoundariesAndExtremeHashesMatchUnpackedCounters(
+    [Test]
+    [Arguments(0L, 8, 10L)]
+    [Arguments(1L, 8, 10L)]
+    [Arguments(8L, 8, 80L)]
+    [Arguments(9L, 16, 90L)]
+    [Arguments(65L, 128, 650L)]
+    [Arguments(long.MaxValue, 1 << 20, (long)int.MaxValue)]
+    public async Task CapacityBoundariesAndExtremeHashesMatchUnpackedCounters(
         long estimatedEntries,
         int capacity,
         long sampleSize
@@ -184,9 +167,8 @@ public sealed class FrequencySketchRegressionTests
         UnpackedSketch expected = new(0x80000000);
         actual.EnsureCapacity(estimatedEntries);
         expected.EnsureCapacity(estimatedEntries);
-        actual.Capacity.Should().Be(capacity);
-        actual.SampleSize.Should().Be(sampleSize);
-
+        await Assert.That(actual.Capacity).IsEqualTo(capacity);
+        await Assert.That(actual.SampleSize).IsEqualTo(sampleSize);
         for (int step = 0; step < ProbeHashes.Length; step++)
         {
             uint hash = ProbeHashes[step];
@@ -224,16 +206,33 @@ public sealed class FrequencySketchRegressionTests
         int step
     )
     {
-        using var scope = new AssertionScope(
-            $"seed={expected.Seed}, step={step}, capacity={expected.Capacity}, hash={hash:X8}"
-        );
-        actual.Capacity.Should().Be(expected.Capacity);
-        actual.SampleSize.Should().Be(expected.SampleSize);
-        actual.SampleCount.Should().Be(expected.SampleCount);
-        actual.Frequency(hash).Should().Be(expected.Frequency(hash));
+        string context =
+            $"seed={expected.Seed}, step={step}, capacity={expected.Capacity}, hash={hash:X8}: ";
+        if ((actual.Capacity) != (expected.Capacity))
+            Assert.Fail(
+                context + $"Expected capacity {expected.Capacity}, found {actual.Capacity}."
+            );
+        if ((actual.SampleSize) != (expected.SampleSize))
+            Assert.Fail(
+                context + $"Expected sample size {expected.SampleSize}, found {actual.SampleSize}."
+            );
+        if ((actual.SampleCount) != (expected.SampleCount))
+            Assert.Fail(
+                context
+                    + $"Expected sample count {expected.SampleCount}, found {actual.SampleCount}."
+            );
+        if ((actual.Frequency(hash)) != (expected.Frequency(hash)))
+            Assert.Fail(
+                context
+                    + $"Expected frequency {expected.Frequency(hash)}, found {actual.Frequency(hash)}."
+            );
         foreach (uint probe in ProbeHashes)
         {
-            actual.Frequency(probe).Should().Be(expected.Frequency(probe), $"probe={probe:X8}");
+            if ((actual.Frequency(probe)) != (expected.Frequency(probe)))
+                Assert.Fail(
+                    context
+                        + $"probe={probe:X8}: expected frequency {expected.Frequency(probe)}, found {actual.Frequency(probe)}."
+                );
         }
     }
 
@@ -242,7 +241,6 @@ public sealed class FrequencySketchRegressionTests
     private sealed class UnpackedSketch(uint seed)
     {
         private byte[]? _counters;
-
         internal uint Seed { get; } = seed;
         internal int Capacity => (_counters?.Length ?? 0) / 16;
         internal long SampleSize { get; private set; }
@@ -298,6 +296,7 @@ public sealed class FrequencySketchRegressionTests
             {
                 frequency = Math.Min(frequency, _counters[CounterIndex(hash, lane)]);
             }
+
             return frequency;
         }
 
@@ -338,6 +337,7 @@ public sealed class FrequencySketchRegressionTests
                 odd += _counters[index] % 2;
                 _counters[index] /= 2;
             }
+
             SampleCount = Math.Max(0, (SampleCount - odd / 4) / 2);
             ResetCount++;
         }

@@ -1,6 +1,4 @@
-using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
@@ -25,34 +23,25 @@ public sealed class TimeoutAdversarialTests
             .LoadTimeout(TimeSpan.FromSeconds(1))
             .TimeProvider(clock)
             .BuildAsyncLoading(Loader);
-
         Task<string> first = cache.GetAsync(1).AsTask();
         try
         {
             await loaderEntered.Task.WaitAsync(Watchdog, CancellationToken.None);
-
             clock.Advance(TimeSpan.FromSeconds(1));
             await WaitForCompletion(first);
-            await FluentActions
-                .Awaiting(() => first)
-                .Should()
-                .ThrowExactlyAsync<TimeoutException>();
+            await Assert.That((Func<Task>)(() => first)).ThrowsExactly<TimeoutException>();
             await cancellationEntered.Task.WaitAsync(Watchdog);
-
             backend.TrySetResult("late");
             Func<CacheStatistics> readStatistics = cache.GetStatistics;
-            SpinWait
-                .SpinUntil(() => readStatistics().InFlightLoads == 0, Watchdog)
-                .Should()
-                .BeTrue();
-
+            await Assert
+                .That(SpinWait.SpinUntil(() => readStatistics().InFlightLoads == 0, Watchdog))
+                .IsTrue();
             Task<string> second = cache.GetAsync(2).AsTask();
             await WaitForCompletion(second);
-            await FluentActions
-                .Awaiting(() => second)
-                .Should()
-                .ThrowExactlyAsync<CacheLoadRejectedException>();
-            Volatile.Read(ref callbackCount.Value).Should().Be(1);
+            await Assert
+                .That((Func<Task>)(() => second))
+                .ThrowsExactly<CacheLoadRejectedException>();
+            await Assert.That(Volatile.Read(ref callbackCount.Value)).IsEqualTo(1);
         }
         finally
         {
@@ -63,7 +52,6 @@ public sealed class TimeoutAdversarialTests
         }
 
         return;
-
         Task<string> Loader(int key, CancellationToken cancellationToken)
         {
             if (key != 1)
@@ -94,13 +82,13 @@ public sealed class TimeoutAdversarialTests
             .LoadTimeout(TimeSpan.FromSeconds(1))
             .TimeProvider(clock)
             .BuildAsyncLoading((_, _) => Task.FromResult("value"));
-
         Task<string> first = cache.GetAsync(1).AsTask();
         await WaitForCompletion(first);
-        await FluentActions.Awaiting(() => first).Should().ThrowExactlyAsync<TimeoutException>();
-        cache.GetStatistics().InFlightLoads.Should().Be(0);
-
-        (await cache.GetAsync(2).AsTask().WaitAsync(Watchdog)).Should().Be("value");
+        await Assert.That((Func<Task>)(() => first)).ThrowsExactly<TimeoutException>();
+        await Assert.That(cache.GetStatistics().InFlightLoads).IsEqualTo(0);
+        await Assert
+            .That((await cache.GetAsync(2).AsTask().WaitAsync(Watchdog)))
+            .IsEqualTo("value");
     }
 
     [Test]
@@ -131,18 +119,13 @@ public sealed class TimeoutAdversarialTests
             (_, _) =>
                 Task.FromResult(Interlocked.Increment(ref loads.Value) == 1 ? "first" : "retry")
         );
-
         Task<string> first = cache.GetAsync(1).AsTask();
         await WaitForCompletion(first);
-        await FluentActions
-            .Awaiting(() => first)
-            .Should()
-            .ThrowExactlyAsync<ControlledTimestampException>();
-
+        await Assert.That((Func<Task>)(() => first)).ThrowsExactly<ControlledTimestampException>();
         Task<string> retry = cache.GetAsync(1).AsTask();
         await WaitForCompletion(retry);
-        (await retry).Should().Be("retry");
-        Volatile.Read(ref loads.Value).Should().Be(2);
+        await Assert.That((await retry)).IsEqualTo("retry");
+        await Assert.That(Volatile.Read(ref loads.Value)).IsEqualTo(2);
     }
 
     [Test]
@@ -164,21 +147,16 @@ public sealed class TimeoutAdversarialTests
                     return releaseLoader.Task;
                 }
             );
-
         Task<string> pending = cache.GetAsync(1).AsTask();
         try
         {
             await loaderEntered.Task.WaitAsync(Watchdog, CancellationToken.None);
             await cache.DisposeAsync().AsTask().WaitAsync(Watchdog, CancellationToken.None);
             await WaitForCompletion(pending);
-            await FluentActions
-                .Awaiting(() => pending)
-                .Should()
-                .ThrowExactlyAsync<ObjectDisposedException>();
-
-            timeProvider.CreatedTimers.Should().ContainSingle();
-            timeProvider.CreatedTimers[0].DisposeCount.Should().Be(1);
-            timeProvider.CreatedTimers[0].CallbackCount.Should().Be(0);
+            await Assert.That((Func<Task>)(() => pending)).ThrowsExactly<ObjectDisposedException>();
+            await Assert.That(timeProvider.CreatedTimers).HasSingleItem();
+            await Assert.That(timeProvider.CreatedTimers[0].DisposeCount).IsEqualTo(1);
+            await Assert.That(timeProvider.CreatedTimers[0].CallbackCount).IsEqualTo(0);
         }
         finally
         {
@@ -191,9 +169,10 @@ public sealed class TimeoutAdversarialTests
     private static async Task WaitForCompletion(Task task)
     {
         Task completed = await Task.WhenAny(task, Task.Delay(Watchdog));
-        completed
-            .Should()
-            .BeSameAs(task, "the adversarial operation must complete within the watchdog");
+        await Assert
+            .That(ReferenceEquals(completed, task))
+            .IsTrue()
+            .Because("the adversarial operation must complete within the watchdog");
     }
 
     private static TaskCompletionSource<bool> Signal() =>
@@ -206,7 +185,6 @@ public sealed class TimeoutAdversarialTests
     {
         private long _timestamp;
         private int _fireNext = 1;
-
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;
 
         public override long GetTimestamp() => Volatile.Read(ref _timestamp);
@@ -244,7 +222,6 @@ public sealed class TimeoutAdversarialTests
     private sealed class ThrowNextTimestampTimeProvider : TimeProvider
     {
         private int _throwNext;
-
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;
 
         public override long GetTimestamp()
@@ -263,7 +240,6 @@ public sealed class TimeoutAdversarialTests
     {
         private readonly object _sync = new();
         private readonly List<TrackingTimer> _timers = [];
-
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;
 
         public override long GetTimestamp() => 0;
@@ -312,7 +288,6 @@ public sealed class TimeoutAdversarialTests
             }
 
             internal int DisposeCount => Volatile.Read(ref _disposeCount);
-
             internal int CallbackCount => Volatile.Read(ref _callbackCount);
 
             public bool Change(TimeSpan dueTime, TimeSpan period)

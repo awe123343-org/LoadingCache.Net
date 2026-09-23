@@ -27,7 +27,7 @@ dotnet csharpier check .
 dotnet build LoadingCache.slnx -c Release --no-restore
 for framework in net8.0 net10.0; do
     for project in LoadingCache.Tests LoadingCache.DependencyInjection.Tests LoadingCache.StressTests; do
-        dotnet test "tests/$project/$project.csproj" -c Release --no-build --no-restore -f "$framework"
+        dotnet test --project "tests/$project/$project.csproj" -c Release --no-build --no-restore -f "$framework"
     done
     dotnet run --project tests/LoadingCache.ConsumerSmoke/LoadingCache.ConsumerSmoke.csproj -c Release --no-build --no-restore -f "$framework"
 done
@@ -38,18 +38,29 @@ listed here is a workflow, not a claim that a platform has passed it.
 
 Development uses the SDK in `global.json`, while the library targets .NET 8.
 Install the .NET 8 and .NET 10 runtimes through your normal environment setup to
-run both targets. A local runtime can also be selected using VSTest's
-`RunConfiguration.DotNetHostPath`, using the path to your installed runtime host. Do not roll .NET 8 tests forward to .NET 10 and
-report that as .NET 8 validation.
+run both targets. For an isolated runtime installation, invoke its `dotnet exec
+--fx-version <installed-patch> tests/<project>/bin/Release/<framework>/<project>.dll`.
+Do not roll .NET 8 tests forward to .NET 10 and report that as .NET 8 validation.
 
-Use NUnit for test discovery and FluentAssertions for assertions. Preserve exact
+Use TUnit for test discovery and native assertions. Await assertion chains; use
+`ThrowsExactly<T>` for exact exception types. Inject `CancellationToken` into tests
+and pass it explicitly to their helpers. Synchronous callbacks and GC-lifetime
+helpers use immediate `Assert.Fail` guards rather than blocking on async assertions.
+Allocation measurements run in the separate `LoadingCache.AllocationProbe` executable;
+test projects use the generated TUnit entry point. Preserve exact
 exception-type assertions and controlled interleavings when migrating tests.
-Core and DI unit-test assemblies use method-level parallel execution with
-`ParallelScope.Children` and `FixtureLifeCycle(LifeCycle.InstancePerTestCase)`.
+All three test projects use TUnit's test-case parallelism, including each
+`[Arguments]` row and `[Matrix]` combination, with a fresh class instance per case.
 Keep mutable test state local to each case; instance isolation does not protect
-static state or shared external resources. NUnit selects its default worker count.
-See the [NUnit parallel execution contract](https://docs.nunit.org/articles/nunit/technical-notes/usage/Framework-Parallel-Test-Execution.html)
-and [fixture lifecycle contract](https://docs.nunit.org/articles/nunit/writing-tests/attributes/fixturelifecycle.html).
+static state or shared external resources. Core tests use a
+`max(2, ProcessorCount)` concurrent-case limit because their blocking race gates
+can starve continuations with TUnit's 4x CPU default. This still permits cases in
+the same method/class to overlap. Do not add assembly/class serialization.
+See the [TUnit parallel execution contract](https://tunit.dev/docs/execution/parallelism/).
+The SDK 10 runner is selected in `global.json`. Use `--report-trx
+--report-trx-filename <name>.trx --results-directory <directory>` for TRX output,
+`--treenode-filter` for selection, and `--maximum-parallel-tests` to bound concurrency.
+
 Run `dotnet csharpier format .` to apply formatting and `dotnet csharpier check .`
 to verify it. Restore the pinned local tool; do not install a global formatter.
 

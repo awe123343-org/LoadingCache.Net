@@ -1,26 +1,24 @@
-using FluentAssertions;
 using LoadingCache.Maintenance;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class ReadBufferReuseTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
 
-    [TestCase(false, 1, 0L)]
-    [TestCase(true, 1, 0L)]
-    [TestCase(false, 16, 0L)]
-    [TestCase(true, 16, 0L)]
-    [TestCase(false, 1, long.MaxValue - 2)]
-    [TestCase(true, 1, long.MaxValue - 2)]
-    [TestCase(false, 16, long.MaxValue - 2)]
-    [TestCase(true, 16, long.MaxValue - 2)]
-    [TestCase(false, 1, -2L)]
-    [TestCase(true, 1, -2L)]
-    [TestCase(false, 16, -2L)]
-    [TestCase(true, 16, -2L)]
+    [Test]
+    [Arguments(false, 1, 0L)]
+    [Arguments(true, 1, 0L)]
+    [Arguments(false, 16, 0L)]
+    [Arguments(true, 16, 0L)]
+    [Arguments(false, 1, long.MaxValue - 2)]
+    [Arguments(true, 1, long.MaxValue - 2)]
+    [Arguments(false, 16, long.MaxValue - 2)]
+    [Arguments(true, 16, long.MaxValue - 2)]
+    [Arguments(false, 1, -2L)]
+    [Arguments(true, 1, -2L)]
+    [Arguments(false, 16, -2L)]
+    [Arguments(true, 16, -2L)]
     public async Task ConcurrentProducersAndBatchConsumerReuseEverySlotWithoutLosingOrTearingEvents(
         bool recordStatistics,
         int capacity,
@@ -31,10 +29,9 @@ public sealed class ReadBufferReuseTests
         const int eventsPerProducer = 2048;
         const int eventCount = producerCount * eventsPerProducer;
         using StripedReadBuffer<ReadPayload> buffer = new(1, capacity, recordStatistics);
-        buffer.TryOffer(default).Should().Be(ReadBufferOfferResult.Success);
-        buffer.TryRead(out _).Should().BeTrue();
+        await Assert.That(buffer.TryOffer(default)).IsEqualTo(ReadBufferOfferResult.Success);
+        await Assert.That(buffer.TryRead(out _)).IsTrue();
         buffer.SetCounterForTesting(initialCounter);
-
         ReadPayload[] expected = new ReadPayload[eventCount];
         for (int id = 0; id < expected.Length; id++)
         {
@@ -100,6 +97,7 @@ public sealed class ReadBufferReuseTests
                                             "The live buffer shut down."
                                         );
                                 }
+
                                 Thread.Yield();
                             }
                         }
@@ -152,20 +150,21 @@ public sealed class ReadBufferReuseTests
             TaskCreationOptions.LongRunning,
             TaskScheduler.Default
         );
-
         try
         {
             await Task.WhenAll(workers).WaitAsync(TestTimeout, CancellationToken.None);
-            accepted.Should().OnlyContain(static value => value);
-            observed.Should().OnlyContain(static count => count == 1);
-            buffer.HasPublished.Should().BeFalse();
+            await Assert.That(accepted).All(static value => value);
+            await Assert.That(observed).All(static count => count == 1);
+            await Assert.That(buffer.HasPublished).IsFalse();
             ReadBufferStatistics statistics = buffer.GetStatistics();
-            statistics.Queued.Should().Be(0);
-            statistics.Enqueued.Should().Be(recordStatistics ? eventCount : 0);
-            statistics.Dequeued.Should().Be(recordStatistics ? eventCount : 0);
-            statistics.DroppedFull.Should().Be(recordStatistics ? full.Sum() : 0);
-            statistics.DroppedFailed.Should().Be(recordStatistics ? failed.Sum() : 0);
-            statistics.DroppedShutdown.Should().Be(0);
+            await Assert.That(statistics.Queued).IsEqualTo(0);
+            await Assert.That(statistics.Enqueued).IsEqualTo(recordStatistics ? eventCount : 0);
+            await Assert.That(statistics.Dequeued).IsEqualTo(recordStatistics ? eventCount : 0);
+            await Assert.That(statistics.DroppedFull).IsEqualTo(recordStatistics ? full.Sum() : 0);
+            await Assert
+                .That(statistics.DroppedFailed)
+                .IsEqualTo(recordStatistics ? failed.Sum() : 0);
+            await Assert.That(statistics.DroppedShutdown).IsEqualTo(0);
         }
         finally
         {

@@ -1,16 +1,14 @@
-using FluentAssertions;
 using LoadingCache.Maintenance;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class ReadBufferShutdownRaceTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task ShutdownCountsAProducerThatFinishesAfterTheTailSnapshot(bool recordStatistics)
     {
         StripedReadBuffer<int> buffer = new(1, 4, recordStatistics);
@@ -18,7 +16,7 @@ public sealed class ReadBufferShutdownRaceTests
         {
             await using BlockingTestHook reservation = new(TestTimeout);
             Action releaseReservation = reservation.Release;
-            buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
+            await Assert.That(buffer.TryOffer(0)).IsEqualTo(ReadBufferOfferResult.Success);
             buffer.SetHooksForTesting(reservation.Invoke, beforePublish: null);
             Task<ReadBufferOfferResult> producer = Task.Factory.StartNew(
                 static state => ((StripedReadBuffer<int>)state!).TryOffer(1),
@@ -32,21 +30,19 @@ public sealed class ReadBufferShutdownRaceTests
                 releaseReservation();
                 producer.WaitAsync(TestTimeout).GetAwaiter().GetResult();
             });
-
             try
             {
                 await reservation.Entered.WaitAsync(TestTimeout);
                 buffer.Dispose();
-                (await producer.WaitAsync(TestTimeout))
-                    .Should()
-                    .BeOneOf(ReadBufferOfferResult.Success, ReadBufferOfferResult.Shutdown);
-
+                await Assert
+                    .That((await producer.WaitAsync(TestTimeout)))
+                    .IsIn([ReadBufferOfferResult.Success, ReadBufferOfferResult.Shutdown]);
                 ReadBufferStatistics statistics = buffer.GetStatistics();
-                statistics.Enqueued.Should().Be(recordStatistics ? 2 : 0);
-                statistics.Dequeued.Should().Be(0);
-                statistics.DroppedShutdown.Should().Be(recordStatistics ? 2 : 0);
-                statistics.Queued.Should().Be(0);
-                reservation.TimedOut.Should().BeFalse();
+                await Assert.That(statistics.Enqueued).IsEqualTo(recordStatistics ? 2 : 0);
+                await Assert.That(statistics.Dequeued).IsEqualTo(0);
+                await Assert.That(statistics.DroppedShutdown).IsEqualTo(recordStatistics ? 2 : 0);
+                await Assert.That(statistics.Queued).IsEqualTo(0);
+                await Assert.That(reservation.TimedOut).IsFalse();
             }
             finally
             {
@@ -62,8 +58,9 @@ public sealed class ReadBufferShutdownRaceTests
         }
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task CompetingRingDisposersCannotChangeTheOwnersShutdownBoundary(
         bool recordStatistics
     )
@@ -75,7 +72,7 @@ public sealed class ReadBufferShutdownRaceTests
             Action releaseReservation = reservation.Release;
             await using BlockingTestHook publication = new(TestTimeout);
             Task publicationEntered = publication.Entered;
-            buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
+            await Assert.That(buffer.TryOffer(0)).IsEqualTo(ReadBufferOfferResult.Success);
             buffer.SetHooksForTesting(reservation.Invoke, publication.Invoke);
             Task<ReadBufferOfferResult> producer = Task.Factory.StartNew(
                 static state => ((StripedReadBuffer<int>)state!).TryOffer(1),
@@ -105,23 +102,23 @@ public sealed class ReadBufferShutdownRaceTests
                 );
                 competingDisposer.WaitAsync(TestTimeout).GetAwaiter().GetResult();
             });
-
             try
             {
                 await reservation.Entered.WaitAsync(TestTimeout);
                 buffer.Dispose();
                 publication.Release();
-                (await producer.WaitAsync(TestTimeout)).Should().Be(ReadBufferOfferResult.Shutdown);
-
+                await Assert
+                    .That((await producer.WaitAsync(TestTimeout)))
+                    .IsEqualTo(ReadBufferOfferResult.Shutdown);
                 ReadBufferStatistics statistics = buffer.GetStatistics();
-                statistics.Enqueued.Should().Be(recordStatistics ? 2 : 0);
-                statistics.Dequeued.Should().Be(0);
-                statistics.DroppedShutdown.Should().Be(recordStatistics ? 2 : 0);
-                statistics.DroppedFull.Should().Be(0);
-                statistics.DroppedFailed.Should().Be(0);
-                statistics.Queued.Should().Be(0);
-                reservation.TimedOut.Should().BeFalse();
-                publication.TimedOut.Should().BeFalse();
+                await Assert.That(statistics.Enqueued).IsEqualTo(recordStatistics ? 2 : 0);
+                await Assert.That(statistics.Dequeued).IsEqualTo(0);
+                await Assert.That(statistics.DroppedShutdown).IsEqualTo(recordStatistics ? 2 : 0);
+                await Assert.That(statistics.DroppedFull).IsEqualTo(0);
+                await Assert.That(statistics.DroppedFailed).IsEqualTo(0);
+                await Assert.That(statistics.Queued).IsEqualTo(0);
+                await Assert.That(reservation.TimedOut).IsFalse();
+                await Assert.That(publication.TimedOut).IsFalse();
             }
             finally
             {
@@ -139,16 +136,17 @@ public sealed class ReadBufferShutdownRaceTests
         }
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    public void ShutdownDuringTheFinalFailedReservationCountsTheRejectedOfferOnce(
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task ShutdownDuringTheFinalFailedReservationCountsTheRejectedOfferOnce(
         bool recordStatistics
     )
     {
         StripedReadBuffer<int> buffer = new(1, 4, recordStatistics);
         try
         {
-            buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Success);
+            await Assert.That(buffer.TryOffer(1)).IsEqualTo(ReadBufferOfferResult.Success);
             buffer.SetForcedCasFailuresForTesting(3);
             int reservations = 0;
             Action shutdown = buffer.Dispose;
@@ -162,17 +160,15 @@ public sealed class ReadBufferShutdownRaceTests
                 },
                 beforePublish: null
             );
-
-            buffer.TryOffer(2).Should().Be(ReadBufferOfferResult.Shutdown);
-
-            reservations.Should().Be(3);
+            await Assert.That(buffer.TryOffer(2)).IsEqualTo(ReadBufferOfferResult.Shutdown);
+            await Assert.That(reservations).IsEqualTo(3);
             ReadBufferStatistics statistics = buffer.GetStatistics();
-            statistics.Enqueued.Should().Be(recordStatistics ? 1 : 0);
-            statistics.Dequeued.Should().Be(0);
-            statistics.DroppedFull.Should().Be(0);
-            statistics.DroppedFailed.Should().Be(0);
-            statistics.DroppedShutdown.Should().Be(recordStatistics ? 2 : 0);
-            statistics.Queued.Should().Be(0);
+            await Assert.That(statistics.Enqueued).IsEqualTo(recordStatistics ? 1 : 0);
+            await Assert.That(statistics.Dequeued).IsEqualTo(0);
+            await Assert.That(statistics.DroppedFull).IsEqualTo(0);
+            await Assert.That(statistics.DroppedFailed).IsEqualTo(0);
+            await Assert.That(statistics.DroppedShutdown).IsEqualTo(recordStatistics ? 2 : 0);
+            await Assert.That(statistics.Queued).IsEqualTo(0);
         }
         finally
         {

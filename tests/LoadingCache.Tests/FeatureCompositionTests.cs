@@ -1,7 +1,5 @@
-using FluentAssertions;
 using JetBrains.Annotations;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
@@ -54,16 +52,17 @@ public sealed class FeatureCompositionTests
                 )
                 .Unwrap();
         }
+
         IReadOnlyDictionary<int, int>[] results;
         try
         {
             await allJoined.Task.WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
             CacheStatistics during = cache.GetStatistics();
-            during.Misses.Should().Be(200);
-            during.LoadsStarted.Should().Be(1);
-            during.BulkLoads.Should().Be(1);
-            during.CoalescedWaiters.Should().Be(198);
-            loader.Calls.Should().Be(1);
+            await Assert.That(during.Misses).IsEqualTo(200);
+            await Assert.That(during.LoadsStarted).IsEqualTo(1);
+            await Assert.That(during.BulkLoads).IsEqualTo(1);
+            await Assert.That(during.CoalescedWaiters).IsEqualTo(198);
+            await Assert.That(loader.Calls).IsEqualTo(1);
         }
         finally
         {
@@ -71,12 +70,13 @@ public sealed class FeatureCompositionTests
             results = await Task.WhenAll(callers)
                 .WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
         }
-        results.Should().OnlyContain(result => result[1] == 10 && result[2] == 20);
-        cache.GetStatistics().LoadSuccesses.Should().Be(1);
+
+        await Assert.That(results).All(result => result[1] == 10 && result[2] == 20);
+        await Assert.That(cache.GetStatistics().LoadSuccesses).IsEqualTo(1);
     }
 
     [Test]
-    public void WeakDictionaryConditionalOperationsUseValueIdentity()
+    public async Task WeakDictionaryConditionalOperationsUseValueIdentity()
     {
         using var cache = CacheBuilder
             .Create<int, EqualValue>()
@@ -89,14 +89,17 @@ public sealed class FeatureCompositionTests
         var replacement = new EqualValue(2);
         cache.Put(1, original);
         var view = cache.AsDictionary();
-        view.TryUpdate(1, replacement, equal).Should().BeFalse();
-        view.TryRemove(1, equal).Should().BeFalse();
-        ((ICollection<KeyValuePair<int, EqualValue>>)view)
-            .Contains(new KeyValuePair<int, EqualValue>(1, equal))
-            .Should()
-            .BeFalse();
-        view.TryUpdate(1, replacement, original).Should().BeTrue();
-        view.TryRemove(1, replacement).Should().BeTrue();
+        await Assert.That(view.TryUpdate(1, replacement, equal)).IsFalse();
+        await Assert.That(view.TryRemove(1, equal)).IsFalse();
+        await Assert
+            .That(
+                ((ICollection<KeyValuePair<int, EqualValue>>)view).Contains(
+                    new KeyValuePair<int, EqualValue>(1, equal)
+                )
+            )
+            .IsFalse();
+        await Assert.That(view.TryUpdate(1, replacement, original)).IsTrue();
+        await Assert.That(view.TryRemove(1, replacement)).IsTrue();
         GC.KeepAlive(original);
         GC.KeepAlive(equal);
         GC.KeepAlive(replacement);
@@ -125,18 +128,16 @@ public sealed class FeatureCompositionTests
         object key = new();
         object value = new();
         cache.Put(key, value);
-
         time.Advance(TimeSpan.FromSeconds(1));
         var notification = await removal.Task.WaitAsync(
             TimeSpan.FromSeconds(10),
             CancellationToken.None
         );
-
-        notification.Key.Should().BeSameAs(key);
-        notification.Value.Should().BeSameAs(value);
-        notification.Cause.Should().Be(RemovalCause.MemoryPressure);
-        cache.EstimatedCount.Should().Be(0);
-        cache.Policy.MemoryPressureStatistics!.Value.EvictedEntries.Should().Be(1);
+        await Assert.That(ReferenceEquals(notification.Key, key)).IsTrue();
+        await Assert.That(ReferenceEquals(notification.Value, value)).IsTrue();
+        await Assert.That(notification.Cause).IsEqualTo(RemovalCause.MemoryPressure);
+        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
+        await Assert.That(cache.Policy.MemoryPressureStatistics!.Value.EvictedEntries).IsEqualTo(1);
         GC.KeepAlive(key);
         GC.KeepAlive(value);
     }
@@ -159,16 +160,14 @@ public sealed class FeatureCompositionTests
         object second = new();
         cache.Put(1, first);
         cache.Put(1, second);
-
         var notification = await removed.Task.WaitAsync(
             TimeSpan.FromSeconds(10),
             CancellationToken.None
         );
-
-        notification.Cause.Should().Be(RemovalCause.Replaced);
-        notification.Value.Should().BeSameAs(first);
-        cache.TryGet(1, out object? current).Should().BeTrue();
-        current.Should().BeSameAs(second);
+        await Assert.That(notification.Cause).IsEqualTo(RemovalCause.Replaced);
+        await Assert.That(ReferenceEquals(notification.Value, first)).IsTrue();
+        await Assert.That(cache.TryGet(1, out object? current)).IsTrue();
+        await Assert.That(ReferenceEquals(current, second)).IsTrue();
         GC.KeepAlive(first);
         GC.KeepAlive(second);
     }

@@ -1,12 +1,9 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
-using FluentAssertions;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class MetricsTests
 {
     [Test]
@@ -53,31 +50,28 @@ public sealed class MetricsTests
             }
         );
         listener.Start();
-
         await using IAsyncLoadingCache<int, string> cache = CacheBuilder
             .Create<int, string>()
             .MaximumSize(4)
             .MaxConcurrentLoads(4)
             .EnableMetrics(cacheName)
             .BuildAsyncLoading((key, _) => Task.FromResult($"value-{key}"));
-
-        (await cache.GetAsync(1)).Should().Be("value-1");
-        cache.Statistics.LoadsStarted.Should().Be(0);
+        await Assert.That((await cache.GetAsync(1))).IsEqualTo("value-1");
+        await Assert.That(cache.Statistics.LoadsStarted).IsEqualTo(0);
         listener.RecordObservableInstruments();
-
-        measurements
-            .Should()
-            .Contain(item =>
+        await Assert
+            .That(measurements)
+            .Contains(item =>
                 item.Name == "loadingcache.loads" && item.Outcome == "started" && item.Value >= 1
             );
-        measurements
-            .Should()
-            .Contain(item =>
+        await Assert
+            .That(measurements)
+            .Contains(item =>
                 item.Name == "loadingcache.loads" && item.Outcome == "success" && item.Value >= 1
             );
-        measurements
-            .Should()
-            .Contain(item =>
+        await Assert
+            .That(measurements)
+            .Contains(item =>
                 item.Name == "loadingcache.inflight"
                 && item.Outcome == null
                 && item.Cause == null
@@ -86,7 +80,7 @@ public sealed class MetricsTests
     }
 
     [Test]
-    public void InstrumentPublicationCanSynchronouslyRecordWithoutHalfInitializedEngine()
+    public async Task InstrumentPublicationCanSynchronouslyRecordWithoutHalfInitializedEngine()
     {
         Exception? publicationError = null;
         int recording = 0;
@@ -114,7 +108,6 @@ public sealed class MetricsTests
             }
         };
         listener.Start();
-
         Action build = () =>
         {
             using ICache<int, string> cache = CacheBuilder
@@ -124,13 +117,12 @@ public sealed class MetricsTests
                 .EnableMetrics($"construction-{Guid.NewGuid():N}")
                 .Build();
         };
-
-        build.Should().NotThrow();
-        publicationError.Should().BeNull();
+        await Assert.That(build).ThrowsNothing();
+        await Assert.That((publicationError) is null).IsTrue();
     }
 
     [Test]
-    public void ThrowingInstrumentPublicationDoesNotLeavePartialMetricsRegistration()
+    public async Task ThrowingInstrumentPublicationDoesNotLeavePartialMetricsRegistration()
     {
         var throwDuringBuild = new AsyncLocal<bool>();
         int published = 0;
@@ -148,7 +140,6 @@ public sealed class MetricsTests
             }
         };
         listener.Start();
-
         throwDuringBuild.Value = true;
         Action build = () =>
         {
@@ -159,9 +150,8 @@ public sealed class MetricsTests
                 .EnableMetrics($"throwing-{Guid.NewGuid():N}")
                 .Build();
         };
-        build.Should().Throw<InvalidOperationException>();
+        await Assert.That(build).Throws<InvalidOperationException>();
         throwDuringBuild.Value = false;
-
         Action secondBuild = () =>
         {
             using ICache<int, string> cache = CacheBuilder
@@ -171,11 +161,11 @@ public sealed class MetricsTests
                 .EnableMetrics($"after-throw-{Guid.NewGuid():N}")
                 .Build();
         };
-        secondBuild.Should().NotThrow();
+        await Assert.That(secondBuild).ThrowsNothing();
     }
 
     [Test]
-    public void DisposedMetricsCacheIsNotRetainedByMeterListener()
+    public async Task DisposedMetricsCacheIsNotRetainedByMeterListener()
     {
         using MeterListener listener = new();
         listener.InstrumentPublished = static (instrument, meterListener) =>
@@ -186,11 +176,9 @@ public sealed class MetricsTests
             }
         };
         listener.Start();
-
         WeakReference reference = CreateDisposedMetricsCache();
         ForceCollection(reference);
-
-        reference.IsAlive.Should().BeFalse();
+        await Assert.That(reference.IsAlive).IsFalse();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

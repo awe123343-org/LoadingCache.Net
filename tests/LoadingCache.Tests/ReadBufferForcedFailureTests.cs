@@ -1,18 +1,15 @@
-using FluentAssertions;
 using LoadingCache.Maintenance;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
-[Parallelizable(ParallelScope.All)]
 public sealed class ReadBufferForcedFailureTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
 
-    [TestCase(false)]
-    [TestCase(true)]
-    public void BeforeReserveCanReplacePublicationHookForTheSameOffer(bool recordStatistics)
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task BeforeReserveCanReplacePublicationHookForTheSameOffer(bool recordStatistics)
     {
         using ProducerHookState state = new(recordStatistics);
         StripedReadBuffer<int> buffer = state.Buffer;
@@ -21,89 +18,96 @@ public sealed class ReadBufferForcedFailureTests
             beforeReserve: state.ReplacePublicationHook,
             beforePublish: state.RecordOriginalPublication
         );
-
-        buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
-        trace.Should().BeEmpty();
-        buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Success);
-        buffer.TryOffer(2).Should().Be(ReadBufferOfferResult.Success);
-
-        trace.Should().Equal("reserve", "replacement", "replacement");
+        await Assert.That(buffer.TryOffer(0)).IsEqualTo(ReadBufferOfferResult.Success);
+        await Assert.That(trace).IsEmpty();
+        await Assert.That(buffer.TryOffer(1)).IsEqualTo(ReadBufferOfferResult.Success);
+        await Assert.That(buffer.TryOffer(2)).IsEqualTo(ReadBufferOfferResult.Success);
+        await Assert
+            .That(trace)
+            .IsEquivalentTo(
+                ["reserve", "replacement", "replacement"],
+                TUnit.Assertions.Enums.CollectionOrdering.Matching
+            );
         List<int> observed = [];
-        buffer.DrainTo(observed.Add, 4).Should().Be(3);
-        observed.Should().Equal(0, 1, 2);
+        await Assert.That(buffer.DrainTo(observed.Add, 4)).IsEqualTo(3);
+        await Assert
+            .That(observed)
+            .IsEquivalentTo([0, 1, 2], TUnit.Assertions.Enums.CollectionOrdering.Matching);
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    public void ClearingHooksDoesNotDisablePendingForcedFailures(bool recordStatistics)
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task ClearingHooksDoesNotDisablePendingForcedFailures(bool recordStatistics)
     {
         using ProducerHookState state = new(recordStatistics);
         StripedReadBuffer<int> buffer = state.Buffer;
-        buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
+        await Assert.That(buffer.TryOffer(0)).IsEqualTo(ReadBufferOfferResult.Success);
         buffer.SetForcedCasFailuresForTesting(3);
         buffer.SetHooksForTesting(
             beforeReserve: state.ClearHooks,
             beforePublish: state.RecordPublication
         );
-
-        buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Failed);
-        buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Success);
-
-        state.Reservations.Should().Be(1);
-        state.Publications.Should().Be(0);
+        await Assert.That(buffer.TryOffer(1)).IsEqualTo(ReadBufferOfferResult.Failed);
+        await Assert.That(buffer.TryOffer(1)).IsEqualTo(ReadBufferOfferResult.Success);
+        await Assert.That(state.Reservations).IsEqualTo(1);
+        await Assert.That(state.Publications).IsEqualTo(0);
         List<int> observed = [];
-        buffer.DrainTo(observed.Add, 4).Should().Be(2);
-        observed.Should().Equal(0, 1);
+        await Assert.That(buffer.DrainTo(observed.Add, 4)).IsEqualTo(2);
+        await Assert
+            .That(observed)
+            .IsEquivalentTo([0, 1], TUnit.Assertions.Enums.CollectionOrdering.Matching);
         ReadBufferStatistics statistics = buffer.GetStatistics();
-        statistics.DroppedFailed.Should().Be(recordStatistics ? 1 : 0);
-        statistics.Enqueued.Should().Be(recordStatistics ? 2 : 0);
-        statistics.Dequeued.Should().Be(recordStatistics ? 2 : 0);
-        statistics.Queued.Should().Be(0);
+        await Assert.That(statistics.DroppedFailed).IsEqualTo(recordStatistics ? 1 : 0);
+        await Assert.That(statistics.Enqueued).IsEqualTo(recordStatistics ? 2 : 0);
+        await Assert.That(statistics.Dequeued).IsEqualTo(recordStatistics ? 2 : 0);
+        await Assert.That(statistics.Queued).IsEqualTo(0);
     }
 
     [Test]
-    public void BeforeReserveCanClearForcedFailuresForTheSameOffer()
+    public async Task BeforeReserveCanClearForcedFailuresForTheSameOffer()
     {
         using ProducerHookState state = new();
         StripedReadBuffer<int> buffer = state.Buffer;
-        buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
+        await Assert.That(buffer.TryOffer(0)).IsEqualTo(ReadBufferOfferResult.Success);
         buffer.SetForcedCasFailuresForTesting(3);
         buffer.SetHooksForTesting(beforeReserve: state.ClearForcedFailures, beforePublish: null);
-
-        buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Success);
-        state.Reservations.Should().Be(1);
+        await Assert.That(buffer.TryOffer(1)).IsEqualTo(ReadBufferOfferResult.Success);
+        await Assert.That(state.Reservations).IsEqualTo(1);
         ReadBufferStatistics statistics = buffer.GetStatistics();
-        statistics.DroppedFailed.Should().Be(0);
-        statistics.Enqueued.Should().Be(2);
-        statistics.Queued.Should().Be(2);
+        await Assert.That(statistics.DroppedFailed).IsEqualTo(0);
+        await Assert.That(statistics.Enqueued).IsEqualTo(2);
+        await Assert.That(statistics.Queued).IsEqualTo(2);
         List<int> observed = [];
-        buffer.DrainTo(observed.Add, 4).Should().Be(2);
-        observed.Should().Equal(0, 1);
-        buffer.GetStatistics().Dequeued.Should().Be(2);
-        buffer.GetStatistics().Queued.Should().Be(0);
+        await Assert.That(buffer.DrainTo(observed.Add, 4)).IsEqualTo(2);
+        await Assert
+            .That(observed)
+            .IsEquivalentTo([0, 1], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(buffer.GetStatistics().Dequeued).IsEqualTo(2);
+        await Assert.That(buffer.GetStatistics().Queued).IsEqualTo(0);
     }
 
     [Test]
-    public void ExhaustedForcedFailuresAllowLaterOffersWithoutReset()
+    public async Task ExhaustedForcedFailuresAllowLaterOffersWithoutReset()
     {
         using StripedReadBuffer<int> buffer = new(1, 4);
-        buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
+        await Assert.That(buffer.TryOffer(0)).IsEqualTo(ReadBufferOfferResult.Success);
         buffer.SetForcedCasFailuresForTesting(3);
-
-        buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Failed);
-        buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Success);
-        buffer.TryOffer(2).Should().Be(ReadBufferOfferResult.Success);
-
+        await Assert.That(buffer.TryOffer(1)).IsEqualTo(ReadBufferOfferResult.Failed);
+        await Assert.That(buffer.TryOffer(1)).IsEqualTo(ReadBufferOfferResult.Success);
+        await Assert.That(buffer.TryOffer(2)).IsEqualTo(ReadBufferOfferResult.Success);
         List<int> observed = [];
-        buffer.DrainTo(observed.Add, 4).Should().Be(3);
-        observed.Should().Equal(0, 1, 2);
+        await Assert.That(buffer.DrainTo(observed.Add, 4)).IsEqualTo(3);
+        await Assert
+            .That(observed)
+            .IsEquivalentTo([0, 1, 2], TUnit.Assertions.Enums.CollectionOrdering.Matching);
         ReadBufferStatistics statistics = buffer.GetStatistics();
-        statistics.DroppedFailed.Should().Be(1);
-        statistics.DroppedFull.Should().Be(0);
-        statistics.DroppedShutdown.Should().Be(0);
-        statistics.Enqueued.Should().Be(3);
-        statistics.Dequeued.Should().Be(3);
-        statistics.Queued.Should().Be(0);
+        await Assert.That(statistics.DroppedFailed).IsEqualTo(1);
+        await Assert.That(statistics.DroppedFull).IsEqualTo(0);
+        await Assert.That(statistics.DroppedShutdown).IsEqualTo(0);
+        await Assert.That(statistics.Enqueued).IsEqualTo(3);
+        await Assert.That(statistics.Dequeued).IsEqualTo(3);
+        await Assert.That(statistics.Queued).IsEqualTo(0);
     }
 
     [Test]
@@ -114,7 +118,7 @@ public sealed class ReadBufferForcedFailureTests
         const int totalAttempts = workerCount * attemptsPerWorker;
         const int capacity = 2_048;
         using StripedReadBuffer<int> buffer = new(1, capacity);
-        buffer.TryOffer(-1).Should().Be(ReadBufferOfferResult.Success);
+        await Assert.That(buffer.TryOffer(-1)).IsEqualTo(ReadBufferOfferResult.Success);
         buffer.SetForcedCasFailuresForTesting(128);
         using Barrier start = new(workerCount + 1);
         Task<WorkerResult>[] workers = new Task<WorkerResult>[workerCount];
@@ -152,6 +156,7 @@ public sealed class ReadBufferForcedFailureTests
                                 break;
                         }
                     }
+
                     return new WorkerResult(accepted, failed, unexpected);
                 },
                 (buffer, start, worker),
@@ -164,34 +169,34 @@ public sealed class ReadBufferForcedFailureTests
         Task<WorkerResult[]> completion = Task.WhenAll(workers);
         try
         {
-            start.SignalAndWait(TestTimeout).Should().BeTrue();
+            await Assert.That(start.SignalAndWait(TestTimeout)).IsTrue();
             WorkerResult[] results = await completion.WaitAsync(TestTimeout);
             int failed = results.Sum(static result => result.Failed);
             List<int> accepted = [.. results.SelectMany(static result => result.Accepted)];
-            results.Sum(static result => result.Unexpected).Should().Be(0);
-            failed.Should().BeGreaterThan(0);
-            accepted.Should().NotBeEmpty();
-            (accepted.Count + failed).Should().Be(totalAttempts);
-
+            await Assert.That(results.Sum(static result => result.Unexpected)).IsEqualTo(0);
+            await Assert.That(failed).IsGreaterThan(0);
+            await Assert.That(accepted).IsNotEmpty();
+            await Assert.That((accepted.Count + failed)).IsEqualTo(totalAttempts);
             // The finite failure budget is exhausted. No setter resets it before this offer.
-            buffer.TryOffer(totalAttempts).Should().Be(ReadBufferOfferResult.Success);
+            await Assert
+                .That(buffer.TryOffer(totalAttempts))
+                .IsEqualTo(ReadBufferOfferResult.Success);
             accepted.Add(-1);
             accepted.Add(totalAttempts);
             ReadBufferStatistics beforeDrain = buffer.GetStatistics();
-            beforeDrain.DroppedFailed.Should().Be(failed);
-            beforeDrain.DroppedFull.Should().Be(0);
-            beforeDrain.DroppedShutdown.Should().Be(0);
-            beforeDrain.Enqueued.Should().Be(accepted.Count);
-            beforeDrain.Queued.Should().Be(accepted.Count);
-
+            await Assert.That(beforeDrain.DroppedFailed).IsEqualTo(failed);
+            await Assert.That(beforeDrain.DroppedFull).IsEqualTo(0);
+            await Assert.That(beforeDrain.DroppedShutdown).IsEqualTo(0);
+            await Assert.That(beforeDrain.Enqueued).IsEqualTo(accepted.Count);
+            await Assert.That(beforeDrain.Queued).IsEqualTo(accepted.Count);
             List<int> observed = [];
-            buffer.DrainTo(observed.Add, capacity).Should().Be(accepted.Count);
-            observed.Should().OnlyHaveUniqueItems();
-            observed.Should().BeEquivalentTo(accepted);
+            await Assert.That(buffer.DrainTo(observed.Add, capacity)).IsEqualTo(accepted.Count);
+            await Assert.That(observed).HasDistinctItems();
+            await Assert.That(observed).IsEquivalentTo(accepted);
             ReadBufferStatistics afterDrain = buffer.GetStatistics();
-            afterDrain.Dequeued.Should().Be(accepted.Count);
-            afterDrain.Queued.Should().Be(0);
-            afterDrain.DroppedFailed.Should().Be(failed);
+            await Assert.That(afterDrain.Dequeued).IsEqualTo(accepted.Count);
+            await Assert.That(afterDrain.Queued).IsEqualTo(0);
+            await Assert.That(afterDrain.DroppedFailed).IsEqualTo(failed);
         }
         finally
         {

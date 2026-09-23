@@ -19,6 +19,7 @@
     <Project Path="tools/LoadingCache.Simulator/LoadingCache.Simulator.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/LoadingCache.AllocationProbe/LoadingCache.AllocationProbe.csproj" />
     <Project Path="tests/LoadingCache.ConsumerSmoke/LoadingCache.ConsumerSmoke.csproj" />
     <Project Path="tests/LoadingCache.Tests/LoadingCache.Tests.csproj" />
     <Project Path="tests/LoadingCache.StressTests/LoadingCache.StressTests.csproj" />

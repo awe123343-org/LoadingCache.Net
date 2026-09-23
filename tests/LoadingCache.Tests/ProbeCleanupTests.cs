@@ -1,9 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using FluentAssertions;
 using LoadingCache.Maintenance;
 using LoadingCache.MemoryCacheProbe;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
@@ -11,8 +9,9 @@ public sealed class ProbeCleanupTests
 {
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task PausedMaintenanceMayNeedMoreThan256CleanupAttempts(bool statistics)
     {
         var scheduler = new ControlledScheduler();
@@ -35,13 +34,11 @@ public sealed class ProbeCleanupTests
         try
         {
             await hook.Entered.WaitAsync(Watchdog, CancellationToken.None);
-            cache.TryGet(1, out _).Should().BeTrue();
-            engine.GetPolicyReadBufferStatistics().Queued.Should().Be(1);
-            engine
-                .GetMaintenanceStatistics()
-                .State.Should()
-                .Be(MaintenanceCoordinatorState.Running);
-
+            await Assert.That(cache.TryGet(1, out _)).IsTrue();
+            await Assert.That(engine.GetPolicyReadBufferStatistics().Queued).IsEqualTo(1);
+            await Assert
+                .That(engine.GetMaintenanceStatistics().State)
+                .IsEqualTo(MaintenanceCoordinatorState.Running);
             drain = Task.Factory.StartNew(
                 static state => ProbeCleanup.Drain((ObservedCache)state!, Watchdog),
                 cache,
@@ -50,10 +47,9 @@ public sealed class ProbeCleanupTests
                 TaskScheduler.Default
             );
             int passes = await drain.WaitAsync(Watchdog, CancellationToken.None);
-
-            passes.Should().BeGreaterThan(256);
-            cache.Statistics.MaintenanceBacklog.Should().Be(0);
-            cache.Policy.Eviction!.WeightedSize.Should().BeLessThanOrEqualTo(4);
+            await Assert.That(passes).IsGreaterThan(256);
+            await Assert.That(cache.Statistics.MaintenanceBacklog).IsEqualTo(0);
+            await Assert.That(cache.Policy.Eviction!.WeightedSize).IsLessThanOrEqualTo(4);
         }
         finally
         {
@@ -62,12 +58,13 @@ public sealed class ProbeCleanupTests
                 .WaitAsync(Watchdog, CancellationToken.None);
         }
 
-        hook.TimedOut.Should().BeFalse();
+        await Assert.That(hook.TimedOut).IsFalse();
         engine.AssertInvariants();
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task WorkerWithoutProgressStillFailsAtTheWatchdog(bool statistics)
     {
         var scheduler = new ControlledScheduler();
@@ -80,9 +77,8 @@ public sealed class ProbeCleanupTests
         try
         {
             await hook.Entered.WaitAsync(Watchdog, CancellationToken.None);
-            cache.TryGet(1, out _).Should().BeTrue();
-            engine.GetPolicyReadBufferStatistics().Queued.Should().Be(1);
-
+            await Assert.That(cache.TryGet(1, out _)).IsTrue();
+            await Assert.That(engine.GetPolicyReadBufferStatistics().Queued).IsEqualTo(1);
             TimeSpan deadline = TimeSpan.FromMilliseconds(100);
             var elapsed = new System.Runtime.CompilerServices.StrongBox<TimeSpan>(TimeSpan.Zero);
             drain = Task.Factory.StartNew(
@@ -114,15 +110,14 @@ public sealed class ProbeCleanupTests
                 TaskScheduler.Default
             );
             Func<Task> result = async () => await drain.WaitAsync(Watchdog, CancellationToken.None);
-
-            await result
-                .Should()
-                .ThrowAsync<InvalidOperationException>()
-                .WithMessage("LoadingCache cleanup did not converge*");
-            elapsed.Value.Should().BeGreaterThanOrEqualTo(deadline);
-            cache.CleanupCalls.Should().BeGreaterThan(0);
-            hook.Returned.IsCompleted.Should().BeFalse();
-            cache.Statistics.MaintenanceBacklog.Should().Be(1);
+            await Assert
+                .That(result)
+                .Throws<InvalidOperationException>()
+                .WithMessageMatching("LoadingCache cleanup did not converge*");
+            await Assert.That(elapsed.Value).IsGreaterThanOrEqualTo(deadline);
+            await Assert.That(cache.CleanupCalls).IsGreaterThan(0);
+            await Assert.That(hook.Returned.IsCompleted).IsFalse();
+            await Assert.That(cache.Statistics.MaintenanceBacklog).IsEqualTo(1);
         }
         finally
         {
@@ -143,9 +138,9 @@ public sealed class ProbeCleanupTests
             }
         }
 
-        ProbeCleanup.Drain(cache, Watchdog).Should().BeGreaterThan(0);
-        cache.Statistics.MaintenanceBacklog.Should().Be(0);
-        hook.TimedOut.Should().BeFalse();
+        await Assert.That(ProbeCleanup.Drain(cache, Watchdog)).IsGreaterThan(0);
+        await Assert.That(cache.Statistics.MaintenanceBacklog).IsEqualTo(0);
+        await Assert.That(hook.TimedOut).IsFalse();
         engine.AssertInvariants();
     }
 
@@ -199,7 +194,8 @@ public sealed class ProbeCleanupTests
 
         internal void RunNext()
         {
-            _callbacks.TryDequeue(out Action? callback).Should().BeTrue();
+            if (!(_callbacks.TryDequeue(out Action? callback)))
+                Assert.Fail("Expected _callbacks.TryDequeue(out Action? callback) to be true ().");
             callback!();
         }
     }

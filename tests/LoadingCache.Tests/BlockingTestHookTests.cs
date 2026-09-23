@@ -1,9 +1,5 @@
-using FluentAssertions;
-using NUnit.Framework;
-
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class BlockingTestHookTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
@@ -13,15 +9,13 @@ public sealed class BlockingTestHookTests
     {
         BlockingTestHook hook = new(TestTimeout);
         Task invocation = Task.Run(hook.Invoke);
-
         try
         {
             await hook.Entered.WaitAsync(TestTimeout, CancellationToken.None);
             await hook.DisposeAsync();
-
             await invocation.WaitAsync(TestTimeout, CancellationToken.None);
-            hook.Returned.IsCompleted.Should().BeTrue();
-            hook.TimedOut.Should().BeFalse();
+            await Assert.That(hook.Returned.IsCompleted).IsTrue();
+            await Assert.That(hook.TimedOut).IsFalse();
         }
         finally
         {
@@ -34,15 +28,13 @@ public sealed class BlockingTestHookTests
     public async Task LateInvocationAfterDisposeIsSafe()
     {
         BlockingTestHook hook = new(TestTimeout);
-
         try
         {
             await hook.DisposeAsync();
-
             Action invoke = hook.Invoke;
-            invoke.Should().NotThrow();
-            hook.Entered.IsCompleted.Should().BeFalse();
-            hook.Returned.IsCompleted.Should().BeFalse();
+            await Assert.That(invoke).ThrowsNothing();
+            await Assert.That(hook.Entered.IsCompleted).IsFalse();
+            await Assert.That(hook.Returned.IsCompleted).IsFalse();
         }
         finally
         {
@@ -54,12 +46,10 @@ public sealed class BlockingTestHookTests
     public async Task RepeatedCleanupAndReleaseAreSafe()
     {
         BlockingTestHook hook = new(TestTimeout);
-
         try
         {
             ValueTask firstDispose = hook.DisposeAsync();
             ValueTask secondDispose = hook.DisposeAsync();
-
             await firstDispose;
             await secondDispose;
             hook.Release();
@@ -76,7 +66,6 @@ public sealed class BlockingTestHookTests
     {
         BlockingTestHook hook = new(TestTimeout);
         Task invocation = Task.Run(hook.Invoke);
-
         try
         {
             await hook.Entered.WaitAsync(TestTimeout, CancellationToken.None);
@@ -89,7 +78,7 @@ public sealed class BlockingTestHookTests
             await invocation.WaitAsync(TestTimeout, CancellationToken.None);
         }
 
-        hook.Returned.IsCompleted.Should().BeTrue();
-        hook.TimedOut.Should().BeFalse();
+        await Assert.That(hook.Returned.IsCompleted).IsTrue();
+        await Assert.That(hook.TimedOut).IsFalse();
     }
 }

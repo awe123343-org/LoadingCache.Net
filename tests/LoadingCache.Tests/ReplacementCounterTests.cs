@@ -1,20 +1,18 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 using System.Reflection;
-using FluentAssertions;
 using LoadingCache.Diagnostics;
-using NUnit.Framework;
+using TUnit.Assertions.Exceptions;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
-[Parallelizable(ParallelScope.All)]
 public sealed class ReplacementCounterTests
 {
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task ConcurrentResidentPutsCountEverySameReferenceReplacement(bool sameKey)
     {
         using ICache<int, string> cache = CacheBuilder
@@ -29,6 +27,7 @@ public sealed class ReplacementCounterTests
         {
             cache.Put(key, "same reference");
         }
+
         await RunTogether(
             workers,
             worker =>
@@ -39,17 +38,18 @@ public sealed class ReplacementCounterTests
                 }
             }
         );
-        cache.Statistics.ReplacedRemovals.Should().Be(workers * replacements);
+        await Assert.That(cache.Statistics.ReplacedRemovals).IsEqualTo(workers * replacements);
         cache.Clear();
-        cache.Statistics.ReplacedRemovals.Should().Be(workers * replacements);
-        cache.Statistics.ClearedRemovals.Should().Be(sameKey ? 1 : workers);
+        await Assert.That(cache.Statistics.ReplacedRemovals).IsEqualTo(workers * replacements);
+        await Assert.That(cache.Statistics.ClearedRemovals).IsEqualTo(sameKey ? 1 : workers);
     }
 
-    [TestCase(false, false)]
-    [TestCase(true, false)]
-    [TestCase(false, true)]
-    [TestCase(true, true)]
-    public void MixedResidentPhysicalMutationAndClearCountsRespectOptIn(
+    [Test]
+    [Arguments(false, false)]
+    [Arguments(true, false)]
+    [Arguments(false, true)]
+    [Arguments(true, true)]
+    public async Task MixedResidentPhysicalMutationAndClearCountsRespectOptIn(
         bool statistics,
         bool metrics
     )
@@ -66,18 +66,21 @@ public sealed class ReplacementCounterTests
         );
         using var cache = new Cache<int, string>(engine);
         ExerciseMixedReplacements(cache);
-        cache.Statistics.ReplacedRemovals.Should().Be(statistics ? 5 : 0);
-        cache.Statistics.ClearedRemovals.Should().Be(statistics ? 2 : 0);
+        await Assert.That(cache.Statistics.ReplacedRemovals).IsEqualTo(statistics ? 5 : 0);
+        await Assert.That(cache.Statistics.ClearedRemovals).IsEqualTo(statistics ? 2 : 0);
         var counters = (StripedCacheCounters?)
             PrivateField(engine.GetType(), "_counters").GetValue(engine);
         if (statistics || metrics)
         {
-            counters.Should().NotBeNull();
-            counters.Snapshot()[CacheCounterKind.ReplacedRemovals].Should().Be(5);
+            Assert.NotNull(counters);
+            await Assert.That(counters.Snapshot()[CacheCounterKind.ReplacedRemovals]).IsEqualTo(5);
         }
         else
         {
-            counters.Should().BeNull("disabled diagnostics must not allocate a counter object");
+            await Assert
+                .That((counters) is null)
+                .IsTrue()
+                .Because("disabled diagnostics must not allocate a counter object");
         }
     }
 
@@ -95,10 +98,11 @@ public sealed class ReplacementCounterTests
         using var cache = new Cache<int, string>(engine);
         cache.Put(1, "first");
         engine.PutTask(1, Task.FromResult("task value"));
-        engine.TryGetTask(1, out Task<string>? task).Should().BeTrue();
-        (await task!.WaitAsync(Watchdog)).Should().Be("task value");
+        await Assert.That(engine.TryGetTask(1, out Task<string>? task)).IsTrue();
+        Assert.NotNull(task);
+        await Assert.That((await task!.WaitAsync(Watchdog))).IsEqualTo("task value");
         cache.Put(1, "resident replacement");
-        cache.Statistics.ReplacedRemovals.Should().Be(2);
+        await Assert.That(cache.Statistics.ReplacedRemovals).IsEqualTo(2);
     }
 
     [Test]
@@ -117,17 +121,18 @@ public sealed class ReplacementCounterTests
         Task<string> first = cache.RefreshAsync(1).AsTask();
         Task<string> second = cache.RefreshAsync(1).AsTask();
         result.SetResult("refreshed");
-        (await Task.WhenAll(first, second).WaitAsync(Watchdog))
-            .Should()
-            .OnlyContain(value => value == "refreshed");
-        cache.Statistics.ReplacedRemovals.Should().Be(1);
-        cache.Statistics.RefreshSuccesses.Should().Be(1);
+        await Assert
+            .That((await Task.WhenAll(first, second).WaitAsync(Watchdog)))
+            .All(value => value == "refreshed");
+        await Assert.That(cache.Statistics.ReplacedRemovals).IsEqualTo(1);
+        await Assert.That(cache.Statistics.RefreshSuccesses).IsEqualTo(1);
     }
 
-    [TestCase(false, false)]
-    [TestCase(true, false)]
-    [TestCase(false, true)]
-    [TestCase(true, true)]
+    [Test]
+    [Arguments(false, false)]
+    [Arguments(true, false)]
+    [Arguments(false, true)]
+    [Arguments(true, true)]
     public async Task RefreshPublicationKeepsItsReplacementAccountingAcrossClearAndRollback(
         bool clear,
         bool fail
@@ -171,29 +176,30 @@ public sealed class ReplacementCounterTests
         try
         {
             await publication.Entered.WaitAsync(Watchdog);
-            cache.Statistics.ReplacedRemovals.Should().Be(0);
+            await Assert.That(cache.Statistics.ReplacedRemovals).IsEqualTo(0);
             if (clear)
             {
                 cache.Clear();
             }
+
             publication.Release();
             if (fail)
             {
-                await FluentActions
-                    .Awaiting(() => refresh.WaitAsync(Watchdog))
-                    .Should()
-                    .ThrowExactlyAsync<InvalidOperationException>();
+                await Assert
+                    .That((Func<Task>)(() => refresh.WaitAsync(Watchdog)))
+                    .ThrowsExactly<InvalidOperationException>();
             }
             else
             {
-                (await refresh.WaitAsync(Watchdog)).Should().Be("refreshed");
+                await Assert.That((await refresh.WaitAsync(Watchdog))).IsEqualTo("refreshed");
             }
-            cache.Statistics.ReplacedRemovals.Should().Be(fail ? 0 : 1);
-            cache.Statistics.ClearedRemovals.Should().Be(clear ? 1 : 0);
-            cache.TryGet(1, out string? value).Should().Be(!clear);
+
+            await Assert.That(cache.Statistics.ReplacedRemovals).IsEqualTo(fail ? 0 : 1);
+            await Assert.That(cache.Statistics.ClearedRemovals).IsEqualTo(clear ? 1 : 0);
+            await Assert.That(cache.TryGet(1, out string? value)).IsEqualTo(!clear);
             if (!clear)
             {
-                value.Should().Be(fail ? "old" : "refreshed");
+                await Assert.That(value).IsEqualTo(fail ? "old" : "refreshed");
             }
         }
         finally
@@ -205,11 +211,12 @@ public sealed class ReplacementCounterTests
             }
             catch (InvalidOperationException) when (fail) { }
         }
-        publication.TimedOut.Should().BeFalse();
+
+        await Assert.That(publication.TimedOut).IsFalse();
     }
 
     [Test]
-    public void MetricsOnlyExposesCombinedReplacementsWhilePublicStatisticsStayZero()
+    public async Task MetricsOnlyExposesCombinedReplacementsWhilePublicStatisticsStayZero()
     {
         string cacheName = $"replacement-metrics-{Guid.NewGuid():N}";
         ConcurrentQueue<long> replacements = new();
@@ -234,6 +241,7 @@ public sealed class ReplacementCounterTests
                     matches |= tag.Key == "cache.name" && Equals(tag.Value, cacheName);
                     replaced |= tag is { Key: "cause", Value: "replaced" };
                 }
+
                 if (matches && replaced)
                 {
                     replacements.Enqueue(value);
@@ -248,9 +256,9 @@ public sealed class ReplacementCounterTests
             .MaxConcurrentLoads(4)
             .Build();
         ExerciseMixedReplacements(cache);
-        cache.Statistics.ReplacedRemovals.Should().Be(0);
+        await Assert.That(cache.Statistics.ReplacedRemovals).IsEqualTo(0);
         listener.RecordObservableInstruments();
-        replacements.Should().ContainSingle().Which.Should().Be(5);
+        await Assert.That((await Assert.That(replacements).HasSingleItem())).IsEqualTo(5);
     }
 
     private static void ExerciseMixedReplacements(ICache<int, string> cache)
@@ -298,9 +306,10 @@ public sealed class ReplacementCounterTests
                 TaskScheduler.Default
             );
         }
+
         try
         {
-            ready.Wait(Watchdog).Should().BeTrue();
+            await Assert.That(ready.Wait(Watchdog)).IsTrue();
         }
         finally
         {

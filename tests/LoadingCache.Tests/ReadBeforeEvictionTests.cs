@@ -1,14 +1,11 @@
-using FluentAssertions;
-using NUnit.Framework;
-
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class ReadBeforeEvictionTests
 {
-    [TestCase(false)]
-    [TestCase(true)]
-    public void PublishedProbationAccessPrecedesWeightEviction(bool recordStatistics)
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task PublishedProbationAccessPrecedesWeightEviction(bool recordStatistics)
     {
         List<object> evicted = [];
         using WindowTinyLfuEnginePolicy policy = new(
@@ -29,22 +26,26 @@ public sealed class ReadBeforeEvictionTests
         policy.OnPublish(growing, 1);
         policy.OnPublish(window, 1);
         policy.FlushWrites();
-        evicted.Should().BeEmpty();
-
+        await Assert.That(evicted).IsEmpty();
         // The first two residents are in probation. This accepted access must protect the
         // oldest before the following weight increase needs a victim. No new admission or
         // frequency comparison is involved, so the result does not depend on the sketch seed.
         policy.OnAccess(hot);
-        policy.GetReadBufferStatistics().Queued.Should().Be(1);
+        await Assert.That(policy.GetReadBufferStatistics().Queued).IsEqualTo(1);
         policy.OnPublish(growing, 2);
         policy.CleanUp();
-
-        evicted.Should().Equal(growing.Entry);
-        policy.Snapshot(hottest: true, limit: 3).Should().BeEquivalentTo([hot.Entry, window.Entry]);
-        policy.WeightedSize.Should().Be(2);
-        policy.GetReadBufferStatistics().Dequeued.Should().Be(recordStatistics ? 1 : 0);
-        policy.GetReadBufferStatistics().Queued.Should().Be(0);
-        policy.GetWriteBufferStatistics().Queued.Should().Be(0);
+        await Assert
+            .That(evicted)
+            .IsEquivalentTo([growing.Entry], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert
+            .That(policy.Snapshot(hottest: true, limit: 3))
+            .IsEquivalentTo([hot.Entry, window.Entry]);
+        await Assert.That(policy.WeightedSize).IsEqualTo(2);
+        await Assert
+            .That(policy.GetReadBufferStatistics().Dequeued)
+            .IsEqualTo(recordStatistics ? 1 : 0);
+        await Assert.That(policy.GetReadBufferStatistics().Queued).IsEqualTo(0);
+        await Assert.That(policy.GetWriteBufferStatistics().Queued).IsEqualTo(0);
         policy.AssertInvariants();
     }
 }

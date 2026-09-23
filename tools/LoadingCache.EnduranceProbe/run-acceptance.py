@@ -19,8 +19,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 FILTER = (
-    "FullyQualifiedName~LoadingCache.StressTests.LongRunningStabilityTests|"
-    "FullyQualifiedName~LoadingCache.StressTests.FeatureCombinationStabilityTests"
+    "/*/LoadingCache.StressTests/(LongRunningStabilityTests|FeatureCombinationStabilityTests)/*"
 )
 
 
@@ -148,8 +147,6 @@ def main():
     args = parser.parse_args()
     runtime = args.runtime.resolve()
     require(runtime.is_file(), "Runtime host does not exist")
-    sdk = shutil.which("dotnet")
-    require(sdk is not None, "Existing SDK host must be on PATH")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     sources = source_manifest()
@@ -297,16 +294,20 @@ def main():
             run(
                 "soak",
                 [
-                    sdk,
-                    "vstest",
+                    str(runtime),
+                    "exec",
+                    "--fx-version",
+                    selected[0],
                     str(inputs / "stress/LoadingCache.StressTests.dll"),
-                    f"--TestCaseFilter:{FILTER}",
-                    "--Logger:trx;LogFileName=results.trx",
-                    f"--ResultsDirectory:{folder}",
-                    f"--Diag:{folder / 'vstest.log'}",
-                    "--",
-                    f"RunConfiguration.DotNetHostPath={runtime}",
-                    "NUnit.NumberOfTestWorkers=6",
+                    "--treenode-filter",
+                    FILTER,
+                    "--report-trx",
+                    "--report-trx-filename",
+                    "results.trx",
+                    "--results-directory",
+                    str(folder),
+                    "--maximum-parallel-tests",
+                    "6",
                 ],
                 seconds + 300,
                 {

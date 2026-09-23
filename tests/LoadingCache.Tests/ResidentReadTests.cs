@@ -1,10 +1,7 @@
-using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class ResidentReadTests
 {
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
@@ -59,10 +56,11 @@ public sealed class ResidentReadTests
             await publicationGate.Entered.WaitAsync(Watchdog);
             reader = Task.Run(() =>
             {
-                cache.TryGet(1, out TValue? value).Should().BeTrue();
+                if (!(cache.TryGet(1, out TValue? value)))
+                    Assert.Fail("Expected cache.TryGet(1, out TValue? value) to be true ().");
                 return value!;
             });
-            (await reader.WaitAsync(Watchdog)).Should().Be(first);
+            await Assert.That((await reader.WaitAsync(Watchdog))).IsEqualTo(first);
         }
         finally
         {
@@ -70,18 +68,18 @@ public sealed class ResidentReadTests
             await Task.WhenAll(writer, reader ?? Task.CompletedTask).WaitAsync(Watchdog);
         }
 
-        publicationGate.TimedOut.Should().BeFalse();
-        cache.TryGet(1, out TValue? current).Should().BeTrue();
-        current.Should().Be(second);
-        cache.Statistics.Hits.Should().Be(2);
-        cache.Invalidate(1).Should().BeTrue();
-        cache.TryGet(1, out _).Should().BeFalse();
+        await Assert.That(publicationGate.TimedOut).IsFalse();
+        await Assert.That(cache.TryGet(1, out TValue? current)).IsTrue();
+        await Assert.That(current).IsEqualTo(second);
+        await Assert.That(cache.Statistics.Hits).IsEqualTo(2);
+        await Assert.That(cache.Invalidate(1)).IsTrue();
+        await Assert.That(cache.TryGet(1, out _)).IsFalse();
         cache.Put(1, first);
         cache.Clear();
-        cache.TryGet(1, out _).Should().BeFalse();
+        await Assert.That(cache.TryGet(1, out _)).IsFalse();
         cache.Put(1, second);
-        cache.TryGet(1, out current).Should().BeTrue();
-        current.Should().Be(second);
+        await Assert.That(cache.TryGet(1, out current)).IsTrue();
+        await Assert.That(current).IsEqualTo(second);
     }
 
     [Test]
@@ -97,18 +95,19 @@ public sealed class ResidentReadTests
             .BuildAsyncLoading((_, _) => Task.FromResult("unexpected load"));
         cache.Set("Canonical", "resident");
         clock.RejectTimestamps = true;
-
-        cache.TryGet("canonical", out string? value).Should().BeTrue();
-        value.Should().Be("resident");
-        (await cache.GetAsync("CANONICAL")).Should().Be("resident");
-        cache.TryGetTask("canonical", out Task<string>? first).Should().BeTrue();
-        cache.TryGetTask("CANONICAL", out Task<string>? second).Should().BeTrue();
-        second.Should().BeSameAs(first);
-        (await first!).Should().Be("resident");
+        await Assert.That(cache.TryGet("canonical", out string? value)).IsTrue();
+        await Assert.That(value).IsEqualTo("resident");
+        await Assert.That((await cache.GetAsync("CANONICAL"))).IsEqualTo("resident");
+        await Assert.That(cache.TryGetTask("canonical", out Task<string>? first)).IsTrue();
+        Assert.NotNull(first);
+        await Assert.That(cache.TryGetTask("CANONICAL", out Task<string>? second)).IsTrue();
+        Assert.NotNull(second);
+        await Assert.That(ReferenceEquals(second, first)).IsTrue();
+        await Assert.That((await first!)).IsEqualTo("resident");
     }
 
     [Test]
-    public void LargeStructFallbackWithoutTimePoliciesDoesNotSampleTheClock()
+    public async Task LargeStructFallbackWithoutTimePoliciesDoesNotSampleTheClock()
     {
         var clock = new RejectReadTimeProvider();
         using ICache<int, LargeValue> cache = CacheBuilder
@@ -120,8 +119,8 @@ public sealed class ResidentReadTests
         var expected = new LargeValue(7);
         cache.Put(1, expected);
         clock.RejectTimestamps = true;
-        cache.TryGet(1, out LargeValue value).Should().BeTrue();
-        value.Should().Be(expected);
+        await Assert.That(cache.TryGet(1, out LargeValue value)).IsTrue();
+        await Assert.That(value).IsEqualTo(expected);
     }
 
     [Test]
@@ -199,12 +198,12 @@ public sealed class ResidentReadTests
         ];
         start.SetResult();
         await Task.WhenAll(readers.Append(writer)).WaitAsync(Watchdog);
-        cache.TryGet(1, out TValue? final).Should().BeTrue();
-        final.Should().BeEquivalentTo(createValue(iterations));
+        await Assert.That(cache.TryGet(1, out TValue? final)).IsTrue();
+        await Assert.That(final).IsEquivalentTo(createValue(iterations));
     }
 
     [Test]
-    public void AccessExpirationAndRuntimeDurationChangesKeepTheirClockPath()
+    public async Task AccessExpirationAndRuntimeDurationChangesKeepTheirClockPath()
     {
         var clock = new FakeTimeProvider();
         using ICache<int, int> cache = CacheBuilder
@@ -216,12 +215,12 @@ public sealed class ResidentReadTests
             .Build();
         cache.Put(1, 1);
         clock.Advance(TimeSpan.FromSeconds(9));
-        cache.TryGet(1, out _).Should().BeTrue();
+        await Assert.That(cache.TryGet(1, out _)).IsTrue();
         clock.Advance(TimeSpan.FromSeconds(9));
-        cache.TryGet(1, out _).Should().BeTrue();
+        await Assert.That(cache.TryGet(1, out _)).IsTrue();
         cache.Policy.ExpireAfterAccess!.SetDuration(TimeSpan.FromSeconds(2));
         clock.Advance(TimeSpan.FromSeconds(2));
-        cache.TryGet(1, out _).Should().BeFalse();
+        await Assert.That(cache.TryGet(1, out _)).IsFalse();
     }
 
     private sealed class RejectReadTimeProvider : TimeProvider
@@ -245,7 +244,6 @@ public sealed class ResidentReadTests
         private long Complement { get; } = ~Version;
         private long Doubled { get; } = Version * 2;
         private long Tripled { get; } = Version * 3;
-
         internal bool IsConsistent =>
             Complement == ~Version && Doubled == Version * 2 && Tripled == Version * 3;
     }

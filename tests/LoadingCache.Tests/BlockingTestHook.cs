@@ -11,11 +11,8 @@ internal sealed class BlockingTestHook(TimeSpan timeout) : IAsyncDisposable
     private int _activeCallbacks;
     private int _timedOut;
     private bool _disposed;
-
     public Task Entered => _entered.Task;
-
     public Task Returned => _returned.Task;
-
     public bool TimedOut => Volatile.Read(ref _timedOut) != 0;
 
     public void Invoke()

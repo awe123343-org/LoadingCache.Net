@@ -1,16 +1,14 @@
-using FluentAssertions;
 using LoadingCache.Maintenance;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class CoordinatorOwnershipTests
 {
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task InlineRearmCannotReleaseAReplacementOwner(bool replacementCompletes)
     {
         await using BlockingTestHook schedulerReturning = new(Watchdog);
@@ -32,7 +30,7 @@ public sealed class CoordinatorOwnershipTests
             scheduler,
             maxPassesPerInvocation: 1
         );
-        coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
+        await Assert.That(coordinator.Request()).IsEqualTo(MaintenanceRequestResult.Accepted);
         Task original = Task.Run(scheduler.RunNext);
         Task? replacement = null;
         try
@@ -44,34 +42,42 @@ public sealed class CoordinatorOwnershipTests
             {
                 replacementDraining.Release();
                 await replacement.WaitAsync(Watchdog);
-                coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
-                coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
+                await Assert.That(coordinator.State).IsEqualTo(MaintenanceCoordinatorState.Idle);
+                await Assert
+                    .That(coordinator.Request())
+                    .IsEqualTo(MaintenanceRequestResult.Accepted);
             }
 
             schedulerReturning.Release();
             await original.WaitAsync(Watchdog);
-            coordinator.GetStatistics().FallbackRequired.Should().BeFalse();
+            await Assert.That(coordinator.GetStatistics().FallbackRequired).IsFalse();
             if (replacementCompletes)
             {
                 // The same Scheduled enum value now belongs to a later request, not A's re-arm.
-                coordinator.State.Should().Be(MaintenanceCoordinatorState.Scheduled);
-                scheduler.ScheduleCalls.Should().Be(3);
+                await Assert
+                    .That(coordinator.State)
+                    .IsEqualTo(MaintenanceCoordinatorState.Scheduled);
+                await Assert.That(scheduler.ScheduleCalls).IsEqualTo(3);
             }
             else
             {
-                coordinator.State.Should().Be(MaintenanceCoordinatorState.Running);
-                coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
-                coordinator.State.Should().Be(MaintenanceCoordinatorState.RunningRequired);
-                scheduler.ScheduleCalls.Should().Be(2);
+                await Assert.That(coordinator.State).IsEqualTo(MaintenanceCoordinatorState.Running);
+                await Assert
+                    .That(coordinator.Request())
+                    .IsEqualTo(MaintenanceRequestResult.Accepted);
+                await Assert
+                    .That(coordinator.State)
+                    .IsEqualTo(MaintenanceCoordinatorState.RunningRequired);
+                await Assert.That(scheduler.ScheduleCalls).IsEqualTo(2);
                 replacementDraining.Release();
                 await replacement.WaitAsync(Watchdog);
             }
 
             scheduler.RunNext();
-            passes.Should().Be(3);
-            coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
-            schedulerReturning.TimedOut.Should().BeFalse();
-            replacementDraining.TimedOut.Should().BeFalse();
+            await Assert.That(passes).IsEqualTo(3);
+            await Assert.That(coordinator.State).IsEqualTo(MaintenanceCoordinatorState.Idle);
+            await Assert.That(schedulerReturning.TimedOut).IsFalse();
+            await Assert.That(replacementDraining.TimedOut).IsFalse();
         }
         finally
         {
@@ -95,7 +101,7 @@ public sealed class CoordinatorOwnershipTests
             maxPassesPerInvocation: 1,
             rejectedRemainderFallback: fallbacks.Increment
         );
-        coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
+        await Assert.That(coordinator.Request()).IsEqualTo(MaintenanceRequestResult.Accepted);
         Task older = Task.Run(scheduler.RunNext);
         Task<MaintenanceCleanupResult>? newer = null;
         try
@@ -103,26 +109,23 @@ public sealed class CoordinatorOwnershipTests
             await olderReturning.Entered.WaitAsync(Watchdog);
             newer = Task.Run(coordinator.CleanUp);
             await newerReturning.Entered.WaitAsync(Watchdog);
-
             olderReturning.Release();
             await older.WaitAsync(Watchdog);
-            coordinator.State.Should().Be(MaintenanceCoordinatorState.Scheduled);
-            coordinator.GetStatistics().FallbackRequired.Should().BeFalse();
-            fallbacks.Count.Should().Be(0);
-
+            await Assert.That(coordinator.State).IsEqualTo(MaintenanceCoordinatorState.Scheduled);
+            await Assert.That(coordinator.GetStatistics().FallbackRequired).IsFalse();
+            await Assert.That(fallbacks.Count).IsEqualTo(0);
             newerReturning.Release();
             MaintenanceCleanupResult result = await newer.WaitAsync(Watchdog);
-            result.FallbackRequired.Should().BeTrue();
-            coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
-            coordinator.GetStatistics().FallbackRequired.Should().BeTrue();
-
-            coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
+            await Assert.That(result.FallbackRequired).IsTrue();
+            await Assert.That(coordinator.State).IsEqualTo(MaintenanceCoordinatorState.Idle);
+            await Assert.That(coordinator.GetStatistics().FallbackRequired).IsTrue();
+            await Assert.That(coordinator.Request()).IsEqualTo(MaintenanceRequestResult.Accepted);
             scheduler.RunNext();
-            passes.Should().Be(3);
-            coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
-            coordinator.GetStatistics().FallbackRequired.Should().BeFalse();
-            olderReturning.TimedOut.Should().BeFalse();
-            newerReturning.TimedOut.Should().BeFalse();
+            await Assert.That(passes).IsEqualTo(3);
+            await Assert.That(coordinator.State).IsEqualTo(MaintenanceCoordinatorState.Idle);
+            await Assert.That(coordinator.GetStatistics().FallbackRequired).IsFalse();
+            await Assert.That(olderReturning.TimedOut).IsFalse();
+            await Assert.That(newerReturning.TimedOut).IsFalse();
         }
         finally
         {
@@ -150,17 +153,18 @@ public sealed class CoordinatorOwnershipTests
         try
         {
             await rejecting.Entered.WaitAsync(Watchdog);
-            coordinator.CleanUp().Performed.Should().BeTrue();
-            coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
-            coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
-
+            await Assert.That(coordinator.CleanUp().Performed).IsTrue();
+            await Assert.That(coordinator.State).IsEqualTo(MaintenanceCoordinatorState.Idle);
+            await Assert.That(coordinator.Request()).IsEqualTo(MaintenanceRequestResult.Accepted);
             rejecting.Release();
-            (await original.WaitAsync(Watchdog)).Should().Be(MaintenanceRequestResult.Accepted);
-            coordinator.State.Should().Be(MaintenanceCoordinatorState.Scheduled);
+            await Assert
+                .That((await original.WaitAsync(Watchdog)))
+                .IsEqualTo(MaintenanceRequestResult.Accepted);
+            await Assert.That(coordinator.State).IsEqualTo(MaintenanceCoordinatorState.Scheduled);
             scheduler.RunNext();
-            passes.Should().Be(2);
-            coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
-            rejecting.TimedOut.Should().BeFalse();
+            await Assert.That(passes).IsEqualTo(2);
+            await Assert.That(coordinator.State).IsEqualTo(MaintenanceCoordinatorState.Idle);
+            await Assert.That(rejecting.TimedOut).IsFalse();
         }
         finally
         {
@@ -172,7 +176,6 @@ public sealed class CoordinatorOwnershipTests
     private sealed class CallbackCounter
     {
         private int _count;
-
         internal int Count => Volatile.Read(ref _count);
 
         internal void Increment() => Interlocked.Increment(ref _count);
@@ -204,7 +207,6 @@ public sealed class CoordinatorOwnershipTests
     ) : IMaintenanceScheduler
     {
         private readonly Queue<Action> _callbacks = new();
-
         internal int ScheduleCalls { get; private set; }
 
         public bool TrySchedule(Action callback)

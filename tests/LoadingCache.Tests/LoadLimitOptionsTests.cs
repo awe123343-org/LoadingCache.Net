@@ -1,6 +1,3 @@
-using FluentAssertions;
-using NUnit.Framework;
-
 namespace LoadingCache.Tests;
 
 public sealed class LoadLimitOptionsTests
@@ -23,17 +20,17 @@ public sealed class LoadLimitOptionsTests
             .Create<int, int>()
             .MaximumSize(1)
             .BuildAsyncLoading(static (key, _) => Task.FromResult(key));
-
-        manual.GetOrAdd(1, static key => key).Should().Be(1);
-        loading.Get(2).Should().Be(2);
-        (await asyncManual.GetOrAddAsync(3, static (key, _) => Task.FromResult(key)))
-            .Should()
-            .Be(3);
-        (await asyncLoading.GetAsync(4)).Should().Be(4);
+        await Assert.That(manual.GetOrAdd(1, static key => key)).IsEqualTo(1);
+        await Assert.That(loading.Get(2)).IsEqualTo(2);
+        await Assert
+            .That((await asyncManual.GetOrAddAsync(3, static (key, _) => Task.FromResult(key))))
+            .IsEqualTo(3);
+        await Assert.That((await asyncLoading.GetAsync(4))).IsEqualTo(4);
     }
 
-    [TestCase(0)]
-    [TestCase(1)]
+    [Test]
+    [Arguments(0)]
+    [Arguments(1)]
     public async Task UnsetLimitAllowsDistinctFlightsAndPreservesJoinsAndCallerCancellation(
         int configuration
     )
@@ -57,21 +54,19 @@ public sealed class LoadLimitOptionsTests
 
             pending.Add(Get(cache, loader, 0, CancellationToken.None).AsTask());
             canceledJoin = Get(cache, loader, 0, cancellation.Token).AsTask();
-            loader.Calls.Should().Be(distinctKeys);
-            pending.Should().OnlyContain(static operation => !operation.IsCompleted);
-
+            await Assert.That(loader.Calls).IsEqualTo(distinctKeys);
+            await Assert.That(pending).All(static operation => !operation.IsCompleted);
             await cancellation.CancelAsync();
             Func<Task> waitCanceled = () =>
                 canceledJoin.WaitAsync(TestTimeout, CancellationToken.None);
-            await waitCanceled.Should().ThrowAsync<OperationCanceledException>();
-            loader.Cancellation.IsCancellationRequested.Should().BeFalse();
-            pending.Should().OnlyContain(static operation => !operation.IsCompleted);
-
+            await Assert.That(waitCanceled).Throws<OperationCanceledException>();
+            await Assert.That(loader.Cancellation.IsCancellationRequested).IsFalse();
+            await Assert.That(pending).All(static operation => !operation.IsCompleted);
             loader.Release.TrySetResult(42);
             int[] results = await Task.WhenAll(pending)
                 .WaitAsync(TestTimeout, CancellationToken.None);
-            results.Should().OnlyContain(static value => value == 42);
-            loader.Calls.Should().Be(distinctKeys);
+            await Assert.That(results).All(static value => value == 42);
+            await Assert.That(loader.Calls).IsEqualTo(distinctKeys);
         }
         finally
         {
@@ -92,8 +87,9 @@ public sealed class LoadLimitOptionsTests
         }
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task ExplicitConcurrencyOrPendingLimitRejectsOnlyNewFlights(bool pendingOnly)
     {
         var loader = new GatedLoader();
@@ -117,17 +113,18 @@ public sealed class LoadLimitOptionsTests
         {
             pending.Add(cache.GetAsync(1).AsTask());
             pending.Add(cache.GetAsync(1).AsTask());
-            (await cache.GetAsync(99)).Should().Be(99);
+            await Assert.That((await cache.GetAsync(99))).IsEqualTo(99);
             rejectedOperation = cache.GetAsync(2).AsTask();
             Func<Task> rejected = () => rejectedOperation.WaitAsync(TestTimeout);
-            await rejected.Should().ThrowExactlyAsync<CacheLoadRejectedException>();
-            loader.Calls.Should().Be(1);
-
+            await Assert.That(rejected).ThrowsExactly<CacheLoadRejectedException>();
+            await Assert.That(loader.Calls).IsEqualTo(1);
             loader.Release.TrySetResult(42);
             int[] results = await Task.WhenAll(pending).WaitAsync(TestTimeout);
-            results.Should().Equal(42, 42);
-            (await cache.GetAsync(2)).Should().Be(42);
-            loader.Calls.Should().Be(2);
+            await Assert
+                .That(results)
+                .IsEquivalentTo([42, 42], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+            await Assert.That((await cache.GetAsync(2))).IsEqualTo(42);
+            await Assert.That(loader.Calls).IsEqualTo(2);
         }
         finally
         {
@@ -147,13 +144,13 @@ public sealed class LoadLimitOptionsTests
         }
     }
 
-    [TestCase(0)]
-    [TestCase(-1)]
-    public void ExplicitNonPositiveBuilderConcurrencyLimitRemainsInvalid(int maximum)
+    [Test]
+    [Arguments(0)]
+    [Arguments(-1)]
+    public async Task ExplicitNonPositiveBuilderConcurrencyLimitRemainsInvalid(int maximum)
     {
         Action configure = () => CacheBuilder.Create<int, int>().MaxConcurrentLoads(maximum);
-
-        configure.Should().ThrowExactly<ArgumentOutOfRangeException>();
+        await Assert.That(configure).ThrowsExactly<ArgumentOutOfRangeException>();
     }
 
     private static ValueTask<int> Get(
@@ -180,6 +177,7 @@ public sealed class LoadLimitOptionsTests
             {
                 Cancellation = cancellationToken;
             }
+
             return Release.Task;
         }
     }

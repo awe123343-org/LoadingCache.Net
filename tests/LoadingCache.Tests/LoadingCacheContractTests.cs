@@ -1,13 +1,14 @@
 using System.Diagnostics;
-using FluentAssertions;
-using NUnit.Framework;
+using TUnit.Assertions.Exceptions;
 
 namespace LoadingCache.Tests;
 
 public sealed class LoadingCacheContractTests
 {
     [Test]
-    public async Task GetAsyncCachesValueAndTryGetAcceptsDefaultValue()
+    public async Task GetAsyncCachesValueAndTryGetAcceptsDefaultValue(
+        CancellationToken cancellationToken
+    )
     {
         int calls = 0;
         await using var cache = Create<int, int>(
@@ -17,16 +18,17 @@ public sealed class LoadingCacheContractTests
                 return Task.FromResult(0);
             }
         );
-
-        (await Get(cache, 1)).Should().Be(0);
-        (await Get(cache, 1)).Should().Be(0);
-        cache.TryGet(1, out int value).Should().BeTrue();
-        value.Should().Be(0);
-        calls.Should().Be(1);
+        await Assert.That((await Get(cache, 1, cancellationToken))).IsEqualTo(0);
+        await Assert.That((await Get(cache, 1, cancellationToken))).IsEqualTo(0);
+        await Assert.That(cache.TryGet(1, out int value)).IsTrue();
+        await Assert.That(value).IsEqualTo(0);
+        await Assert.That(calls).IsEqualTo(1);
     }
 
     [Test]
-    public async Task ComparerEqualKeysShareAFlightAndResidentValue()
+    public async Task ComparerEqualKeysShareAFlightAndResidentValue(
+        CancellationToken cancellationToken
+    )
     {
         int calls = 0;
         await using var cache = Create<string, string>(
@@ -37,86 +39,76 @@ public sealed class LoadingCacheContractTests
             },
             comparer: StringComparer.OrdinalIgnoreCase
         );
-
         string[] values = await Task.WhenAll(
-            Get(cache, "Key").AsTask(),
-            Get(cache, "kEy").AsTask()
+            Get(cache, "Key", cancellationToken).AsTask(),
+            Get(cache, "kEy", cancellationToken).AsTask()
         );
-
         foreach (string value in values)
         {
-            value.Should().Be("KEY");
+            await Assert.That(value).IsEqualTo("KEY");
         }
-        calls.Should().Be(1);
-        cache.TryGet("KEY", out string? resident).Should().BeTrue();
-        resident.Should().Be("KEY");
+
+        await Assert.That(calls).IsEqualTo(1);
+        await Assert.That(cache.TryGet("KEY", out string? resident)).IsTrue();
+        await Assert.That(resident).IsEqualTo("KEY");
     }
 
     [Test]
-    public void InvalidOptionsFailFast()
+    public async Task InvalidOptionsFailFast()
     {
-        FluentActions
-            .Invoking(() => Create<int, int>(CompletedLoader<int, int>, Options(maximumSize: 0)))
-            .Should()
-            .ThrowExactly<ArgumentOutOfRangeException>();
-        FluentActions
-            .Invoking(() => Create<int, int>(CompletedLoader<int, int>, Options(maximumSize: -1)))
-            .Should()
-            .ThrowExactly<ArgumentOutOfRangeException>();
-        FluentActions
-            .Invoking(() =>
-                Create<int, int>(CompletedLoader<int, int>, Options(maxConcurrentLoads: 0))
-            )
-            .Should()
-            .ThrowExactly<ArgumentOutOfRangeException>();
-        FluentActions
-            .Invoking(() =>
+        await Assert
+            .That(() => Create<int, int>(CompletedLoader<int, int>, Options(maximumSize: 0)))
+            .ThrowsExactly<ArgumentOutOfRangeException>();
+        await Assert
+            .That(() => Create<int, int>(CompletedLoader<int, int>, Options(maximumSize: -1)))
+            .ThrowsExactly<ArgumentOutOfRangeException>();
+        await Assert
+            .That(() => Create<int, int>(CompletedLoader<int, int>, Options(maxConcurrentLoads: 0)))
+            .ThrowsExactly<ArgumentOutOfRangeException>();
+        await Assert
+            .That(() =>
                 Create<int, int>(CompletedLoader<int, int>, Options(maxConcurrentLoads: -1))
             )
-            .Should()
-            .ThrowExactly<ArgumentOutOfRangeException>();
-        FluentActions
-            .Invoking(() =>
+            .ThrowsExactly<ArgumentOutOfRangeException>();
+        await Assert
+            .That(() =>
                 Create<int, int>(
                     CompletedLoader<int, int>,
                     Options(expireAfterWrite: TimeSpan.Zero)
                 )
             )
-            .Should()
-            .ThrowExactly<ArgumentOutOfRangeException>();
-        FluentActions
-            .Invoking(() =>
+            .ThrowsExactly<ArgumentOutOfRangeException>();
+        await Assert
+            .That(() =>
                 Create<int, int>(
                     CompletedLoader<int, int>,
                     Options(expireAfterAccess: TimeSpan.FromTicks(-1))
                 )
             )
-            .Should()
-            .ThrowExactly<ArgumentOutOfRangeException>();
+            .ThrowsExactly<ArgumentOutOfRangeException>();
     }
 
     [Test]
-    public async Task ImmutableOptionsAreAppliedAtConstruction()
+    public async Task ImmutableOptionsAreAppliedAtConstruction(CancellationToken cancellationToken)
     {
         var clock = new ManualTimeProvider();
         var options = Options(expireAfterWrite: TimeSpan.FromSeconds(10), timeProvider: clock);
         await using var cache = Create<int, int>((_, _) => Task.FromResult(42), options);
-
-        await Get(cache, 1);
+        await Get(cache, 1, cancellationToken);
         clock.Advance(TimeSpan.FromSeconds(2));
-
-        cache.TryGet(1, out int value).Should().BeTrue();
-        value.Should().Be(42);
+        await Assert.That(cache.TryGet(1, out int value)).IsTrue();
+        await Assert.That(value).IsEqualTo(42);
     }
 
     [Test]
-    public async Task SameKeyHasOneLoaderForMoreThanOneHundredParallelCallers()
+    public async Task SameKeyHasOneLoaderForMoreThanOneHundredParallelCallers(
+        CancellationToken cancellationToken
+    )
     {
         const int callerCount = 128;
         var loaderEntered = NewSignal();
         var releaseLoader = NewSignal();
         int calls = 0;
-
         await using var cache = Create<int, int>(
             async (_, _) =>
             {
@@ -132,7 +124,6 @@ public sealed class LoadingCacheContractTests
                 return 7;
             }
         );
-
         var ready = Enumerable.Range(0, callerCount).Select(_ => NewSignal()).ToArray();
         var go = NewSignal();
         var waiters = new Task<int>[callerCount];
@@ -143,18 +134,21 @@ public sealed class LoadingCacheContractTests
 
         try
         {
-            await AwaitWithTestTimeout(Task.WhenAll(ready.Select(signal => signal.Task)));
+            await AwaitWithTestTimeout(
+                Task.WhenAll(ready.Select(signal => signal.Task)),
+                cancellationToken
+            );
             go.TrySetResult(true);
-            await AwaitWithTestTimeout(loaderEntered.Task);
+            await AwaitWithTestTimeout(loaderEntered.Task, cancellationToken);
             releaseLoader.TrySetResult(true);
-
-            int[] values = await AwaitWithTestTimeout(Task.WhenAll(waiters));
-            values.Length.Should().Be(callerCount);
+            int[] values = await AwaitWithTestTimeout(Task.WhenAll(waiters), cancellationToken);
+            await Assert.That(values.Length).IsEqualTo(callerCount);
             foreach (int value in values)
             {
-                value.Should().Be(7);
+                await Assert.That(value).IsEqualTo(7);
             }
-            calls.Should().Be(1);
+
+            await Assert.That(calls).IsEqualTo(1);
         }
         finally
         {
@@ -165,13 +159,12 @@ public sealed class LoadingCacheContractTests
     }
 
     [Test]
-    public async Task DifferentKeysCanEnterLoadersConcurrently()
+    public async Task DifferentKeysCanEnterLoadersConcurrently(CancellationToken cancellationToken)
     {
         var entered = NewSignal();
         var release = NewSignal();
         int active = 0;
         var maximumActive = new AtomicCounter();
-
         await using var cache = Create<int, int>(
             async (_, _) =>
             {
@@ -188,13 +181,12 @@ public sealed class LoadingCacheContractTests
             },
             Options(maxConcurrentLoads: 2)
         );
-
-        var first = Get(cache, 1).AsTask();
-        var second = Get(cache, 2).AsTask();
+        var first = Get(cache, 1, cancellationToken).AsTask();
+        var second = Get(cache, 2, cancellationToken).AsTask();
         try
         {
-            await AwaitWithTestTimeout(entered.Task);
-            maximumActive.Value.Should().Be(2);
+            await AwaitWithTestTimeout(entered.Task, cancellationToken);
+            await Assert.That(maximumActive.Value).IsEqualTo(2);
         }
         finally
         {
@@ -204,7 +196,9 @@ public sealed class LoadingCacheContractTests
     }
 
     [Test]
-    public async Task WaiterJoiningAfterFlightInstallationCannotLeavePromiseUnstarted()
+    public async Task WaiterJoiningAfterFlightInstallationCannotLeavePromiseUnstarted(
+        CancellationToken cancellationToken
+    )
     {
         var loaderEntered = NewSignal();
         var release = NewSignal();
@@ -218,27 +212,26 @@ public sealed class LoadingCacheContractTests
                 return 9;
             }
         );
-
-        var first = Get(cache, 1).AsTask();
-        await AwaitWithTestTimeout(loaderEntered.Task);
-        var second = Get(cache, 1).AsTask();
+        var first = Get(cache, 1, cancellationToken).AsTask();
+        await AwaitWithTestTimeout(loaderEntered.Task, cancellationToken);
+        var second = Get(cache, 1, cancellationToken).AsTask();
         release.TrySetResult(true);
-
-        int[] values = await AwaitWithTestTimeout(Task.WhenAll(first, second));
-        values[0].Should().Be(9);
-        values[1].Should().Be(9);
-        calls.Should().Be(1);
+        int[] values = await AwaitWithTestTimeout(Task.WhenAll(first, second), cancellationToken);
+        await Assert.That(values[0]).IsEqualTo(9);
+        await Assert.That(values[1]).IsEqualTo(9);
+        await Assert.That(calls).IsEqualTo(1);
     }
 
     [Test]
-    public async Task JoiningCallerStartsFlightWhenInstallerIsPausedAfterInstallation()
+    public async Task JoiningCallerStartsFlightWhenInstallerIsPausedAfterInstallation(
+        CancellationToken cancellationToken
+    )
     {
         await using var installation = new BlockingTestHook(TestTimeout);
         var loaderEntered = NewSignal();
         var releaseLoader = NewSignal();
         int calls = 0;
         var hooks = new LoadingCacheTestHooks { AfterFlightInstalled = installation.Invoke };
-
         await using var cache = Create<int, int>(
             async (_, _) =>
             {
@@ -249,10 +242,9 @@ public sealed class LoadingCacheContractTests
             },
             Options(testHooks: hooks)
         );
-
         var installer = Task
             .Factory.StartNew(
-                static state => Get((IAsyncLoadingCache<int, int>)state!, 1).AsTask(),
+                state => Get((IAsyncLoadingCache<int, int>)state!, 1, cancellationToken).AsTask(),
                 cache,
                 CancellationToken.None,
                 TaskCreationOptions.DenyChildAttach,
@@ -262,16 +254,19 @@ public sealed class LoadingCacheContractTests
         Task<int>? joining = null;
         try
         {
-            await AwaitWithTestTimeout(installation.Entered);
-            joining = Get(cache, 1).AsTask();
-            await AwaitWithTestTimeout(loaderEntered.Task);
+            await AwaitWithTestTimeout(installation.Entered, cancellationToken);
+            joining = Get(cache, 1, cancellationToken).AsTask();
+            await AwaitWithTestTimeout(loaderEntered.Task, cancellationToken);
             installation.Release();
             releaseLoader.TrySetResult(true);
-
-            (await AwaitWithTestTimeout(installer)).Should().Be(9);
-            (await AwaitWithTestTimeout(joining)).Should().Be(9);
-            calls.Should().Be(1);
-            installation.TimedOut.Should().BeFalse();
+            await Assert
+                .That((await AwaitWithTestTimeout(installer, cancellationToken)))
+                .IsEqualTo(9);
+            await Assert
+                .That((await AwaitWithTestTimeout(joining, cancellationToken)))
+                .IsEqualTo(9);
+            await Assert.That(calls).IsEqualTo(1);
+            await Assert.That(installation.TimedOut).IsFalse();
         }
         finally
         {
@@ -283,18 +278,19 @@ public sealed class LoadingCacheContractTests
     }
 
     [Test]
-    public async Task BeforePublishHookIsOutsideCacheLockAndSetWinsTheGeneration()
+    public async Task BeforePublishHookIsOutsideCacheLockAndSetWinsTheGeneration(
+        CancellationToken cancellationToken
+    )
     {
         await using var publication = new BlockingTestHook(TestTimeout);
         var hooks = new LoadingCacheTestHooks { BeforePublish = publication.Invoke };
-
         await using var cache = Create<int, int>(
             (_, _) => Task.FromResult(100),
             Options(testHooks: hooks)
         );
         var pending = Task
             .Factory.StartNew(
-                static state => Get((IAsyncLoadingCache<int, int>)state!, 1).AsTask(),
+                state => Get((IAsyncLoadingCache<int, int>)state!, 1, cancellationToken).AsTask(),
                 cache,
                 CancellationToken.None,
                 TaskCreationOptions.DenyChildAttach,
@@ -304,20 +300,21 @@ public sealed class LoadingCacheContractTests
         Task? set = null;
         try
         {
-            await AwaitWithTestTimeout(publication.Entered);
+            await AwaitWithTestTimeout(publication.Entered, cancellationToken);
             set = Task.Factory.StartNew(
                 static state => ((IAsyncLoadingCache<int, int>)state!).Set(1, 101),
                 cache,
-                TestContext.CurrentContext.CancellationToken,
+                cancellationToken,
                 TaskCreationOptions.DenyChildAttach,
                 TaskScheduler.Default
             );
-            await AwaitWithTestTimeout(set);
+            await AwaitWithTestTimeout(set, cancellationToken);
             publication.Release();
-
-            (await AwaitWithTestTimeout(pending)).Should().Be(100);
-            (await Get(cache, 1)).Should().Be(101);
-            publication.TimedOut.Should().BeFalse();
+            await Assert
+                .That((await AwaitWithTestTimeout(pending, cancellationToken)))
+                .IsEqualTo(100);
+            await Assert.That((await Get(cache, 1, cancellationToken))).IsEqualTo(101);
+            await Assert.That(publication.TimedOut).IsFalse();
         }
         finally
         {
@@ -328,18 +325,19 @@ public sealed class LoadingCacheContractTests
     }
 
     [Test]
-    public async Task BeforeCompletionHookIsOutsideCacheLockAndSetSurvivesCompletion()
+    public async Task BeforeCompletionHookIsOutsideCacheLockAndSetSurvivesCompletion(
+        CancellationToken cancellationToken
+    )
     {
         await using var completion = new BlockingTestHook(TestTimeout);
         var hooks = new LoadingCacheTestHooks { BeforeCompletion = completion.Invoke };
-
         await using var cache = Create<int, int>(
             (_, _) => Task.FromResult(110),
             Options(testHooks: hooks)
         );
         var pending = Task
             .Factory.StartNew(
-                static state => Get((IAsyncLoadingCache<int, int>)state!, 1).AsTask(),
+                state => Get((IAsyncLoadingCache<int, int>)state!, 1, cancellationToken).AsTask(),
                 cache,
                 CancellationToken.None,
                 TaskCreationOptions.DenyChildAttach,
@@ -349,20 +347,21 @@ public sealed class LoadingCacheContractTests
         Task? set = null;
         try
         {
-            await AwaitWithTestTimeout(completion.Entered);
+            await AwaitWithTestTimeout(completion.Entered, cancellationToken);
             set = Task.Factory.StartNew(
                 static state => ((IAsyncLoadingCache<int, int>)state!).Set(1, 111),
                 cache,
-                TestContext.CurrentContext.CancellationToken,
+                cancellationToken,
                 TaskCreationOptions.DenyChildAttach,
                 TaskScheduler.Default
             );
-            await AwaitWithTestTimeout(set);
+            await AwaitWithTestTimeout(set, cancellationToken);
             completion.Release();
-
-            (await AwaitWithTestTimeout(pending)).Should().Be(110);
-            (await Get(cache, 1)).Should().Be(111);
-            completion.TimedOut.Should().BeFalse();
+            await Assert
+                .That((await AwaitWithTestTimeout(pending, cancellationToken)))
+                .IsEqualTo(110);
+            await Assert.That((await Get(cache, 1, cancellationToken))).IsEqualTo(111);
+            await Assert.That(completion.TimedOut).IsFalse();
         }
         finally
         {
@@ -373,7 +372,7 @@ public sealed class LoadingCacheContractTests
     }
 
     [Test]
-    public async Task TryGetDoesNotWaitForOrStartPendingLoad()
+    public async Task TryGetDoesNotWaitForOrStartPendingLoad(CancellationToken cancellationToken)
     {
         var entered = NewSignal();
         var release = NewSignal();
@@ -387,15 +386,16 @@ public sealed class LoadingCacheContractTests
                 return 10;
             }
         );
-
-        var pending = Get(cache, 1).AsTask();
+        var pending = Get(cache, 1, cancellationToken).AsTask();
         try
         {
-            await AwaitWithTestTimeout(entered.Task);
-            cache.TryGet(1, out _).Should().BeFalse();
-            calls.Should().Be(1);
+            await AwaitWithTestTimeout(entered.Task, cancellationToken);
+            await Assert.That(cache.TryGet(1, out _)).IsFalse();
+            await Assert.That(calls).IsEqualTo(1);
             release.TrySetResult(true);
-            (await AwaitWithTestTimeout(pending)).Should().Be(10);
+            await Assert
+                .That((await AwaitWithTestTimeout(pending, cancellationToken)))
+                .IsEqualTo(10);
         }
         finally
         {
@@ -405,7 +405,7 @@ public sealed class LoadingCacheContractTests
     }
 
     [Test]
-    public async Task SynchronousThrowIsNotCachedAndCanRetry()
+    public async Task SynchronousThrowIsNotCachedAndCanRetry(CancellationToken cancellationToken)
     {
         int calls = 0;
         await using var cache = Create<int, int>(
@@ -414,18 +414,14 @@ public sealed class LoadingCacheContractTests
                     ? throw new InvalidOperationException("first attempt")
                     : Task.FromResult(11)
         );
-
-        Task firstAttempt = Get(cache, 1).AsTask();
-        await FluentActions
-            .Awaiting(() => firstAttempt)
-            .Should()
-            .ThrowExactlyAsync<InvalidOperationException>();
-        (await Get(cache, 1)).Should().Be(11);
-        calls.Should().Be(2);
+        Task firstAttempt = Get(cache, 1, cancellationToken).AsTask();
+        await Assert.That(() => firstAttempt).ThrowsExactly<InvalidOperationException>();
+        await Assert.That((await Get(cache, 1, cancellationToken))).IsEqualTo(11);
+        await Assert.That(calls).IsEqualTo(2);
     }
 
     [Test]
-    public async Task AsyncFaultIsNotCachedAndCanRetry()
+    public async Task AsyncFaultIsNotCachedAndCanRetry(CancellationToken cancellationToken)
     {
         int calls = 0;
         await using var cache = Create<int, int>(
@@ -434,18 +430,14 @@ public sealed class LoadingCacheContractTests
                     ? Task.FromException<int>(new InvalidOperationException("async fault"))
                     : Task.FromResult(12)
         );
-
-        Task firstAttempt = Get(cache, 1).AsTask();
-        await FluentActions
-            .Awaiting(() => firstAttempt)
-            .Should()
-            .ThrowExactlyAsync<InvalidOperationException>();
-        (await Get(cache, 1)).Should().Be(12);
-        calls.Should().Be(2);
+        Task firstAttempt = Get(cache, 1, cancellationToken).AsTask();
+        await Assert.That(() => firstAttempt).ThrowsExactly<InvalidOperationException>();
+        await Assert.That((await Get(cache, 1, cancellationToken))).IsEqualTo(12);
+        await Assert.That(calls).IsEqualTo(2);
     }
 
     [Test]
-    public async Task LoaderCancellationIsNotCachedAndCanRetry()
+    public async Task LoaderCancellationIsNotCachedAndCanRetry(CancellationToken cancellationToken)
     {
         int calls = 0;
         using var loaderCancellation = new CancellationTokenSource();
@@ -457,32 +449,29 @@ public sealed class LoadingCacheContractTests
                     ? Task.FromCanceled<int>(canceledToken)
                     : Task.FromResult(13)
         );
-
-        Task firstAttempt = Get(cache, 1, TestContext.CurrentContext.CancellationToken).AsTask();
-        await FluentActions
-            .Awaiting(() => firstAttempt)
-            .Should()
-            .ThrowAsync<OperationCanceledException>();
-        (await Get(cache, 1, TestContext.CurrentContext.CancellationToken)).Should().Be(13);
-        calls.Should().Be(2);
+        Task firstAttempt = Get(cache, 1, cancellationToken).AsTask();
+        await Assert.That(() => firstAttempt).Throws<OperationCanceledException>();
+        await Assert.That((await Get(cache, 1, cancellationToken))).IsEqualTo(13);
+        await Assert.That(calls).IsEqualTo(2);
     }
 
     [Test]
-    public async Task NullTaskIsAContractFailureAndCanRetry()
+    public async Task NullTaskIsAContractFailureAndCanRetry(CancellationToken cancellationToken)
     {
         int calls = 0;
         await using var cache = Create<int, int>(
             (_, _) => Interlocked.Increment(ref calls) == 1 ? null! : Task.FromResult(14)
         );
-
-        Task firstAttempt = Get(cache, 1).AsTask();
-        await FluentActions.Awaiting(() => firstAttempt).Should().ThrowAsync<Exception>();
-        (await Get(cache, 1)).Should().Be(14);
-        calls.Should().Be(2);
+        Task firstAttempt = Get(cache, 1, cancellationToken).AsTask();
+        await Assert.That(() => firstAttempt).Throws<Exception>();
+        await Assert.That((await Get(cache, 1, cancellationToken))).IsEqualTo(14);
+        await Assert.That(calls).IsEqualTo(2);
     }
 
     [Test]
-    public async Task NullReferenceValueIsAContractFailureAndCanRetry()
+    public async Task NullReferenceValueIsAContractFailureAndCanRetry(
+        CancellationToken cancellationToken
+    )
     {
         int calls = 0;
         await using var cache = Create<int, string>(
@@ -491,15 +480,14 @@ public sealed class LoadingCacheContractTests
                     ? Task.FromResult<string>(null!)
                     : Task.FromResult("value")
         );
-
-        Task firstAttempt = Get(cache, 1).AsTask();
-        await FluentActions.Awaiting(() => firstAttempt).Should().ThrowAsync<Exception>();
-        (await Get(cache, 1)).Should().Be("value");
-        calls.Should().Be(2);
+        Task firstAttempt = Get(cache, 1, cancellationToken).AsTask();
+        await Assert.That(() => firstAttempt).Throws<Exception>();
+        await Assert.That((await Get(cache, 1, cancellationToken))).IsEqualTo("value");
+        await Assert.That(calls).IsEqualTo(2);
     }
 
     [Test]
-    public async Task NullKeyIsRejectedBeforeLoaderStarts()
+    public async Task NullKeyIsRejectedBeforeLoaderStarts(CancellationToken cancellationToken)
     {
         int calls = 0;
         await using var cache = Create<string, string>(
@@ -509,23 +497,22 @@ public sealed class LoadingCacheContractTests
                 return Task.FromResult("unexpected");
             }
         );
-
         Exception? rejection = null;
         try
         {
-            await Get(cache, null!);
+            await Get(cache, null!, cancellationToken);
         }
         catch (Exception exception)
         {
             rejection = exception;
         }
 
-        rejection.Should().BeOfType<ArgumentNullException>();
-        calls.Should().Be(0);
+        await Assert.That<object>(rejection!).IsTypeOf<ArgumentNullException>();
+        await Assert.That(calls).IsEqualTo(0);
     }
 
     [Test]
-    public async Task CallerCancellationOnlyCancelsThatWaiter()
+    public async Task CallerCancellationOnlyCancelsThatWaiter(CancellationToken cancellationToken)
     {
         var loaderEntered = NewSignal();
         var release = NewSignal();
@@ -539,24 +526,21 @@ public sealed class LoadingCacheContractTests
                 return 21;
             }
         );
-
         using var canceled = new CancellationTokenSource();
         var first = Get(cache, 1, canceled.Token).AsTask();
         Task<int>? second = null;
         try
         {
-            await AwaitWithTestTimeout(loaderEntered.Task);
+            await AwaitWithTestTimeout(loaderEntered.Task, cancellationToken);
             second = Get(cache, 1, CancellationToken.None).AsTask();
             await canceled.CancelAsync();
-
-            await FluentActions
-                .Awaiting(() => first)
-                .Should()
-                .ThrowAsync<OperationCanceledException>();
+            await Assert.That(() => first).Throws<OperationCanceledException>();
             release.TrySetResult(true);
-            (await AwaitWithTestTimeout(second)).Should().Be(21);
-            (await Get(cache, 1, CancellationToken.None)).Should().Be(21);
-            calls.Should().Be(1);
+            await Assert
+                .That((await AwaitWithTestTimeout(second, cancellationToken)))
+                .IsEqualTo(21);
+            await Assert.That((await Get(cache, 1, CancellationToken.None))).IsEqualTo(21);
+            await Assert.That(calls).IsEqualTo(1);
         }
         finally
         {
@@ -567,7 +551,7 @@ public sealed class LoadingCacheContractTests
     }
 
     [Test]
-    public async Task AllCanceledWaitersDoNotCancelSharedLoad()
+    public async Task AllCanceledWaitersDoNotCancelSharedLoad(CancellationToken cancellationToken)
     {
         var loaderEntered = NewSignal();
         var release = NewSignal();
@@ -581,29 +565,21 @@ public sealed class LoadingCacheContractTests
                 return 22;
             }
         );
-
         using var firstCancellation = new CancellationTokenSource();
         using var secondCancellation = new CancellationTokenSource();
         var first = Get(cache, 1, firstCancellation.Token).AsTask();
         Task<int>? second = null;
         try
         {
-            await AwaitWithTestTimeout(loaderEntered.Task);
+            await AwaitWithTestTimeout(loaderEntered.Task, cancellationToken);
             second = Get(cache, 1, secondCancellation.Token).AsTask();
             await firstCancellation.CancelAsync();
             await secondCancellation.CancelAsync();
-            await FluentActions
-                .Awaiting(() => first)
-                .Should()
-                .ThrowAsync<OperationCanceledException>();
-            await FluentActions
-                .Awaiting(() => second)
-                .Should()
-                .ThrowAsync<OperationCanceledException>();
+            await Assert.That(() => first).Throws<OperationCanceledException>();
+            await Assert.That(() => second).Throws<OperationCanceledException>();
             release.TrySetResult(true);
-
-            (await Get(cache, 1, CancellationToken.None)).Should().Be(22);
-            calls.Should().Be(1);
+            await Assert.That((await Get(cache, 1, CancellationToken.None))).IsEqualTo(22);
+            await Assert.That(calls).IsEqualTo(1);
         }
         finally
         {
@@ -625,27 +601,21 @@ public sealed class LoadingCacheContractTests
                 return Task.FromResult(23);
             }
         );
-
         using var cancellation = new CancellationTokenSource();
         await cancellation.CancelAsync();
         Task firstAttempt = Get(cache, 1, cancellation.Token).AsTask();
-        await FluentActions
-            .Awaiting(() => firstAttempt)
-            .Should()
-            .ThrowAsync<OperationCanceledException>();
-        calls.Should().Be(0);
-
+        await Assert.That(() => firstAttempt).Throws<OperationCanceledException>();
+        await Assert.That(calls).IsEqualTo(0);
         cache.Set(1, 24);
         Task secondAttempt = Get(cache, 1, cancellation.Token).AsTask();
-        await FluentActions
-            .Awaiting(() => secondAttempt)
-            .Should()
-            .ThrowAsync<OperationCanceledException>();
-        calls.Should().Be(0);
+        await Assert.That(() => secondAttempt).Throws<OperationCanceledException>();
+        await Assert.That(calls).IsEqualTo(0);
     }
 
     [Test]
-    public async Task InvalidateFencesLateSuccessFromEarlierLoad()
+    public async Task InvalidateFencesLateSuccessFromEarlierLoad(
+        CancellationToken cancellationToken
+    )
     {
         var firstEntered = NewSignal();
         var firstLoad = NewSignal<int>();
@@ -663,20 +633,21 @@ public sealed class LoadingCacheContractTests
                 };
             }
         );
-
-        var old = Get(cache, 1).AsTask();
-        await AwaitWithTestTimeout(firstEntered.Task);
-        cache.Invalidate(1).Should().BeTrue();
-        var current = Get(cache, 1).AsTask();
+        var old = Get(cache, 1, cancellationToken).AsTask();
+        await AwaitWithTestTimeout(firstEntered.Task, cancellationToken);
+        await Assert.That(cache.Invalidate(1)).IsTrue();
+        var current = Get(cache, 1, cancellationToken).AsTask();
         secondLoad.TrySetResult(32);
-        (await AwaitWithTestTimeout(current)).Should().Be(32);
+        await Assert.That((await AwaitWithTestTimeout(current, cancellationToken))).IsEqualTo(32);
         firstLoad.TrySetResult(31);
-        (await AwaitWithTestTimeout(old)).Should().Be(31);
-        (await Get(cache, 1)).Should().Be(32);
+        await Assert.That((await AwaitWithTestTimeout(old, cancellationToken))).IsEqualTo(31);
+        await Assert.That((await Get(cache, 1, cancellationToken))).IsEqualTo(32);
     }
 
     [Test]
-    public async Task InvalidateFencesLateFailureWithoutDeletingNewValue()
+    public async Task InvalidateFencesLateFailureWithoutDeletingNewValue(
+        CancellationToken cancellationToken
+    )
     {
         var firstEntered = NewSignal();
         var firstLoad = NewSignal<int>();
@@ -691,37 +662,35 @@ public sealed class LoadingCacheContractTests
                     _ => throw new AssertionException("unexpected third load"),
                 }
         );
-
-        var old = Get(cache, 1).AsTask();
-        await AwaitWithTestTimeout(firstEntered.Task);
-        cache.Invalidate(1).Should().BeTrue();
-        var current = Get(cache, 1).AsTask();
+        var old = Get(cache, 1, cancellationToken).AsTask();
+        await AwaitWithTestTimeout(firstEntered.Task, cancellationToken);
+        await Assert.That(cache.Invalidate(1)).IsTrue();
+        var current = Get(cache, 1, cancellationToken).AsTask();
         secondLoad.TrySetResult(34);
-        (await AwaitWithTestTimeout(current)).Should().Be(34);
+        await Assert.That((await AwaitWithTestTimeout(current, cancellationToken))).IsEqualTo(34);
         firstLoad.TrySetException(new InvalidOperationException("late failure"));
-        await ((Func<Task>)(() => AwaitWithTestTimeout(old)))
-            .Should()
-            .ThrowExactlyAsync<InvalidOperationException>();
-        (await Get(cache, 1)).Should().Be(34);
+        await Assert
+            .That(((Func<Task>)(() => AwaitWithTestTimeout(old, cancellationToken))))
+            .ThrowsExactly<InvalidOperationException>();
+        await Assert.That((await Get(cache, 1, cancellationToken))).IsEqualTo(34);
     }
 
     [Test]
-    public async Task SetFencesLateLoadCompletion()
+    public async Task SetFencesLateLoadCompletion(CancellationToken cancellationToken)
     {
         var entered = NewSignal();
         var load = NewSignal<int>();
         await using var cache = Create<int, int>((_, _) => FirstLoad(entered, load));
-        var pending = Get(cache, 1).AsTask();
-        await AwaitWithTestTimeout(entered.Task);
-
+        var pending = Get(cache, 1, cancellationToken).AsTask();
+        await AwaitWithTestTimeout(entered.Task, cancellationToken);
         cache.Set(1, 35);
         load.TrySetResult(36);
-        (await AwaitWithTestTimeout(pending)).Should().Be(36);
-        (await Get(cache, 1)).Should().Be(35);
+        await Assert.That((await AwaitWithTestTimeout(pending, cancellationToken))).IsEqualTo(36);
+        await Assert.That((await Get(cache, 1, cancellationToken))).IsEqualTo(35);
     }
 
     [Test]
-    public async Task ClearFencesOldEpochCompletion()
+    public async Task ClearFencesOldEpochCompletion(CancellationToken cancellationToken)
     {
         var oldEntered = NewSignal();
         var oldLoad = NewSignal<int>();
@@ -736,20 +705,21 @@ public sealed class LoadingCacheContractTests
                     _ => throw new AssertionException("unexpected third load"),
                 }
         );
-
-        var old = Get(cache, 1).AsTask();
-        await AwaitWithTestTimeout(oldEntered.Task);
+        var old = Get(cache, 1, cancellationToken).AsTask();
+        await AwaitWithTestTimeout(oldEntered.Task, cancellationToken);
         cache.Clear();
-        var current = Get(cache, 1).AsTask();
+        var current = Get(cache, 1, cancellationToken).AsTask();
         newLoad.TrySetResult(38);
-        (await AwaitWithTestTimeout(current)).Should().Be(38);
+        await Assert.That((await AwaitWithTestTimeout(current, cancellationToken))).IsEqualTo(38);
         oldLoad.TrySetResult(37);
-        (await AwaitWithTestTimeout(old)).Should().Be(37);
-        (await Get(cache, 1)).Should().Be(38);
+        await Assert.That((await AwaitWithTestTimeout(old, cancellationToken))).IsEqualTo(37);
+        await Assert.That((await Get(cache, 1, cancellationToken))).IsEqualTo(38);
     }
 
     [Test]
-    public async Task MaximumConcurrentLoadsRejectsDistinctKeyButAllowsJoining()
+    public async Task MaximumConcurrentLoadsRejectsDistinctKeyButAllowsJoining(
+        CancellationToken cancellationToken
+    )
     {
         var firstEntered = NewSignal();
         var release = NewSignal();
@@ -764,20 +734,24 @@ public sealed class LoadingCacheContractTests
             },
             Options(maxConcurrentLoads: 1)
         );
-
-        var first = Get(cache, 1).AsTask();
-        await AwaitWithTestTimeout(firstEntered.Task);
-        var joining = Get(cache, 1).AsTask();
-        await AssertRejectedWithoutHangingAsync(() => Get(cache, 2).AsTask());
+        var first = Get(cache, 1, cancellationToken).AsTask();
+        await AwaitWithTestTimeout(firstEntered.Task, cancellationToken);
+        var joining = Get(cache, 1, cancellationToken).AsTask();
+        await AssertRejectedWithoutHangingAsync(
+            () => Get(cache, 2, cancellationToken).AsTask(),
+            cancellationToken
+        );
         release.TrySetResult(true);
-        int[] values = await AwaitWithTestTimeout(Task.WhenAll(first, joining));
-        values[0].Should().Be(41);
-        values[1].Should().Be(41);
-        calls.Should().Be(1);
+        int[] values = await AwaitWithTestTimeout(Task.WhenAll(first, joining), cancellationToken);
+        await Assert.That(values[0]).IsEqualTo(41);
+        await Assert.That(values[1]).IsEqualTo(41);
+        await Assert.That(calls).IsEqualTo(1);
     }
 
     [Test]
-    public async Task InvalidateAndClearDoNotReleasePermitForRunningLoader()
+    public async Task InvalidateAndClearDoNotReleasePermitForRunningLoader(
+        CancellationToken cancellationToken
+    )
     {
         var entered = NewSignal();
         var release = NewSignal();
@@ -790,19 +764,26 @@ public sealed class LoadingCacheContractTests
             },
             Options(maxConcurrentLoads: 1)
         );
-
-        var pending = Get(cache, 1).AsTask();
-        await AwaitWithTestTimeout(entered.Task);
+        var pending = Get(cache, 1, cancellationToken).AsTask();
+        await AwaitWithTestTimeout(entered.Task, cancellationToken);
         cache.Invalidate(1);
-        await AssertRejectedWithoutHangingAsync(() => Get(cache, 2).AsTask());
+        await AssertRejectedWithoutHangingAsync(
+            () => Get(cache, 2, cancellationToken).AsTask(),
+            cancellationToken
+        );
         cache.Clear();
-        await AssertRejectedWithoutHangingAsync(() => Get(cache, 3).AsTask());
+        await AssertRejectedWithoutHangingAsync(
+            () => Get(cache, 3, cancellationToken).AsTask(),
+            cancellationToken
+        );
         release.TrySetResult(true);
-        await AwaitWithTestTimeout(pending);
+        await AwaitWithTestTimeout(pending, cancellationToken);
     }
 
     [Test]
-    public async Task ExpireAfterWriteUsesPublishTimestampAndExactBoundary()
+    public async Task ExpireAfterWriteUsesPublishTimestampAndExactBoundary(
+        CancellationToken cancellationToken
+    )
     {
         var clock = new ManualTimeProvider();
         int calls = 0;
@@ -814,19 +795,20 @@ public sealed class LoadingCacheContractTests
             },
             Options(expireAfterWrite: TimeSpan.FromSeconds(10), timeProvider: clock)
         );
-
-        (await Get(cache, 1)).Should().Be(51);
+        await Assert.That((await Get(cache, 1, cancellationToken))).IsEqualTo(51);
         clock.Advance(TimeSpan.FromSeconds(9));
-        cache.TryGet(1, out int beforeBoundary).Should().BeTrue();
-        beforeBoundary.Should().Be(51);
+        await Assert.That(cache.TryGet(1, out int beforeBoundary)).IsTrue();
+        await Assert.That(beforeBoundary).IsEqualTo(51);
         clock.Advance(TimeSpan.FromSeconds(1));
-        cache.TryGet(1, out _).Should().BeFalse();
-        (await Get(cache, 1)).Should().Be(52);
-        calls.Should().Be(2);
+        await Assert.That(cache.TryGet(1, out _)).IsFalse();
+        await Assert.That((await Get(cache, 1, cancellationToken))).IsEqualTo(52);
+        await Assert.That(calls).IsEqualTo(2);
     }
 
     [Test]
-    public async Task ExpireAfterWriteStartsAtSuccessfulPublishNotLoadStart()
+    public async Task ExpireAfterWriteStartsAtSuccessfulPublishNotLoadStart(
+        CancellationToken cancellationToken
+    )
     {
         var clock = new ManualTimeProvider();
         var entered = NewSignal();
@@ -840,36 +822,39 @@ public sealed class LoadingCacheContractTests
             },
             Options(expireAfterWrite: TimeSpan.FromSeconds(10), timeProvider: clock)
         );
-
-        var load = Get(cache, 1).AsTask();
-        await AwaitWithTestTimeout(entered.Task);
+        var load = Get(cache, 1, cancellationToken).AsTask();
+        await AwaitWithTestTimeout(entered.Task, cancellationToken);
         clock.Advance(TimeSpan.FromSeconds(5));
         release.TrySetResult(true);
-        (await AwaitWithTestTimeout(load)).Should().Be(60);
-        cache.TryGet(1, out int published).Should().BeTrue();
-        published.Should().Be(60);
+        await Assert.That((await AwaitWithTestTimeout(load, cancellationToken))).IsEqualTo(60);
+        await Assert.That(cache.TryGet(1, out int published)).IsTrue();
+        await Assert.That(published).IsEqualTo(60);
         clock.Advance(TimeSpan.FromSeconds(5));
-        cache.TryGet(1, out _).Should().BeTrue();
+        await Assert.That(cache.TryGet(1, out _)).IsTrue();
         clock.Advance(TimeSpan.FromSeconds(5));
-        cache.TryGet(1, out _).Should().BeFalse();
+        await Assert.That(cache.TryGet(1, out _)).IsFalse();
     }
 
     [Test]
-    public async Task TimeProviderTimestampRemainsMonotonicWhenWallClockMovesBack()
+    public async Task TimeProviderTimestampRemainsMonotonicWhenWallClockMovesBack(
+        CancellationToken cancellationToken
+    )
     {
         var clock = new ManualTimeProvider();
         await using var cache = Create<int, int>(
             (_, _) => Task.FromResult(61),
             Options(expireAfterWrite: TimeSpan.FromSeconds(10), timeProvider: clock)
         );
-        await Get(cache, 1);
+        await Get(cache, 1, cancellationToken);
         clock.MoveWallClock(TimeSpan.FromHours(-1));
         clock.Advance(TimeSpan.FromSeconds(10));
-        cache.TryGet(1, out _).Should().BeFalse();
+        await Assert.That(cache.TryGet(1, out _)).IsFalse();
     }
 
     [Test]
-    public async Task ExpireAfterAccessAndWriteUseTheEarlierDeadline()
+    public async Task ExpireAfterAccessAndWriteUseTheEarlierDeadline(
+        CancellationToken cancellationToken
+    )
     {
         var clock = new ManualTimeProvider();
         await using var cache = Create<int, int>(
@@ -880,12 +865,11 @@ public sealed class LoadingCacheContractTests
                 timeProvider: clock
             )
         );
-
-        await Get(cache, 1);
+        await Get(cache, 1, cancellationToken);
         clock.Advance(TimeSpan.FromSeconds(4));
-        cache.TryGet(1, out _).Should().BeTrue();
+        await Assert.That(cache.TryGet(1, out _)).IsTrue();
         clock.Advance(TimeSpan.FromSeconds(5));
-        cache.TryGet(1, out _).Should().BeFalse();
+        await Assert.That(cache.TryGet(1, out _)).IsFalse();
     }
 
     [Test]
@@ -902,11 +886,13 @@ public sealed class LoadingCacheContractTests
 
         cache.CleanUp();
         AssertInvariants(cache);
-        cache.EstimatedCount.Should().BeInRange(0, 8);
+        await Assert.That(cache.EstimatedCount).IsBetween(0, 8);
     }
 
     [Test]
-    public async Task DisposeRejectsNewOperationsAndCooperativeLoaderDoesNotHangShutdown()
+    public async Task DisposeRejectsNewOperationsAndCooperativeLoaderDoesNotHangShutdown(
+        CancellationToken cancellationToken
+    )
     {
         var entered = NewSignal();
         var cache = Create<int, int>(
@@ -917,20 +903,21 @@ public sealed class LoadingCacheContractTests
                 return 70;
             }
         );
-
-        var pending = Get(cache, 1).AsTask();
+        var pending = Get(cache, 1, cancellationToken).AsTask();
         try
         {
-            await AwaitWithTestTimeout(entered.Task);
-            await AwaitWithTestTimeout(cache.DisposeAsync().AsTask());
-            var completion = await CaptureExceptionAsync(() => AwaitWithTestTimeout(pending));
-            (completion is OperationCanceledException or ObjectDisposedException)
-                .Should()
-                .BeTrue($"started load completed with unexpected exception: {completion}");
-            await cache
-                .Awaiting(static current => Get(current, 2).AsTask())
-                .Should()
-                .ThrowExactlyAsync<ObjectDisposedException>();
+            await AwaitWithTestTimeout(entered.Task, cancellationToken);
+            await AwaitWithTestTimeout(cache.DisposeAsync().AsTask(), cancellationToken);
+            var completion = await CaptureExceptionAsync(() =>
+                AwaitWithTestTimeout(pending, cancellationToken)
+            );
+            await Assert
+                .That((completion is OperationCanceledException or ObjectDisposedException))
+                .IsTrue()
+                .Because($"started load completed with unexpected exception: {completion}");
+            await Assert
+                .That(() => Get(cache, 2, cancellationToken).AsTask())
+                .ThrowsExactly<ObjectDisposedException>();
         }
         finally
         {
@@ -940,7 +927,9 @@ public sealed class LoadingCacheContractTests
     }
 
     [Test]
-    public async Task DisposeDoesNotPublishLateCompletionFromNonCooperativeLoader()
+    public async Task DisposeDoesNotPublishLateCompletionFromNonCooperativeLoader(
+        CancellationToken cancellationToken
+    )
     {
         var entered = NewSignal();
         var release = NewSignal<int>();
@@ -962,25 +951,28 @@ public sealed class LoadingCacheContractTests
         Task<int>? pending = null;
         try
         {
-            pending = Get(cache, 1).AsTask();
-            await AwaitWithTestTimeout(entered.Task);
-            await AwaitWithTestTimeout(cache.DisposeAsync().AsTask());
+            pending = Get(cache, 1, cancellationToken).AsTask();
+            await AwaitWithTestTimeout(entered.Task, cancellationToken);
+            await AwaitWithTestTimeout(cache.DisposeAsync().AsTask(), cancellationToken);
             release.TrySetResult(71);
-            var lateCompletion = await CaptureExceptionAsync(() => AwaitWithTestTimeout(pending));
-            (lateCompletion is TimeoutException)
-                .Should()
-                .BeFalse($"non-cooperative completion hung: {lateCompletion}");
+            var lateCompletion = await CaptureExceptionAsync(() =>
+                AwaitWithTestTimeout(pending, cancellationToken)
+            );
+            await Assert
+                .That((lateCompletion is TimeoutException))
+                .IsFalse()
+                .Because($"non-cooperative completion hung: {lateCompletion}");
             Exception? rejection = null;
             try
             {
-                await Get(cache, 1);
+                await Get(cache, 1, cancellationToken);
             }
             catch (Exception exception)
             {
                 rejection = exception;
             }
 
-            rejection.Should().BeOfType<ObjectDisposedException>();
+            await Assert.That<object>(rejection!).IsTypeOf<ObjectDisposedException>();
         }
         finally
         {
@@ -1005,7 +997,9 @@ public sealed class LoadingCacheContractTests
     }
 
     [Test]
-    public async Task DisposeAccountsForFlightsDetachedByInvalidateAndClear()
+    public async Task DisposeAccountsForFlightsDetachedByInvalidateAndClear(
+        CancellationToken cancellationToken
+    )
     {
         var firstInstalled = NewSignal();
         var secondInstalled = NewSignal();
@@ -1026,7 +1020,6 @@ public sealed class LoadingCacheContractTests
                 }
             },
         };
-
         var calls = new AtomicCounter();
         var cache = Create<int, int>(
             (_, _) =>
@@ -1038,29 +1031,30 @@ public sealed class LoadingCacheContractTests
                 },
             Options(maxConcurrentLoads: 2, testHooks: hooks)
         );
-
         Task<int>? first = null;
         Task<int>? second = null;
         try
         {
-            first = Get(cache, 1).AsTask();
-            await AwaitWithTestTimeout(firstInstalled.Task);
-            cache.Invalidate(1).Should().BeTrue();
+            first = Get(cache, 1, cancellationToken).AsTask();
+            await AwaitWithTestTimeout(firstInstalled.Task, cancellationToken);
+            await Assert.That(cache.Invalidate(1)).IsTrue();
             cache.Clear();
-
-            second = Get(cache, 1).AsTask();
-            await AwaitWithTestTimeout(secondInstalled.Task);
+            second = Get(cache, 1, cancellationToken).AsTask();
+            await AwaitWithTestTimeout(secondInstalled.Task, cancellationToken);
             cache.Clear();
-            await AwaitWithTestTimeout(cache.DisposeAsync().AsTask());
-
+            await AwaitWithTestTimeout(cache.DisposeAsync().AsTask(), cancellationToken);
             firstLoad.TrySetResult(120);
             secondLoad.TrySetResult(121);
-            var firstCompletion = await CaptureExceptionAsync(() => AwaitWithTestTimeout(first));
-            var secondCompletion = await CaptureExceptionAsync(() => AwaitWithTestTimeout(second));
-            (firstCompletion is TimeoutException || secondCompletion is TimeoutException)
-                .Should()
-                .BeFalse();
-            calls.Value.Should().Be(2);
+            var firstCompletion = await CaptureExceptionAsync(() =>
+                AwaitWithTestTimeout(first, cancellationToken)
+            );
+            var secondCompletion = await CaptureExceptionAsync(() =>
+                AwaitWithTestTimeout(second, cancellationToken)
+            );
+            await Assert
+                .That((firstCompletion is TimeoutException || secondCompletion is TimeoutException))
+                .IsFalse();
+            await Assert.That(calls.Value).IsEqualTo(2);
         }
         finally
         {
@@ -1097,7 +1091,9 @@ public sealed class LoadingCacheContractTests
     }
 
     [Test]
-    public async Task DisposeDoesNotWaitForAStuckLoaderCancellationCallback()
+    public async Task DisposeDoesNotWaitForAStuckLoaderCancellationCallback(
+        CancellationToken cancellationToken
+    )
     {
         await using var callback = new BlockingTestHook(TestTimeout);
         Action cancellationCallback = callback.Invoke;
@@ -1118,12 +1114,11 @@ public sealed class LoadingCacheContractTests
                 }
             }
         );
-
-        var pending = Get(cache, 1).AsTask();
+        var pending = Get(cache, 1, cancellationToken).AsTask();
         try
         {
-            await AwaitWithTestTimeout(cache.DisposeAsync().AsTask());
-            await AwaitWithTestTimeout(callback.Entered);
+            await AwaitWithTestTimeout(cache.DisposeAsync().AsTask(), cancellationToken);
+            await AwaitWithTestTimeout(callback.Entered, cancellationToken);
         }
         finally
         {
@@ -1135,7 +1130,7 @@ public sealed class LoadingCacheContractTests
                 var completion = await CaptureExceptionAsync(() =>
                     pending.WaitAsync(TestTimeout, CancellationToken.None)
                 );
-                (completion is TimeoutException).Should().BeFalse();
+                await Assert.That((completion is TimeoutException)).IsFalse();
             }
             finally
             {
@@ -1144,34 +1139,38 @@ public sealed class LoadingCacheContractTests
         }
 
         await callback.Returned.WaitAsync(TestTimeout, CancellationToken.None);
-        callback.TimedOut.Should().BeFalse();
+        await Assert.That(callback.TimedOut).IsFalse();
     }
 
     [Test]
-    public async Task SameKeyReentrancyFailsFastAndDoesNotLeaveScopePoisoned()
+    public async Task SameKeyReentrancyFailsFastAndDoesNotLeaveScopePoisoned(
+        CancellationToken cancellationToken
+    )
     {
         var loader = new SameKeyReentrantLoader();
         await using var cache = Create<int, int>(loader.LoadAsync);
         loader.Cache = cache;
-        var failure = await CaptureExceptionAsync(
-            cache.Awaiting(static current => AwaitWithTestTimeout(Get(current, 1).AsTask()))
+        var failure = await CaptureExceptionAsync(() =>
+            AwaitWithTestTimeout(Get(cache, 1, cancellationToken).AsTask(), cancellationToken)
         );
-        failure.Should().NotBeNull();
-        failure.Should().NotBeOfType<TimeoutException>();
-        (await Get(cache, 1)).Should().Be(80);
+        Assert.NotNull(failure);
+        await Assert.That<object>(failure!).IsNotTypeOf<TimeoutException>();
+        await Assert.That((await Get(cache, 1, cancellationToken))).IsEqualTo(80);
     }
 
     [Test]
-    public async Task ReentrantKToJToKCycleFailsInsteadOfDeadlocking()
+    public async Task ReentrantKToJToKCycleFailsInsteadOfDeadlocking(
+        CancellationToken cancellationToken
+    )
     {
         var loader = new CyclicReentrantLoader();
         await using var cache = Create<string, int>(loader.LoadAsync);
         loader.Cache = cache;
-        var failure = await CaptureExceptionAsync(
-            cache.Awaiting(static current => AwaitWithTestTimeout(Get(current, "K").AsTask()))
+        var failure = await CaptureExceptionAsync(() =>
+            AwaitWithTestTimeout(Get(cache, "K", cancellationToken).AsTask(), cancellationToken)
         );
-        failure.Should().NotBeNull();
-        failure.Should().NotBeOfType<TimeoutException>();
+        Assert.NotNull(failure);
+        await Assert.That<object>(failure!).IsNotTypeOf<TimeoutException>();
     }
 
     [Test]
@@ -1185,7 +1184,6 @@ public sealed class LoadingCacheContractTests
             (_, _) => throw new AssertionException("Reference sequence must not load"),
             Options(maximumSize: 64)
         );
-
         for (int step = 0; step < 2_000; step++)
         {
             string key = $"k{random.Next(32)}";
@@ -1200,17 +1198,21 @@ public sealed class LoadingCacheContractTests
                 case 1:
                     trace.Add($"{step}: Invalidate({key})");
                     bool expectedRemoved = expected.Remove(key);
-                    cache.Invalidate(key).Should().Be(expectedRemoved);
+                    await Assert.That(cache.Invalidate(key)).IsEqualTo(expectedRemoved);
                     break;
                 case 2:
                     trace.Add($"{step}: TryGet({key})");
                     bool actualFound = cache.TryGet(key, out int actualValue);
                     bool expectedFound = expected.TryGetValue(key, out int expectedValue);
-                    (actualFound == expectedFound).Should().BeTrue(Failure(seed, trace));
+                    await Assert
+                        .That((actualFound == expectedFound))
+                        .IsTrue()
+                        .Because(Failure(seed, trace));
                     if (expectedFound)
                     {
-                        actualValue.Should().Be(expectedValue);
+                        await Assert.That(actualValue).IsEqualTo(expectedValue);
                     }
+
                     break;
                 default:
                     trace.Add($"{step}: Clear()");
@@ -1239,20 +1241,28 @@ public sealed class LoadingCacheContractTests
         }
     }
 
-    private static async Task AssertRejectedWithoutHangingAsync(Func<Task> operation)
+    private static async Task AssertRejectedWithoutHangingAsync(
+        Func<Task> operation,
+        CancellationToken cancellationToken
+    )
     {
-        var failure = await CaptureExceptionAsync(() => AwaitWithTestTimeout(operation()));
-        failure.Should().NotBeNull();
-        (failure is TimeoutException)
-            .Should()
-            .BeFalse("Rejected operation hung instead of reporting overload.");
+        var failure = await CaptureExceptionAsync(() =>
+            AwaitWithTestTimeout(operation(), cancellationToken)
+        );
+        Assert.NotNull(failure);
+        await Assert
+            .That((failure is TimeoutException))
+            .IsFalse()
+            .Because("Rejected operation hung instead of reporting overload.");
     }
 
-    private static Task AwaitWithTestTimeout(Task task) =>
-        task.WaitAsync(TestTimeout, TestContext.CurrentContext.CancellationToken);
+    private static Task AwaitWithTestTimeout(Task task, CancellationToken cancellationToken) =>
+        task.WaitAsync(TestTimeout, cancellationToken);
 
-    private static Task<T> AwaitWithTestTimeout<T>(Task<T> task) =>
-        task.WaitAsync(TestTimeout, TestContext.CurrentContext.CancellationToken);
+    private static Task<T> AwaitWithTestTimeout<T>(
+        Task<T> task,
+        CancellationToken cancellationToken
+    ) => task.WaitAsync(TestTimeout, cancellationToken);
 
     private static async Task ObserveForCleanup(Task task)
     {
@@ -1296,13 +1306,6 @@ public sealed class LoadingCacheContractTests
     private static void AssertInvariants<TKey, TValue>(IAsyncLoadingCache<TKey, TValue> cache)
         where TKey : notnull
         where TValue : notnull => ((AsyncLoadingCache<TKey, TValue>)cache).AssertInvariants();
-
-    private static ValueTask<TValue> Get<TKey, TValue>(
-        IAsyncLoadingCache<TKey, TValue> cache,
-        TKey key
-    )
-        where TKey : notnull
-        where TValue : notnull => cache.GetAsync(key, TestContext.CurrentContext.CancellationToken);
 
     private static ValueTask<TValue> Get<TKey, TValue>(
         IAsyncLoadingCache<TKey, TValue> cache,
@@ -1401,7 +1404,6 @@ public sealed class LoadingCacheContractTests
     {
         private long _timestamp;
         private DateTimeOffset _wallClock = DateTimeOffset.UnixEpoch;
-
         public override long TimestampFrequency => Stopwatch.Frequency;
 
         public override long GetTimestamp() => Volatile.Read(ref _timestamp);

@@ -1,14 +1,11 @@
-using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class NestedEvictionScopeTests
 {
     [Test]
-    public void NestedExpiredLookupCompletesItsNotificationBeforeStartingTheNewLoader()
+    public async Task NestedExpiredLookupCompletesItsNotificationBeforeStartingTheNewLoader()
     {
         var time = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
         int notifications = 0;
@@ -36,8 +33,8 @@ public sealed class NestedEvictionScopeTests
                     }
                 )
         );
-        value.Should().Be(2);
-        notifiedBeforeNestedLoad.Should().BeTrue();
-        notifications.Should().Be(1);
+        await Assert.That(value).IsEqualTo(2);
+        await Assert.That(notifiedBeforeNestedLoad).IsTrue();
+        await Assert.That(notifications).IsEqualTo(1);
     }
 }

@@ -1,80 +1,93 @@
-using FluentAssertions;
 using LoadingCache.Policy;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class PolicyDequeRegressionTests
 {
-    [TestCase(0L)]
-    [TestCase(1L)]
-    [Parallelizable(ParallelScope.Self)]
-    public void WindowCountPressureUsesRecencyIncludingZeroWeight(long weight)
+    [Test]
+    [Arguments(0L)]
+    [Arguments(1L)]
+    public async Task WindowCountPressureUsesRecencyIncludingZeroWeight(long weight)
     {
         WindowTinyLfuPolicy<int> policy = new(1_000, seed: 7, adaptive: false);
         PolicyNode<int> first = Node(1, weight);
         PolicyNode<int> second = Node(2, weight);
         PolicyNode<int> third = Node(3, weight);
-        policy.Add(first).Should().BeEmpty();
-        policy.Add(second).Should().BeEmpty();
-        policy.Add(third).Should().BeEmpty();
-
-        policy.RecordAccess(first).Should().BeTrue();
-        policy.Snapshot(hottest: false, limit: 4).Should().Equal(second, third, first);
+        await Assert.That(policy.Add(first)).IsEmpty();
+        await Assert.That(policy.Add(second)).IsEmpty();
+        await Assert.That(policy.Add(third)).IsEmpty();
+        await Assert.That(policy.RecordAccess(first)).IsTrue();
+        await Assert
+            .That(policy.Snapshot(hottest: false, limit: 4))
+            .IsEquivalentTo(
+                [second, third, first],
+                TUnit.Assertions.Enums.CollectionOrdering.Matching
+            );
         AssertRepresentation(policy);
-
-        policy.SetMaximumCount(2).Should().Equal(second);
-        policy.Snapshot(hottest: false, limit: 4).Should().Equal(third, first);
-        policy.WeightedSize.Should().Be(weight * 2);
+        await Assert
+            .That(policy.SetMaximumCount(2))
+            .IsEquivalentTo([second], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert
+            .That(policy.Snapshot(hottest: false, limit: 4))
+            .IsEquivalentTo([third, first], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(policy.WeightedSize).IsEqualTo(weight * 2);
         AssertRetired(second);
         AssertRepresentation(policy);
     }
 
     [Test]
-    [Parallelizable(ParallelScope.Self)]
-    public void ProtectedReorderDemotionAndShrinkKeepExactVictimOrder()
+    public async Task ProtectedReorderDemotionAndShrinkKeepExactVictimOrder()
     {
         WindowTinyLfuPolicy<int> policy = new(5, seed: 7, adaptive: false);
         PolicyNode<int>[] nodes = [Node(1), Node(2), Node(3), Node(4), Node(5)];
         foreach (PolicyNode<int> node in nodes)
         {
-            policy.Add(node).Should().BeEmpty();
+            await Assert.That(policy.Add(node)).IsEmpty();
         }
 
-        policy.RecordAccess(nodes[0]).Should().BeTrue();
-        policy.RecordAccess(nodes[1]).Should().BeTrue();
-        policy.RecordAccess(nodes[2]).Should().BeTrue();
-        policy.RecordAccess(nodes[0]).Should().BeTrue();
-        policy.RecordAccess(nodes[3]).Should().BeTrue();
-
-        nodes[1].Queue.Should().Be(PolicyQueue.Probation);
-        policy
-            .Snapshot(hottest: false, limit: 5)
-            .Should()
-            .Equal(nodes[1], nodes[4], nodes[2], nodes[0], nodes[3]);
+        await Assert.That(policy.RecordAccess(nodes[0])).IsTrue();
+        await Assert.That(policy.RecordAccess(nodes[1])).IsTrue();
+        await Assert.That(policy.RecordAccess(nodes[2])).IsTrue();
+        await Assert.That(policy.RecordAccess(nodes[0])).IsTrue();
+        await Assert.That(policy.RecordAccess(nodes[3])).IsTrue();
+        await Assert.That(nodes[1].Queue).IsEqualTo(PolicyQueue.Probation);
+        await Assert
+            .That(policy.Snapshot(hottest: false, limit: 5))
+            .IsEquivalentTo(
+                [nodes[1], nodes[4], nodes[2], nodes[0], nodes[3]],
+                TUnit.Assertions.Enums.CollectionOrdering.Matching
+            );
         AssertRepresentation(policy);
-
-        policy.SetMaximumCount(3).Should().Equal(nodes[1], nodes[2]);
-        policy.SetMaximum(2).Should().Equal(nodes[0]);
-        policy.Snapshot(hottest: false, limit: 5).Should().Equal(nodes[4], nodes[3]);
+        await Assert
+            .That(policy.SetMaximumCount(3))
+            .IsEquivalentTo(
+                [nodes[1], nodes[2]],
+                TUnit.Assertions.Enums.CollectionOrdering.Matching
+            );
+        await Assert
+            .That(policy.SetMaximum(2))
+            .IsEquivalentTo([nodes[0]], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert
+            .That(policy.Snapshot(hottest: false, limit: 5))
+            .IsEquivalentTo(
+                [nodes[4], nodes[3]],
+                TUnit.Assertions.Enums.CollectionOrdering.Matching
+            );
         AssertRepresentation(policy);
-
         foreach (PolicyNode<int> node in nodes)
         {
             policy.Remove(node);
-            policy.RecordAccess(node).Should().BeFalse();
+            await Assert.That(policy.RecordAccess(node)).IsFalse();
             AssertRetired(node);
         }
 
-        policy.ResidentCount.Should().Be(0);
-        policy.WeightedSize.Should().Be(0);
+        await Assert.That(policy.ResidentCount).IsEqualTo(0);
+        await Assert.That(policy.WeightedSize).IsEqualTo(0);
         AssertRepresentation(policy);
     }
 
     [Test]
-    [Parallelizable(ParallelScope.Self)]
-    public void WeightPressureSkipsProtectedZeroAfterWeightChangesAndReorder()
+    public async Task WeightPressureSkipsProtectedZeroAfterWeightChangesAndReorder()
     {
         WindowTinyLfuPolicy<int> policy = new(5, seed: 7, adaptive: false);
         PolicyNode<int> zero = Node(1);
@@ -83,37 +96,44 @@ public sealed class PolicyDequeRegressionTests
         policy.Add(zero);
         policy.Add(positive);
         policy.Add(window);
-        policy.RecordAccess(zero).Should().BeTrue();
-        policy.RecordAccess(positive).Should().BeTrue();
-        policy.UpdateWeight(positive, 0).Should().BeEmpty();
-        policy.UpdateWeight(positive, 1).Should().BeEmpty();
-        policy.RecordAccess(zero).Should().BeTrue();
-        policy.UpdateWeight(zero, 0).Should().BeEmpty();
-        policy.RecordAccess(positive).Should().BeTrue();
-        policy.Remove(window).Should().Equal(window);
-        policy.Snapshot(hottest: false, limit: 3).Should().Equal(zero, positive);
+        await Assert.That(policy.RecordAccess(zero)).IsTrue();
+        await Assert.That(policy.RecordAccess(positive)).IsTrue();
+        await Assert.That(policy.UpdateWeight(positive, 0)).IsEmpty();
+        await Assert.That(policy.UpdateWeight(positive, 1)).IsEmpty();
+        await Assert.That(policy.RecordAccess(zero)).IsTrue();
+        await Assert.That(policy.UpdateWeight(zero, 0)).IsEmpty();
+        await Assert.That(policy.RecordAccess(positive)).IsTrue();
+        await Assert
+            .That(policy.Remove(window))
+            .IsEquivalentTo([window], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert
+            .That(policy.Snapshot(hottest: false, limit: 3))
+            .IsEquivalentTo([zero, positive], TUnit.Assertions.Enums.CollectionOrdering.Matching);
         AssertRepresentation(policy);
-
         PolicyNode<int> incoming = Node(4, 5);
         for (int i = 0; i < 5; i++)
         {
             policy.RecordMiss(incoming.Hash);
         }
 
-        policy.Frequency(incoming.Hash).Should().BeGreaterThan(policy.Frequency(positive.Hash));
-        policy.Add(incoming).Should().Equal(positive);
-        zero.IsAlive.Should().BeTrue();
-        zero.Queue.Should().Be(PolicyQueue.Protected);
-        incoming.IsAlive.Should().BeTrue();
-        policy.WeightedSize.Should().Be(5);
+        await Assert
+            .That(policy.Frequency(incoming.Hash))
+            .IsGreaterThan(policy.Frequency(positive.Hash));
+        await Assert
+            .That(policy.Add(incoming))
+            .IsEquivalentTo([positive], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(zero.IsAlive).IsTrue();
+        await Assert.That(zero.Queue).IsEqualTo(PolicyQueue.Protected);
+        await Assert.That(incoming.IsAlive).IsTrue();
+        await Assert.That(policy.WeightedSize).IsEqualTo(5);
         AssertRetired(positive);
         AssertRepresentation(policy);
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    [Parallelizable(ParallelScope.Self)]
-    public void OverflowSelectionExcludesPriorVictimsAndSkipsZeroWeight(bool protectedQueue)
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task OverflowSelectionExcludesPriorVictimsAndSkipsZeroWeight(bool protectedQueue)
     {
         const long quarter = long.MaxValue / 4;
         WindowTinyLfuPolicy<int> policy = new(
@@ -129,11 +149,11 @@ public sealed class PolicyDequeRegressionTests
         {
             if (protectedQueue)
             {
-                policy.Add(node).Should().BeEmpty();
+                await Assert.That(policy.Add(node)).IsEmpty();
             }
             else
             {
-                policy.AddDeferred(node).Should().BeEmpty();
+                await Assert.That(policy.AddDeferred(node)).IsEmpty();
             }
         }
 
@@ -141,23 +161,24 @@ public sealed class PolicyDequeRegressionTests
         {
             foreach (PolicyNode<int> node in residents)
             {
-                policy.RecordAccess(node).Should().BeTrue();
+                await Assert.That(policy.RecordAccess(node)).IsTrue();
             }
 
-            policy.UpdateWeight(zero, 0).Should().BeEmpty();
-            policy.RecordAccess(positives[0]).Should().BeTrue();
-            policy.RecordAccess(positives[1]).Should().BeTrue();
-            policy.RecordAccess(positives[2]).Should().BeTrue();
+            await Assert.That(policy.UpdateWeight(zero, 0)).IsEmpty();
+            await Assert.That(policy.RecordAccess(positives[0])).IsTrue();
+            await Assert.That(policy.RecordAccess(positives[1])).IsTrue();
+            await Assert.That(policy.RecordAccess(positives[2])).IsTrue();
         }
 
-        residents
-            .Should()
-            .OnlyContain(node =>
+        await Assert
+            .That(residents)
+            .All(node =>
                 node.Queue == (protectedQueue ? PolicyQueue.Protected : PolicyQueue.Window)
             );
-        policy.Snapshot(hottest: false, limit: 5).Should().Equal(residents);
+        await Assert
+            .That(policy.Snapshot(hottest: false, limit: 5))
+            .IsEquivalentTo(residents, TUnit.Assertions.Enums.CollectionOrdering.Matching);
         AssertRepresentation(policy);
-
         PolicyNode<int> incoming = Node(5, long.MaxValue / 2 + 3);
         for (int i = 0; i < 15; i++)
         {
@@ -166,24 +187,33 @@ public sealed class PolicyDequeRegressionTests
 
         foreach (PolicyNode<int> node in positives)
         {
-            policy.Frequency(incoming.Hash).Should().BeGreaterThan(policy.Frequency(node.Hash));
+            await Assert
+                .That(policy.Frequency(incoming.Hash))
+                .IsGreaterThan(policy.Frequency(node.Hash));
         }
 
-        policy.AddDeferred(incoming).Should().Equal(positives[0], positives[1]);
-        zero.IsAlive.Should().BeTrue();
-        positives[2].IsAlive.Should().BeTrue();
-        incoming.IsAlive.Should().BeTrue();
-        policy.ResidentCount.Should().Be(3);
-        policy.WeightedSize.Should().Be(quarter + incoming.Weight);
+        await Assert
+            .That(policy.AddDeferred(incoming))
+            .IsEquivalentTo(
+                [positives[0], positives[1]],
+                TUnit.Assertions.Enums.CollectionOrdering.Matching
+            );
+        await Assert.That(zero.IsAlive).IsTrue();
+        await Assert.That(positives[2].IsAlive).IsTrue();
+        await Assert.That(incoming.IsAlive).IsTrue();
+        await Assert.That(policy.ResidentCount).IsEqualTo(3);
+        await Assert.That(policy.WeightedSize).IsEqualTo(quarter + incoming.Weight);
         AssertRetired(positives[0]);
         AssertRetired(positives[1]);
         AssertRepresentation(policy);
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    [Parallelizable(ParallelScope.Self)]
-    public void ClearedProbationCandidateKeepsEligibilityOrderIndependentOfPrimary(bool countBound)
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task ClearedProbationCandidateKeepsEligibilityOrderIndependentOfPrimary(
+        bool countBound
+    )
     {
         WindowTinyLfuPolicy<int> policy = new(
             2,
@@ -198,64 +228,79 @@ public sealed class PolicyDequeRegressionTests
         policy.Add(first);
         policy.Add(cleared);
         policy.AddDeferred(removed);
-        policy.Maintain(1).Should().BeEmpty();
-        cleared.IsCandidate.Should().BeTrue();
-        policy.RecordAccess(first).Should().BeTrue();
-        policy.Remove(removed).Should().Equal(removed);
-        policy.Maintain(1).Should().BeEmpty();
-
-        policy.Snapshot(hottest: false, limit: 3).Should().Equal(cleared, first);
-        cleared.IsCandidate.Should().BeFalse();
-        first.EligibleNext.Should().BeSameAs(cleared);
-        first.EligiblePositiveNext.Should().BeSameAs(cleared);
+        await Assert.That(policy.Maintain(1)).IsEmpty();
+        await Assert.That(cleared.IsCandidate).IsTrue();
+        await Assert.That(policy.RecordAccess(first)).IsTrue();
+        await Assert
+            .That(policy.Remove(removed))
+            .IsEquivalentTo([removed], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(policy.Maintain(1)).IsEmpty();
+        await Assert
+            .That(policy.Snapshot(hottest: false, limit: 3))
+            .IsEquivalentTo([cleared, first], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(cleared.IsCandidate).IsFalse();
+        await Assert.That(ReferenceEquals(first.EligibleNext, cleared)).IsTrue();
+        await Assert.That(ReferenceEquals(first.EligiblePositiveNext, cleared)).IsTrue();
         AssertRepresentation(policy);
-
-        policy.AddDeferred(incoming).Should().BeEmpty();
-        policy.Maintain().Should().Equal(first);
-        policy.Snapshot(hottest: false, limit: 3).Should().Equal(cleared, incoming);
+        await Assert.That(policy.AddDeferred(incoming)).IsEmpty();
+        await Assert
+            .That(policy.Maintain())
+            .IsEquivalentTo([first], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert
+            .That(policy.Snapshot(hottest: false, limit: 3))
+            .IsEquivalentTo(
+                [cleared, incoming],
+                TUnit.Assertions.Enums.CollectionOrdering.Matching
+            );
         AssertRetired(first);
         AssertRepresentation(policy);
     }
 
     [Test]
-    [Parallelizable(ParallelScope.Self)]
-    public void BudgetedTransfersAndCandidateClearingDoNotConsumeExtraWork()
+    public async Task BudgetedTransfersAndCandidateClearingDoNotConsumeExtraWork()
     {
         WindowTinyLfuPolicy<int> policy = new(3, seed: 7, adaptive: false, maximumCount: 3);
         // The same hash keeps the admission decision a deterministic cold tie.
         PolicyNode<int>[] nodes = [new(1, 1, 7), new(2, 1, 7), new(3, 1, 7), new(4, 1, 7)];
         foreach (PolicyNode<int> node in nodes)
         {
-            policy.AddDeferred(node).Should().BeEmpty();
+            await Assert.That(policy.AddDeferred(node)).IsEmpty();
         }
 
-        policy.Maintain(0).Should().BeEmpty();
-        nodes.Should().OnlyContain(node => node.Queue == PolicyQueue.Window);
+        await Assert.That(policy.Maintain(0)).IsEmpty();
+        await Assert.That(nodes).All(node => node.Queue == PolicyQueue.Window);
         for (int i = 0; i < 3; i++)
         {
-            policy.Maintain(1).Should().BeEmpty();
-            nodes[i].IsCandidate.Should().BeTrue();
-            nodes[i + 1].Queue.Should().Be(PolicyQueue.Window);
-            policy.ResidentCount.Should().Be(4);
+            await Assert.That(policy.Maintain(1)).IsEmpty();
+            await Assert.That(nodes[i].IsCandidate).IsTrue();
+            await Assert.That(nodes[i + 1].Queue).IsEqualTo(PolicyQueue.Window);
+            await Assert.That(policy.ResidentCount).IsEqualTo(4);
         }
 
-        policy.Maintain(1).Should().Equal(nodes[0]);
-        nodes[1].IsCandidate.Should().BeTrue();
-        nodes[2].IsCandidate.Should().BeTrue();
-        policy.Maintain(1).Should().BeEmpty();
-        nodes[1].IsCandidate.Should().BeFalse();
-        nodes[2].IsCandidate.Should().BeTrue();
-        policy.Maintain(1).Should().BeEmpty();
-        nodes[2].IsCandidate.Should().BeFalse();
-        policy.Snapshot(hottest: false, limit: 4).Should().Equal(nodes[1], nodes[2], nodes[3]);
+        await Assert
+            .That(policy.Maintain(1))
+            .IsEquivalentTo([nodes[0]], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(nodes[1].IsCandidate).IsTrue();
+        await Assert.That(nodes[2].IsCandidate).IsTrue();
+        await Assert.That(policy.Maintain(1)).IsEmpty();
+        await Assert.That(nodes[1].IsCandidate).IsFalse();
+        await Assert.That(nodes[2].IsCandidate).IsTrue();
+        await Assert.That(policy.Maintain(1)).IsEmpty();
+        await Assert.That(nodes[2].IsCandidate).IsFalse();
+        await Assert
+            .That(policy.Snapshot(hottest: false, limit: 4))
+            .IsEquivalentTo(
+                [nodes[1], nodes[2], nodes[3]],
+                TUnit.Assertions.Enums.CollectionOrdering.Matching
+            );
         AssertRetired(nodes[0]);
         AssertRepresentation(policy);
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    [Parallelizable(ParallelScope.Self)]
-    public void ClearRetiresEntriesAndRejectsOldGenerationReads(bool queueReadBeforeClear)
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task ClearRetiresEntriesAndRejectsOldGenerationReads(bool queueReadBeforeClear)
     {
         using WindowTinyLfuEnginePolicy policy = new(
             maximum: 5,
@@ -282,10 +327,9 @@ public sealed class PolicyDequeRegressionTests
         policy.OnAccess(tokens[0]);
         policy.CleanUp();
         PolicyNode<object>[] oldNodes = [.. tokens.Select(token => token.Node!)];
-        oldNodes
-            .Select(node => node.Queue)
-            .Should()
-            .BeEquivalentTo([PolicyQueue.Protected, PolicyQueue.Probation, PolicyQueue.Window]);
+        await Assert
+            .That(oldNodes.Select(node => node.Queue))
+            .IsEquivalentTo([PolicyQueue.Protected, PolicyQueue.Probation, PolicyQueue.Window]);
         if (queueReadBeforeClear)
         {
             // Clear drains this read first, promoting the last Probation entry.
@@ -294,8 +338,8 @@ public sealed class PolicyDequeRegressionTests
         }
 
         policy.Clear();
-        policy.Snapshot(hottest: false, limit: 5).Should().BeEmpty();
-        tokens.Should().OnlyContain(token => token.Node == null);
+        await Assert.That(policy.Snapshot(hottest: false, limit: 5)).IsEmpty();
+        await Assert.That(tokens).All(token => token.Node == null);
         foreach (PolicyNode<object> node in oldNodes)
         {
             AssertRetired(node);
@@ -309,8 +353,10 @@ public sealed class PolicyDequeRegressionTests
         }
 
         policy.CleanUp();
-        policy.Snapshot(hottest: false, limit: 5).Should().Equal(fresh.Entry);
-        policy.GetReadBufferStatistics().Queued.Should().Be(0);
+        await Assert
+            .That(policy.Snapshot(hottest: false, limit: 5))
+            .IsEquivalentTo([fresh.Entry], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(policy.GetReadBufferStatistics().Queued).IsEqualTo(0);
     }
 
     private static PolicyNode<int> Node(int value, long weight = 1) =>
@@ -323,43 +369,86 @@ public sealed class PolicyDequeRegressionTests
         {
             if (node.IsCandidate)
             {
-                node.Queue.Should().Be(PolicyQueue.Probation);
+                if ((node.Queue) != (PolicyQueue.Probation))
+                    Assert.Fail("Expected node.Queue to equal (PolicyQueue.Probation).");
             }
 
-            node.PositivePrevious?.PositiveNext.Should().BeSameAs(node);
-            node.PositiveNext?.PositivePrevious.Should().BeSameAs(node);
-            node.EligiblePrevious?.EligibleNext.Should().BeSameAs(node);
-            node.EligibleNext?.EligiblePrevious.Should().BeSameAs(node);
-            node.EligiblePositivePrevious?.EligiblePositiveNext.Should().BeSameAs(node);
-            node.EligiblePositiveNext?.EligiblePositivePrevious.Should().BeSameAs(node);
-
+            if (
+                node.PositivePrevious is { } adjacentPositivePrevious
+                && !ReferenceEquals(adjacentPositivePrevious.PositiveNext, node)
+            )
+                Assert.Fail("Broken reciprocal policy link.");
+            if (
+                node.PositiveNext is { } adjacentPositiveNext
+                && !ReferenceEquals(adjacentPositiveNext.PositivePrevious, node)
+            )
+                Assert.Fail("Broken reciprocal policy link.");
+            if (
+                node.EligiblePrevious is { } adjacentEligiblePrevious
+                && !ReferenceEquals(adjacentEligiblePrevious.EligibleNext, node)
+            )
+                Assert.Fail("Broken reciprocal policy link.");
+            if (
+                node.EligibleNext is { } adjacentEligibleNext
+                && !ReferenceEquals(adjacentEligibleNext.EligiblePrevious, node)
+            )
+                Assert.Fail("Broken reciprocal policy link.");
+            if (
+                node.EligiblePositivePrevious is { } adjacentEligiblePositivePrevious
+                && !ReferenceEquals(adjacentEligiblePositivePrevious.EligiblePositiveNext, node)
+            )
+                Assert.Fail("Broken reciprocal policy link.");
+            if (
+                node.EligiblePositiveNext is { } adjacentEligiblePositiveNext
+                && !ReferenceEquals(adjacentEligiblePositiveNext.EligiblePositivePrevious, node)
+            )
+                Assert.Fail("Broken reciprocal policy link.");
             if (node.Queue == PolicyQueue.Probation)
             {
                 continue;
             }
 
-            node.EligiblePrevious.Should().BeSameAs(node.Previous);
-            node.EligibleNext.Should().BeSameAs(node.Next);
-            node.EligiblePositivePrevious.Should().BeSameAs(node.PositivePrevious);
-            node.EligiblePositiveNext.Should().BeSameAs(node.PositiveNext);
+            if (!(ReferenceEquals(node.EligiblePrevious, node.Previous)))
+                Assert.Fail("Expected node.EligiblePrevious to reference (node.Previous).");
+            if (!(ReferenceEquals(node.EligibleNext, node.Next)))
+                Assert.Fail("Expected node.EligibleNext to reference (node.Next).");
+            if (!(ReferenceEquals(node.EligiblePositivePrevious, node.PositivePrevious)))
+                Assert.Fail(
+                    "Expected node.EligiblePositivePrevious to reference (node.PositivePrevious)."
+                );
+            if (!(ReferenceEquals(node.EligiblePositiveNext, node.PositiveNext)))
+                Assert.Fail("Expected node.EligiblePositiveNext to reference (node.PositiveNext).");
         }
     }
 
     private static void AssertRetired<T>(PolicyNode<T> node)
         where T : notnull
     {
-        node.IsAlive.Should().BeFalse();
-        node.IsCandidate.Should().BeFalse();
-        node.Queue.Should().Be(PolicyQueue.None);
-        node.Previous.Should().BeNull();
-        node.Next.Should().BeNull();
-        node.PositivePrevious.Should().BeNull();
-        node.PositiveNext.Should().BeNull();
-        node.EligiblePrevious.Should().BeNull();
-        node.EligibleNext.Should().BeNull();
-        node.EligiblePositivePrevious.Should().BeNull();
-        node.EligiblePositiveNext.Should().BeNull();
-        node.CandidatePrevious.Should().BeNull();
-        node.CandidateNext.Should().BeNull();
+        if (node.IsAlive)
+            Assert.Fail("Expected node.IsAlive to be false ().");
+        if (node.IsCandidate)
+            Assert.Fail("Expected node.IsCandidate to be false ().");
+        if ((node.Queue) != (PolicyQueue.None))
+            Assert.Fail("Expected node.Queue to equal (PolicyQueue.None).");
+        if (!((node.Previous) is null))
+            Assert.Fail("Expected node.Previous to be null ().");
+        if (!((node.Next) is null))
+            Assert.Fail("Expected node.Next to be null ().");
+        if (!((node.PositivePrevious) is null))
+            Assert.Fail("Expected node.PositivePrevious to be null ().");
+        if (!((node.PositiveNext) is null))
+            Assert.Fail("Expected node.PositiveNext to be null ().");
+        if (!((node.EligiblePrevious) is null))
+            Assert.Fail("Expected node.EligiblePrevious to be null ().");
+        if (!((node.EligibleNext) is null))
+            Assert.Fail("Expected node.EligibleNext to be null ().");
+        if (!((node.EligiblePositivePrevious) is null))
+            Assert.Fail("Expected node.EligiblePositivePrevious to be null ().");
+        if (!((node.EligiblePositiveNext) is null))
+            Assert.Fail("Expected node.EligiblePositiveNext to be null ().");
+        if (!((node.CandidatePrevious) is null))
+            Assert.Fail("Expected node.CandidatePrevious to be null ().");
+        if (!((node.CandidateNext) is null))
+            Assert.Fail("Expected node.CandidateNext to be null ().");
     }
 }

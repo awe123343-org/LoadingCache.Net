@@ -1,19 +1,16 @@
 using System.Collections.Concurrent;
-using FluentAssertions;
 using JetBrains.Annotations;
 using LoadingCache.Maintenance;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class MaintenanceTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
     private static readonly AsyncLocal<string?> Context = new();
 
     [Test]
-    public void ReadBufferRequiresPositivePowerOfTwoStripesAndPositiveCapacity()
+    public async Task ReadBufferRequiresPositivePowerOfTwoStripesAndPositiveCapacity()
     {
         Action zeroStripes = () =>
         {
@@ -27,70 +24,66 @@ public sealed class MaintenanceTests
         {
             using StripedReadBuffer<int> _ = new(2, 0);
         };
-
-        zeroStripes.Should().Throw<ArgumentOutOfRangeException>();
-        nonPowerOfTwoStripes.Should().Throw<ArgumentException>();
-        zeroCapacity.Should().Throw<ArgumentOutOfRangeException>();
+        await Assert.That(zeroStripes).Throws<ArgumentOutOfRangeException>();
+        await Assert.That(nonPowerOfTwoStripes).Throws<ArgumentException>();
+        await Assert.That(zeroCapacity).Throws<ArgumentOutOfRangeException>();
     }
 
     [Test]
-    public void ReadBufferPreservesExactIdentityAndFifoWithinOneStripe()
+    public async Task ReadBufferPreservesExactIdentityAndFifoWithinOneStripe()
     {
         using StripedReadBuffer<ReadEvent> buffer = new(1, 4);
         ReadEvent first = new(1, 1);
         ReadEvent second = new(1, 2);
         ReadEvent third = new(1, 3);
-
-        buffer.TryEnqueue(first).Should().BeTrue();
-        buffer.TryEnqueue(second).Should().BeTrue();
-        buffer.TryEnqueue(third).Should().BeTrue();
-
-        buffer.TryRead(out ReadEvent observedFirst).Should().BeTrue();
-        buffer.TryRead(out ReadEvent observedSecond).Should().BeTrue();
-        buffer.TryRead(out ReadEvent observedThird).Should().BeTrue();
-        buffer.TryRead(out _).Should().BeFalse();
-
-        observedFirst.Should().BeSameAs(first);
-        observedSecond.Should().BeSameAs(second);
-        observedThird.Should().BeSameAs(third);
+        await Assert.That(buffer.TryEnqueue(first)).IsTrue();
+        await Assert.That(buffer.TryEnqueue(second)).IsTrue();
+        await Assert.That(buffer.TryEnqueue(third)).IsTrue();
+        await Assert.That(buffer.TryRead(out ReadEvent observedFirst)).IsTrue();
+        await Assert.That(buffer.TryRead(out ReadEvent observedSecond)).IsTrue();
+        await Assert.That(buffer.TryRead(out ReadEvent observedThird)).IsTrue();
+        await Assert.That(buffer.TryRead(out _)).IsFalse();
+        await Assert.That(ReferenceEquals(observedFirst, first)).IsTrue();
+        await Assert.That(ReferenceEquals(observedSecond, second)).IsTrue();
+        await Assert.That(ReferenceEquals(observedThird, third)).IsTrue();
         ReadBufferStatistics statistics = buffer.GetStatistics();
-        statistics.Enqueued.Should().Be(3);
-        statistics.Dequeued.Should().Be(3);
-        statistics.Queued.Should().Be(0);
-        statistics.Dropped.Should().Be(0);
+        await Assert.That(statistics.Enqueued).IsEqualTo(3);
+        await Assert.That(statistics.Dequeued).IsEqualTo(3);
+        await Assert.That(statistics.Queued).IsEqualTo(0);
+        await Assert.That(statistics.Dropped).IsEqualTo(0);
     }
 
     [Test]
-    public void ReadBufferSupportsBatchDrainAndPublishedProbe()
+    public async Task ReadBufferSupportsBatchDrainAndPublishedProbe()
     {
         using StripedReadBuffer<int> buffer = new(1, 4);
-        buffer.HasPublished.Should().BeFalse();
-
-        buffer.TryEnqueue(1).Should().BeTrue();
-        buffer.TryEnqueue(2).Should().BeTrue();
-        buffer.TryEnqueue(3).Should().BeTrue();
-        buffer.HasPublished.Should().BeTrue();
-
+        await Assert.That(buffer.HasPublished).IsFalse();
+        await Assert.That(buffer.TryEnqueue(1)).IsTrue();
+        await Assert.That(buffer.TryEnqueue(2)).IsTrue();
+        await Assert.That(buffer.TryEnqueue(3)).IsTrue();
+        await Assert.That(buffer.HasPublished).IsTrue();
         List<int> observed = [];
-        buffer.DrainTo(observed.Add, budget: 2).Should().Be(2);
-        observed.Should().Equal(1, 2);
-        buffer.HasPublished.Should().BeTrue();
-
-        buffer.DrainTo(observed.Add, budget: 2).Should().Be(1);
-        observed.Should().Equal(1, 2, 3);
-        buffer.HasPublished.Should().BeFalse();
+        await Assert.That(buffer.DrainTo(observed.Add, budget: 2)).IsEqualTo(2);
+        await Assert
+            .That(observed)
+            .IsEquivalentTo([1, 2], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(buffer.HasPublished).IsTrue();
+        await Assert.That(buffer.DrainTo(observed.Add, budget: 2)).IsEqualTo(1);
+        await Assert
+            .That(observed)
+            .IsEquivalentTo([1, 2, 3], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(buffer.HasPublished).IsFalse();
     }
 
     [Test]
-    public void ReadBufferUsesPublicationSequenceForNullValues()
+    public async Task ReadBufferUsesPublicationSequenceForNullValues()
     {
         using StripedReadBuffer<string?> buffer = new(1, 2);
-
-        buffer.TryEnqueue(null).Should().BeTrue();
-        buffer.TryRead(out string? observed).Should().BeTrue();
-        observed.Should().BeNull();
-        buffer.TryRead(out _).Should().BeFalse();
-        buffer.GetStatistics().Queued.Should().Be(0);
+        await Assert.That(buffer.TryEnqueue(null)).IsTrue();
+        await Assert.That(buffer.TryRead(out string? observed)).IsTrue();
+        await Assert.That((observed) is null).IsTrue();
+        await Assert.That(buffer.TryRead(out _)).IsFalse();
+        await Assert.That(buffer.GetStatistics().Queued).IsEqualTo(0);
     }
 
     [Test]
@@ -98,28 +91,25 @@ public sealed class MaintenanceTests
     {
         StripedReadBuffer<int> buffer = new(1, 4);
         PublishGate gate = new();
-        buffer.TryEnqueue(0).Should().BeTrue();
+        await Assert.That(buffer.TryEnqueue(0)).IsTrue();
         buffer.SetHooksForTesting(beforeReserve: null, beforePublish: gate.BeforePublish);
-
         Task<bool> producer = StartEnqueue(buffer, 1);
         Task<bool>? laterProducer = null;
         try
         {
-            gate.Entered.Wait(TestTimeout).Should().BeTrue();
-            buffer.TryRead(out int first).Should().BeTrue();
-            first.Should().Be(0);
-
+            await Assert.That(gate.Entered.Wait(TestTimeout)).IsTrue();
+            await Assert.That(buffer.TryRead(out int first)).IsTrue();
+            await Assert.That(first).IsEqualTo(0);
             laterProducer = StartEnqueue(buffer, 2);
-            (await laterProducer.WaitAsync(TestTimeout)).Should().BeTrue();
-            buffer.TryRead(out _).Should().BeFalse();
-            buffer.HasPublished.Should().BeFalse();
-
+            await Assert.That((await laterProducer.WaitAsync(TestTimeout))).IsTrue();
+            await Assert.That(buffer.TryRead(out _)).IsFalse();
+            await Assert.That(buffer.HasPublished).IsFalse();
             gate.Release.Set();
-            (await producer.WaitAsync(TestTimeout)).Should().BeTrue();
-            buffer.TryRead(out int second).Should().BeTrue();
-            second.Should().Be(1);
-            buffer.TryRead(out int third).Should().BeTrue();
-            third.Should().Be(2);
+            await Assert.That((await producer.WaitAsync(TestTimeout))).IsTrue();
+            await Assert.That(buffer.TryRead(out int second)).IsTrue();
+            await Assert.That(second).IsEqualTo(1);
+            await Assert.That(buffer.TryRead(out int third)).IsTrue();
+            await Assert.That(third).IsEqualTo(2);
         }
         finally
         {
@@ -146,18 +136,18 @@ public sealed class MaintenanceTests
     {
         StripedReadBuffer<int> buffer = new(1, 8);
         ContendedReserveGate gate = new(2);
-        buffer.TryEnqueue(0).Should().BeTrue();
+        await Assert.That(buffer.TryEnqueue(0)).IsTrue();
         buffer.SetHooksForTesting(beforeReserve: gate.BeforeReserve, beforePublish: null);
-
         Task<bool> first = StartEnqueue(buffer, 1);
         Task<bool> second = StartEnqueue(buffer, 2);
         try
         {
-            (await Task.WhenAll(first, second).WaitAsync(TestTimeout)).Should().Equal(true, true);
-
+            await Assert
+                .That((await Task.WhenAll(first, second).WaitAsync(TestTimeout)))
+                .IsEquivalentTo([true, true], TUnit.Assertions.Enums.CollectionOrdering.Matching);
             ReadBufferStatistics statistics = buffer.GetStatistics();
-            statistics.DroppedFailed.Should().Be(0);
-            statistics.Dropped.Should().Be(0);
+            await Assert.That(statistics.DroppedFailed).IsEqualTo(0);
+            await Assert.That(statistics.Dropped).IsEqualTo(0);
         }
         finally
         {
@@ -176,95 +166,88 @@ public sealed class MaintenanceTests
     }
 
     [Test]
-    public void ReadBufferReportsOneFinalFailedOfferAfterBoundedRetries()
+    public async Task ReadBufferReportsOneFinalFailedOfferAfterBoundedRetries()
     {
         using StripedReadBuffer<int> buffer = new(1, 4);
-        buffer.TryEnqueue(0).Should().BeTrue();
+        await Assert.That(buffer.TryEnqueue(0)).IsTrue();
         buffer.SetForcedCasFailuresForTesting(3);
-
-        buffer.TryEnqueue(1).Should().BeFalse();
-
+        await Assert.That(buffer.TryEnqueue(1)).IsFalse();
         ReadBufferStatistics statistics = buffer.GetStatistics();
-        statistics.DroppedFailed.Should().Be(1);
-        statistics.Dropped.Should().Be(1);
-
+        await Assert.That(statistics.DroppedFailed).IsEqualTo(1);
+        await Assert.That(statistics.Dropped).IsEqualTo(1);
         buffer.SetForcedCasFailuresForTesting(0);
-        buffer.TryEnqueue(1).Should().BeTrue();
+        await Assert.That(buffer.TryEnqueue(1)).IsTrue();
     }
 
     [Test]
-    public void ReadBufferExpandsOnlyToTheConfiguredStripeLimit()
+    public async Task ReadBufferExpandsOnlyToTheConfiguredStripeLimit()
     {
         using StripedReadBuffer<int> buffer = new(2, 4);
-        buffer.TryEnqueue(0).Should().BeTrue();
+        await Assert.That(buffer.TryEnqueue(0)).IsTrue();
         buffer.SetForcedCasFailuresForTesting(3);
-
-        buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Failed);
-        buffer.StripeCountForTesting.Should().Be(2);
+        await Assert.That(buffer.TryOffer(1)).IsEqualTo(ReadBufferOfferResult.Failed);
+        await Assert.That(buffer.StripeCountForTesting).IsEqualTo(2);
         buffer.SetForcedCasFailuresForTesting(0);
-        buffer.TryEnqueue(1).Should().BeTrue();
-        buffer.StripeCountForTesting.Should().BeLessThanOrEqualTo(2);
+        await Assert.That(buffer.TryEnqueue(1)).IsTrue();
+        await Assert.That(buffer.StripeCountForTesting).IsLessThanOrEqualTo(2);
     }
 
     [Test]
-    public void ReadBufferRejectsNonPowerOfTwoCapacity()
+    public async Task ReadBufferRejectsNonPowerOfTwoCapacity()
     {
         Action create = () =>
         {
             using StripedReadBuffer<int> buffer = new(1, 3);
             _ = buffer.GetStatistics();
         };
-        create.Should().Throw<ArgumentException>();
+        await Assert.That(create).Throws<ArgumentException>();
     }
 
-    [TestCase(long.MaxValue - 2)]
-    [TestCase(-2L)]
-    public void ReadBufferHandlesCounterWrapWithPowerOfTwoCapacity(long counter)
+    [Test]
+    [Arguments(long.MaxValue - 2)]
+    [Arguments(-2L)]
+    public async Task ReadBufferHandlesCounterWrapWithPowerOfTwoCapacity(long counter)
     {
         using StripedReadBuffer<int> buffer = new(1, 4);
-        buffer.TryEnqueue(0).Should().BeTrue();
+        await Assert.That(buffer.TryEnqueue(0)).IsTrue();
         buffer.SetCounterForTesting(counter);
-
         for (int cycle = 0; cycle < 2; cycle++)
         {
             int firstValue = cycle * 4 + 1;
             for (int offset = 0; offset < 4; offset++)
             {
-                buffer.TryEnqueue(firstValue + offset).Should().BeTrue();
+                await Assert.That(buffer.TryEnqueue(firstValue + offset)).IsTrue();
             }
 
-            buffer.TryEnqueue(firstValue + 4).Should().BeFalse();
-            buffer.GetStatistics().Queued.Should().Be(4);
-
+            await Assert.That(buffer.TryEnqueue(firstValue + 4)).IsFalse();
+            await Assert.That(buffer.GetStatistics().Queued).IsEqualTo(4);
             for (int offset = 0; offset < 4; offset++)
             {
-                buffer.TryRead(out int observed).Should().BeTrue();
-                observed.Should().Be(firstValue + offset);
+                await Assert.That(buffer.TryRead(out int observed)).IsTrue();
+                await Assert.That(observed).IsEqualTo(firstValue + offset);
             }
 
-            buffer.TryRead(out _).Should().BeFalse();
-            buffer.GetStatistics().Queued.Should().Be(0);
+            await Assert.That(buffer.TryRead(out _)).IsFalse();
+            await Assert.That(buffer.GetStatistics().Queued).IsEqualTo(0);
         }
     }
 
     [Test]
-    public void ReadBufferContinuesAfterAConsumerCallbackThrows()
+    public async Task ReadBufferContinuesAfterAConsumerCallbackThrows()
     {
         using StripedReadBuffer<int> buffer = new(1, 4);
-        buffer.TryEnqueue(1).Should().BeTrue();
-        buffer.TryEnqueue(2).Should().BeTrue();
-        buffer
-            .Invoking(static target =>
-                target.DrainTo(
+        await Assert.That(buffer.TryEnqueue(1)).IsTrue();
+        await Assert.That(buffer.TryEnqueue(2)).IsTrue();
+        await Assert
+            .That(() =>
+                buffer.DrainTo(
                     static _ => throw new InvalidOperationException("test callback failure"),
                     budget: 4
                 )
             )
-            .Should()
-            .Throw<InvalidOperationException>();
-
-        buffer.TryRead(out int observed).Should().BeTrue();
-        observed.Should().Be(2);
+            .Throws<InvalidOperationException>();
+        await Assert.That(buffer.TryRead(out int observed)).IsTrue();
+        await Assert.That(observed).IsEqualTo(2);
     }
 
     [Test]
@@ -273,25 +256,23 @@ public sealed class MaintenanceTests
         StripedReadBuffer<TrackedValue> buffer = new(1, 2);
         PublishGate gate = new();
         TrackedValue initial = new();
-        buffer.TryEnqueue(initial).Should().BeTrue();
-        buffer.TryRead(out _).Should().BeTrue();
+        await Assert.That(buffer.TryEnqueue(initial)).IsTrue();
+        await Assert.That(buffer.TryRead(out _)).IsTrue();
         buffer.SetHooksForTesting(beforeReserve: null, beforePublish: gate.BeforePublish);
-
         Task<(bool Accepted, WeakReference<TrackedValue> Weak)> producer = StartTrackedEnqueue(
             buffer
         );
-
         try
         {
-            gate.Entered.Wait(TestTimeout).Should().BeTrue();
+            await Assert.That(gate.Entered.Wait(TestTimeout)).IsTrue();
             buffer.Dispose();
             gate.Release.Set();
             (bool accepted, WeakReference<TrackedValue> weak) = await producer.WaitAsync(
                 TestTimeout
             );
-            accepted.Should().BeFalse();
+            await Assert.That(accepted).IsFalse();
             buffer.SetHooksForTesting(null, null);
-            EventuallyCollected(weak).Should().BeTrue();
+            await Assert.That(EventuallyCollected(weak)).IsTrue();
         }
         finally
         {
@@ -310,28 +291,24 @@ public sealed class MaintenanceTests
     }
 
     [Test]
-    public void ReadBufferFullTryWriteDropsNewestItemInsteadOfReportingFalseSuccess()
+    public async Task ReadBufferFullTryWriteDropsNewestItemInsteadOfReportingFalseSuccess()
     {
         using StripedReadBuffer<int> buffer = new(1, 1);
-
-        buffer.TryEnqueue(1).Should().BeTrue();
-        buffer.TryEnqueue(2).Should().BeFalse();
-
-        buffer.TryRead(out int observed).Should().BeTrue();
-        observed.Should().Be(1);
-        buffer.TryRead(out _).Should().BeFalse();
-
+        await Assert.That(buffer.TryEnqueue(1)).IsTrue();
+        await Assert.That(buffer.TryEnqueue(2)).IsFalse();
+        await Assert.That(buffer.TryRead(out int observed)).IsTrue();
+        await Assert.That(observed).IsEqualTo(1);
+        await Assert.That(buffer.TryRead(out _)).IsFalse();
         ReadBufferStatistics statistics = buffer.GetStatistics();
-        statistics.Enqueued.Should().Be(1);
-        statistics.DroppedFull.Should().Be(1);
-        statistics.Queued.Should().Be(0);
+        await Assert.That(statistics.Enqueued).IsEqualTo(1);
+        await Assert.That(statistics.DroppedFull).IsEqualTo(1);
+        await Assert.That(statistics.Queued).IsEqualTo(0);
     }
 
     [Test]
-    public void ReadBufferDiagnosticCountersSaturateWithoutCorruptingQueuedCount()
+    public async Task ReadBufferDiagnosticCountersSaturateWithoutCorruptingQueuedCount()
     {
         using StripedReadBuffer<int> buffer = new(2, 1);
-
         buffer.AddStatisticsForTesting(
             0,
             enqueued: long.MaxValue - 1,
@@ -346,14 +323,13 @@ public sealed class MaintenanceTests
             droppedFull: 2,
             droppedShutdown: 2
         );
-
         ReadBufferStatistics statistics = buffer.GetStatistics();
-        statistics.Queued.Should().Be(0);
-        statistics.Enqueued.Should().Be(long.MaxValue);
-        statistics.Dequeued.Should().Be(long.MaxValue);
-        statistics.DroppedFull.Should().Be(long.MaxValue);
-        statistics.DroppedShutdown.Should().Be(long.MaxValue);
-        statistics.Dropped.Should().Be(long.MaxValue);
+        await Assert.That(statistics.Queued).IsEqualTo(0);
+        await Assert.That(statistics.Enqueued).IsEqualTo(long.MaxValue);
+        await Assert.That(statistics.Dequeued).IsEqualTo(long.MaxValue);
+        await Assert.That(statistics.DroppedFull).IsEqualTo(long.MaxValue);
+        await Assert.That(statistics.DroppedShutdown).IsEqualTo(long.MaxValue);
+        await Assert.That(statistics.Dropped).IsEqualTo(long.MaxValue);
     }
 
     [Test]
@@ -397,24 +373,23 @@ public sealed class MaintenanceTests
             }
 
             await Task.WhenAll(producers).WaitAsync(TestTimeout, CancellationToken.None);
-
             List<ReadEvent> observed = [];
             while (buffer.TryRead(out ReadEvent value))
             {
                 observed.Add(value);
             }
 
-            observed.Count.Should().Be(accepted.Count);
-            observed.Should().OnlyHaveUniqueItems();
+            await Assert.That(observed.Count).IsEqualTo(accepted.Count);
+            await Assert.That(observed).HasDistinctItems();
             foreach (ReadEvent value in observed)
             {
-                accepted.Should().Contain(value);
+                await Assert.That(accepted).Contains(value);
             }
 
             ReadBufferStatistics statistics = buffer.GetStatistics();
-            statistics.Queued.Should().Be(0);
-            statistics.Enqueued.Should().Be(observed.Count);
-            statistics.Enqueued.Should().BeLessThanOrEqualTo(8L * 16L);
+            await Assert.That(statistics.Queued).IsEqualTo(0);
+            await Assert.That(statistics.Enqueued).IsEqualTo(observed.Count);
+            await Assert.That(statistics.Enqueued).IsLessThanOrEqualTo(8L * 16L);
         }
         finally
         {
@@ -469,7 +444,6 @@ public sealed class MaintenanceTests
                                 TimeSpan Timeout
                             ))
                                 state!;
-
                             if (!start.SignalAndWait(timeout))
                             {
                                 throw new TimeoutException("The producer did not meet its peers.");
@@ -498,7 +472,6 @@ public sealed class MaintenanceTests
                             TimeSpan Timeout
                         ))
                             state!;
-
                         if (!start.SignalAndWait(timeout))
                         {
                             throw new TimeoutException("The disposer did not meet its peers.");
@@ -512,16 +485,16 @@ public sealed class MaintenanceTests
                     TaskScheduler.Default
                 )
             );
-
             await Task.WhenAll(workers).WaitAsync(TestTimeout, CancellationToken.None);
-
             ReadBufferStatistics statistics = buffer.GetStatistics();
-            statistics.IsDisposed.Should().BeTrue();
-            statistics.Queued.Should().Be(0);
-            statistics.DroppedShutdown.Should().BeGreaterThanOrEqualTo(statistics.Enqueued);
-            buffer.TryEnqueue(-1).Should().BeFalse();
-            buffer.TryRead(out _).Should().BeFalse();
-            buffer.GetStatistics().Queued.Should().Be(0);
+            await Assert.That(statistics.IsDisposed).IsTrue();
+            await Assert.That(statistics.Queued).IsEqualTo(0);
+            await Assert
+                .That(statistics.DroppedShutdown)
+                .IsGreaterThanOrEqualTo(statistics.Enqueued);
+            await Assert.That(buffer.TryEnqueue(-1)).IsFalse();
+            await Assert.That(buffer.TryRead(out _)).IsFalse();
+            await Assert.That(buffer.GetStatistics().Queued).IsEqualTo(0);
         }
         finally
         {
@@ -538,23 +511,20 @@ public sealed class MaintenanceTests
     }
 
     [Test]
-    public void ReadBufferDisposeDropsQueuedItemsAndRejectsLaterPublication()
+    public async Task ReadBufferDisposeDropsQueuedItemsAndRejectsLaterPublication()
     {
         StripedReadBuffer<int> buffer = new(2, 2);
-        buffer.TryEnqueue(1).Should().BeTrue();
-        buffer.TryEnqueue(2).Should().BeTrue();
-
+        await Assert.That(buffer.TryEnqueue(1)).IsTrue();
+        await Assert.That(buffer.TryEnqueue(2)).IsTrue();
         buffer.Dispose();
-
-        buffer.TryEnqueue(3).Should().BeFalse();
-        buffer.TryRead(out _).Should().BeFalse();
+        await Assert.That(buffer.TryEnqueue(3)).IsFalse();
+        await Assert.That(buffer.TryRead(out _)).IsFalse();
         ReadBufferStatistics statistics = buffer.GetStatistics();
-        statistics.IsDisposed.Should().BeTrue();
-        statistics.Queued.Should().Be(0);
-        statistics.DroppedShutdown.Should().Be(3);
-
+        await Assert.That(statistics.IsDisposed).IsTrue();
+        await Assert.That(statistics.Queued).IsEqualTo(0);
+        await Assert.That(statistics.DroppedShutdown).IsEqualTo(3);
         buffer.Dispose();
-        buffer.GetStatistics().DroppedShutdown.Should().Be(3);
+        await Assert.That(buffer.GetStatistics().DroppedShutdown).IsEqualTo(3);
     }
 
     [Test]
@@ -565,7 +535,7 @@ public sealed class MaintenanceTests
         {
             for (int value = 0; value < 64; value++)
             {
-                buffer.TryEnqueue(value).Should().BeTrue();
+                await Assert.That(buffer.TryEnqueue(value)).IsTrue();
             }
 
             Barrier start = new(2);
@@ -620,13 +590,14 @@ public sealed class MaintenanceTests
                     TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
                     TaskScheduler.Default
                 );
-
                 await Task.WhenAll(consumer, disposer)
                     .WaitAsync(TestTimeout, CancellationToken.None);
                 ReadBufferStatistics statistics = buffer.GetStatistics();
-                statistics.IsDisposed.Should().BeTrue();
-                statistics.Queued.Should().Be(0);
-                statistics.Enqueued.Should().Be(statistics.Dequeued + statistics.DroppedShutdown);
+                await Assert.That(statistics.IsDisposed).IsTrue();
+                await Assert.That(statistics.Queued).IsEqualTo(0);
+                await Assert
+                    .That(statistics.Enqueued)
+                    .IsEqualTo(statistics.Dequeued + statistics.DroppedShutdown);
             }
             finally
             {
@@ -649,7 +620,7 @@ public sealed class MaintenanceTests
     }
 
     [Test]
-    public void CoordinatorCoalescesRequestsAndRepeatsBoundedPassesWithoutRecursion()
+    public async Task CoordinatorCoalescesRequestsAndRepeatsBoundedPassesWithoutRecursion()
     {
         ManualMaintenanceScheduler scheduler = new();
         int passes = 0;
@@ -657,25 +628,24 @@ public sealed class MaintenanceTests
             () => Interlocked.Increment(ref passes) < 3,
             scheduler
         );
-
-        coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
-        coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
-        scheduler.ScheduleCalls.Should().Be(1);
-        coordinator.State.Should().Be(MaintenanceCoordinatorState.Scheduled);
-
+        await Assert.That(coordinator.Request()).IsEqualTo(MaintenanceRequestResult.Accepted);
+        await Assert.That(coordinator.Request()).IsEqualTo(MaintenanceRequestResult.Accepted);
+        await Assert.That(scheduler.ScheduleCalls).IsEqualTo(1);
+        await Assert.That(coordinator.State).IsEqualTo(MaintenanceCoordinatorState.Scheduled);
         scheduler.RunNext();
-
-        passes.Should().Be(3);
-        coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
+        await Assert.That(passes).IsEqualTo(3);
+        await Assert.That(coordinator.State).IsEqualTo(MaintenanceCoordinatorState.Idle);
         MaintenanceStatistics statistics = coordinator.GetStatistics();
-        statistics.Requests.Should().Be(2);
-        statistics.CoalescedRequests.Should().Be(1);
-        statistics.DrainPasses.Should().Be(3);
-        statistics.MoreWorkPasses.Should().Be(2);
+        await Assert.That(statistics.Requests).IsEqualTo(2);
+        await Assert.That(statistics.CoalescedRequests).IsEqualTo(1);
+        await Assert.That(statistics.DrainPasses).IsEqualTo(3);
+        await Assert.That(statistics.MoreWorkPasses).IsEqualTo(2);
     }
 
     [Test]
-    public async Task RequestDuringRunningPassSetsRunningRequiredAndCannotLoseWakeup()
+    public async Task RequestDuringRunningPassSetsRunningRequiredAndCannotLoseWakeup(
+        CancellationToken cancellationToken
+    )
     {
         ManualMaintenanceScheduler scheduler = new();
         TaskCompletionSource<bool> entered = NewCompletionSource<bool>();
@@ -698,8 +668,7 @@ public sealed class MaintenanceTests
             },
             scheduler
         );
-
-        coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
+        await Assert.That(coordinator.Request()).IsEqualTo(MaintenanceRequestResult.Accepted);
         Task worker = Task.Factory.StartNew(
             scheduler.RunNext,
             CancellationToken.None,
@@ -708,9 +677,11 @@ public sealed class MaintenanceTests
         );
         try
         {
-            await entered.Task.WaitAsync(TestTimeout, TestContext.CurrentContext.CancellationToken);
-            coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
-            coordinator.State.Should().Be(MaintenanceCoordinatorState.RunningRequired);
+            await entered.Task.WaitAsync(TestTimeout, cancellationToken);
+            await Assert.That(coordinator.Request()).IsEqualTo(MaintenanceRequestResult.Accepted);
+            await Assert
+                .That(coordinator.State)
+                .IsEqualTo(MaintenanceCoordinatorState.RunningRequired);
         }
         finally
         {
@@ -718,13 +689,13 @@ public sealed class MaintenanceTests
             await worker.WaitAsync(TestTimeout, CancellationToken.None);
         }
 
-        passes.Should().Be(2);
-        coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
-        coordinator.GetStatistics().CoalescedRequests.Should().Be(1);
+        await Assert.That(passes).IsEqualTo(2);
+        await Assert.That(coordinator.State).IsEqualTo(MaintenanceCoordinatorState.Idle);
+        await Assert.That(coordinator.GetStatistics().CoalescedRequests).IsEqualTo(1);
     }
 
     [Test]
-    public void CleanUpClaimsScheduledWorkAndLeavesStaleCallbackHarmless()
+    public async Task CleanUpClaimsScheduledWorkAndLeavesStaleCallbackHarmless()
     {
         ManualMaintenanceScheduler scheduler = new();
         int passes = 0;
@@ -736,23 +707,22 @@ public sealed class MaintenanceTests
             },
             scheduler
         );
-
-        coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
+        await Assert.That(coordinator.Request()).IsEqualTo(MaintenanceRequestResult.Accepted);
         MaintenanceCleanupResult cleanup = coordinator.CleanUp();
-        cleanup.Performed.Should().BeTrue();
-        cleanup.MoreWork.Should().BeFalse();
-        cleanup.FallbackRequired.Should().BeFalse();
-        passes.Should().Be(1);
-        coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
-
+        await Assert.That(cleanup.Performed).IsTrue();
+        await Assert.That(cleanup.MoreWork).IsFalse();
+        await Assert.That(cleanup.FallbackRequired).IsFalse();
+        await Assert.That(passes).IsEqualTo(1);
+        await Assert.That(coordinator.State).IsEqualTo(MaintenanceCoordinatorState.Idle);
         scheduler.RunNext();
-        passes.Should().Be(1);
-        coordinator.GetStatistics().SynchronousCleanUps.Should().Be(1);
+        await Assert.That(passes).IsEqualTo(1);
+        await Assert.That(coordinator.GetStatistics().SynchronousCleanUps).IsEqualTo(1);
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    public void RejectedOrThrowingSchedulerReportsSynchronousFallback(bool throws)
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task RejectedOrThrowingSchedulerReportsSynchronousFallback(bool throws)
     {
         ManualMaintenanceScheduler scheduler = new() { Reject = !throws, Throw = throws };
         int passes = 0;
@@ -764,21 +734,21 @@ public sealed class MaintenanceTests
             },
             scheduler
         );
-
-        coordinator.Request().Should().Be(MaintenanceRequestResult.ScheduleRejected);
-        coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
-        coordinator.GetStatistics().ScheduleRejections.Should().Be(1);
-
+        await Assert
+            .That(coordinator.Request())
+            .IsEqualTo(MaintenanceRequestResult.ScheduleRejected);
+        await Assert.That(coordinator.State).IsEqualTo(MaintenanceCoordinatorState.Idle);
+        await Assert.That(coordinator.GetStatistics().ScheduleRejections).IsEqualTo(1);
         MaintenanceCleanupResult cleanup = coordinator.CleanUp();
-        cleanup.Performed.Should().BeTrue();
-        cleanup.MoreWork.Should().BeFalse();
-        cleanup.FallbackRequired.Should().BeFalse();
-        passes.Should().Be(1);
-        coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
+        await Assert.That(cleanup.Performed).IsTrue();
+        await Assert.That(cleanup.MoreWork).IsFalse();
+        await Assert.That(cleanup.FallbackRequired).IsFalse();
+        await Assert.That(passes).IsEqualTo(1);
+        await Assert.That(coordinator.State).IsEqualTo(MaintenanceCoordinatorState.Idle);
     }
 
     [Test]
-    public void CleanUpReportsFallbackWhenRearmIsRejectedWithRemainingWork()
+    public async Task CleanUpReportsFallbackWhenRearmIsRejectedWithRemainingWork()
     {
         ManualMaintenanceScheduler scheduler = new() { Reject = true };
         int passes = 0;
@@ -791,21 +761,21 @@ public sealed class MaintenanceTests
             scheduler,
             maxPassesPerInvocation: 1
         );
-
-        coordinator.Request().Should().Be(MaintenanceRequestResult.ScheduleRejected);
+        await Assert
+            .That(coordinator.Request())
+            .IsEqualTo(MaintenanceRequestResult.ScheduleRejected);
         MaintenanceCleanupResult cleanup = coordinator.CleanUp();
-
-        cleanup.Performed.Should().BeTrue();
-        cleanup.MoreWork.Should().BeTrue();
-        cleanup.FallbackRequired.Should().BeTrue();
-        passes.Should().Be(1);
-        coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
-        coordinator.GetStatistics().FallbackRequired.Should().BeTrue();
-        coordinator.GetStatistics().ScheduleRejections.Should().Be(2);
+        await Assert.That(cleanup.Performed).IsTrue();
+        await Assert.That(cleanup.MoreWork).IsTrue();
+        await Assert.That(cleanup.FallbackRequired).IsTrue();
+        await Assert.That(passes).IsEqualTo(1);
+        await Assert.That(coordinator.State).IsEqualTo(MaintenanceCoordinatorState.Idle);
+        await Assert.That(coordinator.GetStatistics().FallbackRequired).IsTrue();
+        await Assert.That(coordinator.GetStatistics().ScheduleRejections).IsEqualTo(2);
     }
 
     [Test]
-    public void InlineSchedulerCannotBypassThePerInvocationPassBudget()
+    public async Task InlineSchedulerCannotBypassThePerInvocationPassBudget()
     {
         InlineMaintenanceScheduler scheduler = new();
         int passes = 0;
@@ -814,17 +784,17 @@ public sealed class MaintenanceTests
             scheduler,
             maxPassesPerInvocation: 8
         );
-
-        coordinator.Request().Should().Be(MaintenanceRequestResult.ScheduleRejected);
-
-        passes.Should().Be(8);
-        scheduler.ScheduleCalls.Should().Be(2);
-        coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
-        coordinator.GetStatistics().FallbackRequired.Should().BeTrue();
+        await Assert
+            .That(coordinator.Request())
+            .IsEqualTo(MaintenanceRequestResult.ScheduleRejected);
+        await Assert.That(passes).IsEqualTo(8);
+        await Assert.That(scheduler.ScheduleCalls).IsEqualTo(2);
+        await Assert.That(coordinator.State).IsEqualTo(MaintenanceCoordinatorState.Idle);
+        await Assert.That(coordinator.GetStatistics().FallbackRequired).IsTrue();
     }
 
     [Test]
-    public void CleanUpReturnsMoreWorkAfterBudgetAndRequestDuringDrainCannotExtendIt()
+    public async Task CleanUpReturnsMoreWorkAfterBudgetAndRequestDuringDrainCannotExtendIt()
     {
         ManualMaintenanceScheduler scheduler = new();
         var drain = new ReentrantDrain();
@@ -837,24 +807,21 @@ public sealed class MaintenanceTests
         using (coordinator)
         {
             MaintenanceCleanupResult first = coordinator.CleanUp();
-
-            first.Performed.Should().BeTrue();
-            first.MoreWork.Should().BeTrue();
-            first.FallbackRequired.Should().BeFalse();
-            drain.Passes.Should().Be(2);
-            coordinator.State.Should().Be(MaintenanceCoordinatorState.Scheduled);
-            scheduler.Pending.Should().Be(1);
-
+            await Assert.That(first.Performed).IsTrue();
+            await Assert.That(first.MoreWork).IsTrue();
+            await Assert.That(first.FallbackRequired).IsFalse();
+            await Assert.That(drain.Passes).IsEqualTo(2);
+            await Assert.That(coordinator.State).IsEqualTo(MaintenanceCoordinatorState.Scheduled);
+            await Assert.That(scheduler.Pending).IsEqualTo(1);
             scheduler.RunNext();
-
-            drain.Passes.Should().Be(4);
-            coordinator.State.Should().Be(MaintenanceCoordinatorState.Scheduled);
-            coordinator.GetStatistics().BudgetExhaustions.Should().Be(2);
+            await Assert.That(drain.Passes).IsEqualTo(4);
+            await Assert.That(coordinator.State).IsEqualTo(MaintenanceCoordinatorState.Scheduled);
+            await Assert.That(coordinator.GetStatistics().BudgetExhaustions).IsEqualTo(2);
         }
     }
 
     [Test]
-    public void DrainFaultIsObservedAndDoesNotStrandTheCoordinator()
+    public async Task DrainFaultIsObservedAndDoesNotStrandTheCoordinator()
     {
         ManualMaintenanceScheduler scheduler = new();
         int passes = 0;
@@ -866,36 +833,32 @@ public sealed class MaintenanceTests
             },
             scheduler
         );
-
-        coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
+        await Assert.That(coordinator.Request()).IsEqualTo(MaintenanceRequestResult.Accepted);
         scheduler.RunNext();
-        coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
-        coordinator.GetStatistics().DrainFaults.Should().Be(1);
-
-        coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
+        await Assert.That(coordinator.State).IsEqualTo(MaintenanceCoordinatorState.Idle);
+        await Assert.That(coordinator.GetStatistics().DrainFaults).IsEqualTo(1);
+        await Assert.That(coordinator.Request()).IsEqualTo(MaintenanceRequestResult.Accepted);
         scheduler.RunNext();
-        passes.Should().Be(2);
-        coordinator.GetStatistics().DrainFaults.Should().Be(1);
+        await Assert.That(passes).IsEqualTo(2);
+        await Assert.That(coordinator.GetStatistics().DrainFaults).IsEqualTo(1);
     }
 
     [Test]
-    public void CoordinatorDiagnosticCountersSaturateAtLongMaxValue()
+    public async Task CoordinatorDiagnosticCountersSaturateAtLongMaxValue()
     {
         using MaintenanceCoordinator coordinator = new(() => false);
-
         coordinator.AddStatisticsForTesting(
             scheduleRejections: long.MaxValue - 1,
             drainFaults: long.MaxValue - 1
         );
         coordinator.AddStatisticsForTesting(scheduleRejections: 2, drainFaults: 2);
-
         MaintenanceStatistics statistics = coordinator.GetStatistics();
-        statistics.ScheduleRejections.Should().Be(long.MaxValue);
-        statistics.DrainFaults.Should().Be(long.MaxValue);
+        await Assert.That(statistics.ScheduleRejections).IsEqualTo(long.MaxValue);
+        await Assert.That(statistics.DrainFaults).IsEqualTo(long.MaxValue);
     }
 
     [Test]
-    public void DisposeRejectsNewRequestsAndStaleScheduledCallbackDoesNoWork()
+    public async Task DisposeRejectsNewRequestsAndStaleScheduledCallbackDoesNoWork()
     {
         ManualMaintenanceScheduler scheduler = new();
         int passes = 0;
@@ -907,19 +870,16 @@ public sealed class MaintenanceTests
             },
             scheduler
         );
-
-        coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
+        await Assert.That(coordinator.Request()).IsEqualTo(MaintenanceRequestResult.Accepted);
         coordinator.Dispose();
-        coordinator.Request().Should().Be(MaintenanceRequestResult.Disposed);
+        await Assert.That(coordinator.Request()).IsEqualTo(MaintenanceRequestResult.Disposed);
         scheduler.RunNext();
-
-        passes.Should().Be(0);
-        coordinator.State.Should().Be(MaintenanceCoordinatorState.Disposed);
+        await Assert.That(passes).IsEqualTo(0);
+        await Assert.That(coordinator.State).IsEqualTo(MaintenanceCoordinatorState.Disposed);
         coordinator.Dispose();
     }
 
     [Test]
-    [Parallelizable]
     public async Task DefaultSchedulerRearmsWithoutFlowingContextOrOverlappingDrains()
     {
         TaskCompletionSource<bool>[] entered =
@@ -977,7 +937,9 @@ public sealed class MaintenanceTests
                     Context.Value = "request-context";
                     try
                     {
-                        coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
+                        await Assert
+                            .That(coordinator.Request())
+                            .IsEqualTo(MaintenanceRequestResult.Accepted);
                     }
                     finally
                     {
@@ -985,23 +947,27 @@ public sealed class MaintenanceTests
                     }
 
                     await entered[round].Task.WaitAsync(TestTimeout);
-                    coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
-                    coordinator.CleanUp().Performed.Should().BeFalse();
-                    Volatile.Read(ref activeDrains.Value).Should().Be(1);
+                    await Assert
+                        .That(coordinator.Request())
+                        .IsEqualTo(MaintenanceRequestResult.Accepted);
+                    await Assert.That(coordinator.CleanUp().Performed).IsFalse();
+                    await Assert.That(Volatile.Read(ref activeDrains.Value)).IsEqualTo(1);
                     release[round].TrySetResult(true);
                     await WaitForCompletedDrainAsync(coordinator, (round + 1) * 2);
-                    coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
+                    await Assert
+                        .That(coordinator.State)
+                        .IsEqualTo(MaintenanceCoordinatorState.Idle);
                 }
 
-                passes.Should().Be(4);
-                overlappingDrains.Should().Be(0);
-                observedContexts.Should().OnlyContain(context => context == null);
+                await Assert.That(passes).IsEqualTo(4);
+                await Assert.That(overlappingDrains).IsEqualTo(0);
+                await Assert.That(observedContexts).All(context => context == null);
                 MaintenanceStatistics statistics = coordinator.GetStatistics();
-                statistics.DrainPasses.Should().Be(4);
-                statistics.BudgetExhaustions.Should().Be(2);
-                statistics.SynchronousCleanUps.Should().Be(0);
-                statistics.ScheduleRejections.Should().Be(0);
-                statistics.DrainFaults.Should().Be(0);
+                await Assert.That(statistics.DrainPasses).IsEqualTo(4);
+                await Assert.That(statistics.BudgetExhaustions).IsEqualTo(2);
+                await Assert.That(statistics.SynchronousCleanUps).IsEqualTo(0);
+                await Assert.That(statistics.ScheduleRejections).IsEqualTo(0);
+                await Assert.That(statistics.DrainFaults).IsEqualTo(0);
             }
             finally
             {
@@ -1019,7 +985,6 @@ public sealed class MaintenanceTests
     }
 
     [Test]
-    [Parallelizable]
     public async Task DefaultSchedulerDoesNotRearmDisposedRunningDrain()
     {
         TaskCompletionSource<bool> entered = NewCompletionSource<bool>();
@@ -1042,12 +1007,18 @@ public sealed class MaintenanceTests
         {
             try
             {
-                coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
+                await Assert
+                    .That(coordinator.Request())
+                    .IsEqualTo(MaintenanceRequestResult.Accepted);
                 await entered.Task.WaitAsync(TestTimeout);
-                coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
+                await Assert
+                    .That(coordinator.Request())
+                    .IsEqualTo(MaintenanceRequestResult.Accepted);
                 coordinator.Dispose();
-                coordinator.Request().Should().Be(MaintenanceRequestResult.Disposed);
-                coordinator.CleanUp().Performed.Should().BeFalse();
+                await Assert
+                    .That(coordinator.Request())
+                    .IsEqualTo(MaintenanceRequestResult.Disposed);
+                await Assert.That(coordinator.CleanUp().Performed).IsFalse();
             }
             finally
             {
@@ -1056,12 +1027,12 @@ public sealed class MaintenanceTests
             }
 
             await WaitForCompletedDrainAsync(coordinator, 1);
-            passes.Should().Be(1);
+            await Assert.That(passes).IsEqualTo(1);
             MaintenanceStatistics statistics = coordinator.GetStatistics();
-            statistics.State.Should().Be(MaintenanceCoordinatorState.Disposed);
-            statistics.DrainPasses.Should().Be(1);
-            statistics.BudgetExhaustions.Should().Be(0);
-            statistics.DrainFaults.Should().Be(0);
+            await Assert.That(statistics.State).IsEqualTo(MaintenanceCoordinatorState.Disposed);
+            await Assert.That(statistics.DrainPasses).IsEqualTo(1);
+            await Assert.That(statistics.BudgetExhaustions).IsEqualTo(0);
+            await Assert.That(statistics.DrainFaults).IsEqualTo(0);
         }
         finally
         {
@@ -1209,13 +1180,9 @@ public sealed class MaintenanceTests
     private sealed class ManualMaintenanceScheduler : IMaintenanceScheduler
     {
         private readonly Queue<Action> _callbacks = new();
-
         internal bool Reject { get; init; }
-
         internal bool Throw { get; init; }
-
         internal int ScheduleCalls { get; private set; }
-
         internal int Pending => _callbacks.Count;
 
         public bool TrySchedule(Action callback)
@@ -1262,7 +1229,10 @@ public sealed class MaintenanceTests
         internal bool Invoke()
         {
             Interlocked.Increment(ref _passes);
-            Coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
+            if ((Coordinator.Request()) != (MaintenanceRequestResult.Accepted))
+                Assert.Fail(
+                    "Expected Coordinator.Request() to equal (MaintenanceRequestResult.Accepted)."
+                );
             return true;
         }
     }

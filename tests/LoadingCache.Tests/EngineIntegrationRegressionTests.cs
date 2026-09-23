@@ -1,5 +1,4 @@
-using FluentAssertions;
-using NUnit.Framework;
+using TUnit.Assertions.Exceptions;
 
 namespace LoadingCache.Tests;
 
@@ -20,7 +19,6 @@ public sealed class EngineIntegrationRegressionTests
             .Build();
         cache.Put(1, 42);
         comparer.Armed = true;
-
         Task writer = Task.Factory.StartNew(
             static state => ((ICache<int, int>)state!).Put(99, 99),
             cache,
@@ -44,7 +42,7 @@ public sealed class EngineIntegrationRegressionTests
                 TaskCreationOptions.DenyChildAttach,
                 TaskScheduler.Default
             );
-            (await reader.WaitAsync(Watchdog)).Should().Be(42);
+            await Assert.That((await reader.WaitAsync(Watchdog))).IsEqualTo(42);
         }
         finally
         {
@@ -63,26 +61,30 @@ public sealed class EngineIntegrationRegressionTests
             .MaxConcurrentLoads(2)
             .Weigher((_, value) => value.Length)
             .BuildAsync();
-        (await cache.GetOrAddAsync(1, (_, _) => Task.FromResult("old"))).Should().Be("old");
-        cache.Policy.Eviction!.WeightedSize.Should().Be(3);
+        await Assert
+            .That((await cache.GetOrAddAsync(1, (_, _) => Task.FromResult("old"))))
+            .IsEqualTo("old");
+        await Assert.That(cache.Policy.Eviction!.WeightedSize).IsEqualTo(3);
         var pending = new TaskCompletionSource<string>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
         cache.Put(1, pending.Task);
         cache.CleanUp();
-        cache.EstimatedCount.Should().Be(0);
-        cache.Policy.Eviction.WeightedSize.Should().Be(0);
+        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
+        await Assert.That(cache.Policy.Eviction.WeightedSize).IsEqualTo(0);
         pending.SetResult("replacement");
-        (
-            await cache.GetOrAddAsync(
-                1,
-                (_, _) => throw new AssertionException("The stored task must be joined.")
+        await Assert
+            .That(
+                (
+                    await cache.GetOrAddAsync(
+                        1,
+                        (_, _) => throw new AssertionException("The stored task must be joined.")
+                    )
+                )
             )
-        )
-            .Should()
-            .Be("replacement");
+            .IsEqualTo("replacement");
         cache.CleanUp();
-        cache.Policy.Eviction.WeightedSize.Should().Be(11);
+        await Assert.That(cache.Policy.Eviction.WeightedSize).IsEqualTo(11);
     }
 
     [Test]
@@ -97,18 +99,21 @@ public sealed class EngineIntegrationRegressionTests
             TaskCreationOptions.RunContinuationsAsynchronously
         );
         Task<string> waiter = cache.GetOrAddAsync(1, (_, _) => source.Task).AsTask();
-        cache.TryGetTask(1, out Task<string>? before).Should().BeTrue();
-        before.Should().BeSameAs(waiter);
+        await Assert.That(cache.TryGetTask(1, out Task<string>? before)).IsTrue();
+        Assert.NotNull(before);
+        await Assert.That(ReferenceEquals(before, waiter)).IsTrue();
         source.SetResult("ready");
-        (await waiter.WaitAsync(Watchdog)).Should().Be("ready");
-        cache.TryGetTask(1, out Task<string>? after).Should().BeTrue();
-        after.Should().BeSameAs(before);
-        cache.TryGetTask(1, out Task<string>? again).Should().BeTrue();
-        again.Should().BeSameAs(after);
+        await Assert.That((await waiter.WaitAsync(Watchdog))).IsEqualTo("ready");
+        await Assert.That(cache.TryGetTask(1, out Task<string>? after)).IsTrue();
+        Assert.NotNull(after);
+        await Assert.That(ReferenceEquals(after, before)).IsTrue();
+        await Assert.That(cache.TryGetTask(1, out Task<string>? again)).IsTrue();
+        Assert.NotNull(again);
+        await Assert.That(ReferenceEquals(again, after)).IsTrue();
     }
 
     [Test]
-    public void SynchronousColdFactoryExecutesOnItsCallingThread()
+    public async Task SynchronousColdFactoryExecutesOnItsCallingThread()
     {
         using ICache<int, int> cache = CacheBuilder
             .Create<int, int>()
@@ -116,7 +121,9 @@ public sealed class EngineIntegrationRegressionTests
             .MaxConcurrentLoads(2)
             .Build();
         int caller = Environment.CurrentManagedThreadId;
-        cache.GetOrAdd(1, _ => Environment.CurrentManagedThreadId).Should().Be(caller);
+        await Assert
+            .That(cache.GetOrAdd(1, _ => Environment.CurrentManagedThreadId))
+            .IsEqualTo(caller);
     }
 
     // Deliberate test pause at the dictionary boundary, equivalent to suspending

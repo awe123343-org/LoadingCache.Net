@@ -74,21 +74,21 @@ jobs:
       - name: Build and detect unused imports (IDE0005)
         run: dotnet build LoadingCache.slnx -c Release --no-restore
       - name: Test .NET 8
-        run: dotnet test tests/LoadingCache.Tests/LoadingCache.Tests.csproj -c Release --no-build --no-restore -f net8.0 --logger "trx;LogFileName=net8.trx" --results-directory artifacts/test-results
+        run: dotnet test --project tests/LoadingCache.Tests/LoadingCache.Tests.csproj -c Release --no-build --no-restore -f net8.0 --report-trx --report-trx-filename net8.trx --results-directory artifacts/test-results
       - name: Test .NET 10
-        run: dotnet test tests/LoadingCache.Tests/LoadingCache.Tests.csproj -c Release --no-build --no-restore -f net10.0 --logger "trx;LogFileName=net10.trx" --results-directory artifacts/test-results
+        run: dotnet test --project tests/LoadingCache.Tests/LoadingCache.Tests.csproj -c Release --no-build --no-restore -f net10.0 --report-trx --report-trx-filename net10.trx --results-directory artifacts/test-results
       - name: Run .NET 8 source consumer
         run: dotnet run --project tests/LoadingCache.ConsumerSmoke/LoadingCache.ConsumerSmoke.csproj -c Release --no-build --no-restore -f net8.0
       - name: Run .NET 10 source consumer
         run: dotnet run --project tests/LoadingCache.ConsumerSmoke/LoadingCache.ConsumerSmoke.csproj -c Release --no-build --no-restore -f net10.0
       - name: Test DI .NET 8
-        run: dotnet test tests/LoadingCache.DependencyInjection.Tests/LoadingCache.DependencyInjection.Tests.csproj -c Release --no-build --no-restore -f net8.0 --logger "trx;LogFileName=di-net8.trx" --results-directory artifacts/test-results
+        run: dotnet test --project tests/LoadingCache.DependencyInjection.Tests/LoadingCache.DependencyInjection.Tests.csproj -c Release --no-build --no-restore -f net8.0 --report-trx --report-trx-filename di-net8.trx --results-directory artifacts/test-results
       - name: Test DI .NET 10
-        run: dotnet test tests/LoadingCache.DependencyInjection.Tests/LoadingCache.DependencyInjection.Tests.csproj -c Release --no-build --no-restore -f net10.0 --logger "trx;LogFileName=di-net10.trx" --results-directory artifacts/test-results
+        run: dotnet test --project tests/LoadingCache.DependencyInjection.Tests/LoadingCache.DependencyInjection.Tests.csproj -c Release --no-build --no-restore -f net10.0 --report-trx --report-trx-filename di-net10.trx --results-directory artifacts/test-results
       - name: Short stress .NET 8
-        run: dotnet test tests/LoadingCache.StressTests/LoadingCache.StressTests.csproj -c Release --no-build --no-restore -f net8.0 --logger "trx;LogFileName=stress-net8.trx" --results-directory artifacts/test-results
+        run: dotnet test --project tests/LoadingCache.StressTests/LoadingCache.StressTests.csproj -c Release --no-build --no-restore -f net8.0 --report-trx --report-trx-filename stress-net8.trx --results-directory artifacts/test-results
       - name: Short stress .NET 10
-        run: dotnet test tests/LoadingCache.StressTests/LoadingCache.StressTests.csproj -c Release --no-build --no-restore -f net10.0 --logger "trx;LogFileName=stress-net10.trx" --results-directory artifacts/test-results
+        run: dotnet test --project tests/LoadingCache.StressTests/LoadingCache.StressTests.csproj -c Release --no-build --no-restore -f net10.0 --report-trx --report-trx-filename stress-net10.trx --results-directory artifacts/test-results
       - name: ASP.NET Core host smoke
         run: dotnet samples/LoadingCache.AspNetCore/bin/Release/net10.0/LoadingCache.AspNetCore.dll --smoke
       - name: gRPC host smoke

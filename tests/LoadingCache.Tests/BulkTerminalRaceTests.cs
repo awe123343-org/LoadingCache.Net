@@ -1,14 +1,12 @@
-using FluentAssertions;
-using NUnit.Framework;
-
 namespace LoadingCache.Tests;
 
 public sealed class BulkTerminalRaceTests
 {
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task DisposeCompletesNormalWaitersWhileRetirementCleanupIsBlocked(
         bool backendFails
     )
@@ -22,7 +20,6 @@ public sealed class BulkTerminalRaceTests
             .LoadTimeout(TimeSpan.FromSeconds(1))
             .TimeProvider(time)
             .BuildAsyncLoading((_, _) => backend.Task);
-
         Task<int> pending = cache.GetAsync(1).AsTask();
         Task<int> joined = cache.GetAsync(1).AsTask();
         if (backendFails)
@@ -37,20 +34,15 @@ public sealed class BulkTerminalRaceTests
         try
         {
             await time.DisposeEntered.Task.WaitAsync(Watchdog);
-            pending.IsCompleted.Should().BeFalse();
+            await Assert.That(pending.IsCompleted).IsFalse();
             await cache.DisposeAsync().AsTask().WaitAsync(Watchdog);
-            pending
-                .IsCompleted.Should()
-                .BeTrue("retirement cleanup cannot hide an unfinished promise from shutdown");
-            joined.IsCompleted.Should().BeTrue();
-            await FluentActions
-                .Awaiting(() => pending)
-                .Should()
-                .ThrowExactlyAsync<ObjectDisposedException>();
-            await FluentActions
-                .Awaiting(() => joined)
-                .Should()
-                .ThrowExactlyAsync<ObjectDisposedException>();
+            await Assert
+                .That(pending.IsCompleted)
+                .IsTrue()
+                .Because("retirement cleanup cannot hide an unfinished promise from shutdown");
+            await Assert.That(joined.IsCompleted).IsTrue();
+            await Assert.That(() => pending).ThrowsExactly<ObjectDisposedException>();
+            await Assert.That(() => joined).ThrowsExactly<ObjectDisposedException>();
         }
         finally
         {
@@ -76,8 +68,9 @@ public sealed class BulkTerminalRaceTests
         }
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task DisposeCompletesTimedOutSyncWaitersAfterBackendReturns(bool useBulk)
     {
         var time = new BlockingDisposeTimeProvider(Watchdog * 3);
@@ -92,7 +85,6 @@ public sealed class BulkTerminalRaceTests
             .TimeProvider(time)
             .RecordStatistics()
             .BuildLoading(new GatedSyncLoader(backend));
-
         Task owner = Task.Factory.StartNew(
             static state =>
             {
@@ -125,24 +117,23 @@ public sealed class BulkTerminalRaceTests
                 TaskScheduler.Default
             );
             WaitForSyncJoiner(cache);
-
             timeout = time.FireTimeoutAsync();
             await time.DisposeEntered.Task.WaitAsync(Watchdog);
             backend.Release();
             await backend.Returned.WaitAsync(Watchdog);
             WaitForSyncBackendCompletion(cache);
-            joined.IsCompleted.Should().BeFalse();
-
+            await Assert.That(joined.IsCompleted).IsFalse();
             cache.Dispose();
-            await FluentActions
-                .Awaiting(() => joined.WaitAsync(Watchdog))
-                .Should()
-                .ThrowExactlyAsync<ObjectDisposedException>();
-            await FluentActions
-                .Awaiting(() => owner.WaitAsync(Watchdog))
-                .Should()
-                .ThrowExactlyAsync<ObjectDisposedException>();
-            timeout.IsCompleted.Should().BeFalse("the controlled timeout cleanup is blocked");
+            await Assert
+                .That(() => joined.WaitAsync(Watchdog))
+                .ThrowsExactly<ObjectDisposedException>();
+            await Assert
+                .That(() => owner.WaitAsync(Watchdog))
+                .ThrowsExactly<ObjectDisposedException>();
+            await Assert
+                .That(timeout.IsCompleted)
+                .IsFalse()
+                .Because("the controlled timeout cleanup is blocked");
         }
         finally
         {
@@ -186,32 +177,26 @@ public sealed class BulkTerminalRaceTests
             .LoadTimeout(TimeSpan.FromSeconds(1))
             .TimeProvider(time)
             .BuildAsyncLoading(loader);
-
         Task<IReadOnlyDictionary<int, int>> bulk = cache.GetAllAsync([1, 2]).AsTask();
         await loader.Started.Task.WaitAsync(Watchdog);
         Task<int> joined = cache.GetAsync(2).AsTask();
-
         Task timeout = time.FireTimeoutAsync();
         try
         {
             await time.DisposeEntered.Task.WaitAsync(Watchdog);
             loader.Release.TrySetException(new InvalidOperationException("backend failed"));
             await loader.Returned.Task.WaitAsync(Watchdog);
-
             Func<CacheStatistics> readStatistics = cache.GetStatistics;
-            SpinWait
-                .SpinUntil(() => readStatistics().InFlightLoads == 0, Watchdog)
-                .Should()
-                .BeTrue();
-            joined.IsCompleted.Should().BeFalse();
-
+            await Assert
+                .That(SpinWait.SpinUntil(() => readStatistics().InFlightLoads == 0, Watchdog))
+                .IsTrue();
+            await Assert.That(joined.IsCompleted).IsFalse();
             time.ReleaseDispose.TrySetResult(null);
             await timeout.WaitAsync(Watchdog);
-
             Func<Task> waitBulk = async () => await bulk;
             Func<Task> waitJoined = async () => await joined;
-            await waitBulk.Should().ThrowExactlyAsync<TimeoutException>();
-            await waitJoined.Should().ThrowExactlyAsync<TimeoutException>();
+            await Assert.That(waitBulk).ThrowsExactly<TimeoutException>();
+            await Assert.That(waitJoined).ThrowsExactly<TimeoutException>();
         }
         finally
         {
@@ -235,7 +220,6 @@ public sealed class BulkTerminalRaceTests
             .LoadTimeout(TimeSpan.FromSeconds(1))
             .TimeProvider(time)
             .BuildAsyncLoading(loader);
-
         Task<IReadOnlyDictionary<int, int>> bulk = cache.GetAllAsync([1, 2]).AsTask();
         await loader.Started.Task.WaitAsync(Watchdog);
         Task<int> joined = cache.GetAsync(2).AsTask();
@@ -243,21 +227,20 @@ public sealed class BulkTerminalRaceTests
         try
         {
             await time.DisposeEntered.Task.WaitAsync(Watchdog);
-            joined.IsCompleted.Should().BeFalse();
-
+            await Assert.That(joined.IsCompleted).IsFalse();
             await cache.DisposeAsync().AsTask().WaitAsync(Watchdog);
-            joined
-                .IsCompleted.Should()
-                .BeTrue("claiming timeout does not mean promises are terminal");
-            await FluentActions
-                .Awaiting(() => joined)
-                .Should()
-                .ThrowExactlyAsync<ObjectDisposedException>();
-            await FluentActions
-                .Awaiting(() => bulk.WaitAsync(Watchdog))
-                .Should()
-                .ThrowExactlyAsync<ObjectDisposedException>();
-            timeout.IsCompleted.Should().BeFalse("shutdown cannot wait on timeout cleanup");
+            await Assert
+                .That(joined.IsCompleted)
+                .IsTrue()
+                .Because("claiming timeout does not mean promises are terminal");
+            await Assert.That(() => joined).ThrowsExactly<ObjectDisposedException>();
+            await Assert
+                .That((Func<Task>)(() => bulk.WaitAsync(Watchdog)))
+                .ThrowsExactly<ObjectDisposedException>();
+            await Assert
+                .That(timeout.IsCompleted)
+                .IsFalse()
+                .Because("shutdown cannot wait on timeout cleanup");
         }
         finally
         {
@@ -299,7 +282,6 @@ public sealed class BulkTerminalRaceTests
             .MaximumBulkKeys(2)
             .ExpireAfter(expiry)
             .BuildAsyncLoading(loader);
-
         cache.Set(1, "ready");
         Task<IReadOnlyDictionary<int, string>> bulk = Task
             .Factory.StartNew(
@@ -316,28 +298,21 @@ public sealed class BulkTerminalRaceTests
         try
         {
             await expiry.ReadEntered.Task.WaitAsync(Watchdog);
-
             Task<string> joined = cache.GetAsync(2).AsTask();
             await loader.BulkStarted.Task.WaitAsync(Watchdog);
-
-            Func<Task> rejected = cache.Awaiting(static current => current.GetAsync(3).AsTask());
-            await rejected.Should().ThrowExactlyAsync<CacheLoadRejectedException>();
-
+            Func<Task> rejected = () => cache.GetAsync(3).AsTask();
+            await Assert.That(rejected).ThrowsExactly<CacheLoadRejectedException>();
             expiry.Release.TrySetResult(null);
-
             Func<Task> waitBulk = async () => await bulk;
-            await waitBulk.Should().ThrowExactlyAsync<InvalidOperationException>();
-
-            cache.GetStatistics().InFlightLoads.Should().Be(1);
-
+            await Assert.That(waitBulk).ThrowsExactly<InvalidOperationException>();
+            await Assert.That(cache.GetStatistics().InFlightLoads).IsEqualTo(1);
             loader.Release.TrySetResult(new Dictionary<int, string> { [2] = "late" });
-            (await joined).Should().Be("late");
+            await Assert.That((await joined)).IsEqualTo("late");
             await loader.Finished.Task.WaitAsync(Watchdog);
             Func<CacheStatistics> readStatistics = cache.GetStatistics;
-            SpinWait
-                .SpinUntil(() => readStatistics().InFlightLoads == 0, Watchdog)
-                .Should()
-                .BeTrue();
+            await Assert
+                .That(SpinWait.SpinUntil(() => readStatistics().InFlightLoads == 0, Watchdog))
+                .IsTrue();
         }
         finally
         {
@@ -362,14 +337,17 @@ public sealed class BulkTerminalRaceTests
         }
     }
 
-    private static void WaitForSyncJoiner(ILoadingCache<int, int> cache) =>
-        SpinWait
-            .SpinUntil(() => cache.Statistics.CoalescedWaiters == 1, Watchdog)
-            .Should()
-            .BeTrue();
+    private static void WaitForSyncJoiner(ILoadingCache<int, int> cache)
+    {
+        if (!(SpinWait.SpinUntil(() => cache.Statistics.CoalescedWaiters == 1, Watchdog)))
+            Assert.Fail("Timed out waiting for the controlled condition.");
+    }
 
-    private static void WaitForSyncBackendCompletion(ILoadingCache<int, int> cache) =>
-        SpinWait.SpinUntil(() => cache.Statistics.InFlightLoads == 0, Watchdog).Should().BeTrue();
+    private static void WaitForSyncBackendCompletion(ILoadingCache<int, int> cache)
+    {
+        if (!(SpinWait.SpinUntil(() => cache.Statistics.InFlightLoads == 0, Watchdog)))
+            Assert.Fail("Timed out waiting for the controlled condition.");
+    }
 
     private sealed class GatedSyncLoader(BlockingTestHook backend) : IBulkSyncCacheLoader<int, int>
     {
@@ -471,10 +449,8 @@ public sealed class BulkTerminalRaceTests
         private readonly TimeSpan _disposeWatchdog = disposeWatchdog ?? Watchdog;
         private long _timestamp;
         private BlockingTimer? _timer;
-
         internal TaskCompletionSource<bool> DisposeEntered { get; } = Signal<bool>();
         internal TaskCompletionSource<object?> ReleaseDispose { get; } = Signal<object?>();
-
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;
 
         public override long GetTimestamp() => Volatile.Read(ref _timestamp);

@@ -1,20 +1,17 @@
-using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
-[Parallelizable(ParallelScope.All)]
 public sealed class ExpiredReadPublicationTests
 {
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
 
     [Test]
+    [MatrixDataSource]
     public async Task DelayedExpiredReadCannotRemoveACompletedRefresh(
-        [Values("write", "access", "both")] string expiration,
-        [Values] bool recordStatistics,
-        [Values] bool materializeTask
+        [Matrix("write", "access", "both")] string expiration,
+        [Matrix(false, true)] bool recordStatistics,
+        [Matrix(false, true)] bool materializeTask
     )
     {
         await using var cleanup = new BlockingTestHook(Watchdog);
@@ -39,16 +36,17 @@ public sealed class ExpiredReadPublicationTests
                 throw new InvalidOperationException("The resident refresh became a cold load."),
             (_, oldValue, _) =>
             {
-                oldValue.Should().Be("old");
+                if ((oldValue) != ("old"))
+                    Assert.Fail("Expected oldValue to equal (\"old\").");
                 Interlocked.Increment(ref reloads);
                 return Task.FromResult("refreshed");
             }
         );
         cache.Set(1, "old");
         cache.CleanUp();
-        cache.TryGetTask(1, out Task<string>? oldTask).Should().BeTrue();
+        await Assert.That(cache.TryGetTask(1, out Task<string>? oldTask)).IsTrue();
+        Assert.NotNull(oldTask);
         clock.Advance(duration);
-
         Task<(bool Found, string? Value)> staleRead = Task
             .Factory.StartNew(
                 static async state =>
@@ -79,17 +77,17 @@ public sealed class ExpiredReadPublicationTests
             // The reader has observed hard expiry and released entry.Sync,
             // but has not acquired the engine gate for physical cleanup.
             await cleanup.Entered.WaitAsync(Watchdog);
-            staleRead.IsCompleted.Should().BeFalse();
-
+            await Assert.That(staleRead.IsCompleted).IsFalse();
             // Explicit refresh of a physically resident value keeps its Entry.
             // The throwing cold loader ensures this exercises that path.
-            (await cache.RefreshAsync(1).AsTask().WaitAsync(Watchdog))
-                .Should()
-                .Be("refreshed");
-            reloads.Should().Be(1);
-            cache.TryGetTask(1, out publishedTask).Should().BeTrue();
-            (await publishedTask!.WaitAsync(Watchdog)).Should().Be("refreshed");
-            (await oldTask!.WaitAsync(Watchdog)).Should().Be("old");
+            await Assert
+                .That((await cache.RefreshAsync(1).AsTask().WaitAsync(Watchdog)))
+                .IsEqualTo("refreshed");
+            await Assert.That(reloads).IsEqualTo(1);
+            await Assert.That(cache.TryGetTask(1, out publishedTask)).IsTrue();
+            Assert.NotNull(publishedTask);
+            await Assert.That((await publishedTask!.WaitAsync(Watchdog))).IsEqualTo("refreshed");
+            await Assert.That((await oldTask!.WaitAsync(Watchdog))).IsEqualTo("old");
         }
         finally
         {
@@ -97,32 +95,34 @@ public sealed class ExpiredReadPublicationTests
             await staleRead.WaitAsync(Watchdog);
         }
 
-        cleanup.TimedOut.Should().BeFalse();
+        await Assert.That(cleanup.TimedOut).IsFalse();
         (bool staleFound, string? observedValue) = await staleRead;
         if (staleFound)
         {
-            observedValue.Should().Be("refreshed");
+            await Assert.That(observedValue).IsEqualTo("refreshed");
         }
 
         // The overlapping reader may report its earlier miss or retry the new
         // value. Neither choice authorizes removing the completed refresh.
-        cache.Policy.TryGetQuietly(1, out string? current).Should().BeTrue();
-        current.Should().Be("refreshed");
-        cache.TryGetTask(1, out Task<string>? currentTask).Should().BeTrue();
-        currentTask.Should().BeSameAs(publishedTask);
-        (await currentTask.WaitAsync(Watchdog)).Should().Be("refreshed");
+        await Assert.That(cache.Policy.TryGetQuietly(1, out string? current)).IsTrue();
+        await Assert.That(current).IsEqualTo("refreshed");
+        await Assert.That(cache.TryGetTask(1, out Task<string>? currentTask)).IsTrue();
+        Assert.NotNull(currentTask);
+        await Assert.That(ReferenceEquals(currentTask, publishedTask)).IsTrue();
+        await Assert.That((await currentTask.WaitAsync(Watchdog))).IsEqualTo("refreshed");
         cache.CleanUp();
-        cache.EstimatedCount.Should().Be(1);
-        cache.Policy.Eviction!.WeightedSize.Should().Be(1);
-        cache.Statistics.ExpiredRemovals.Should().Be(0);
-        reloads.Should().Be(1);
+        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
+        await Assert.That(cache.Policy.Eviction!.WeightedSize).IsEqualTo(1);
+        await Assert.That(cache.Statistics.ExpiredRemovals).IsEqualTo(0);
+        await Assert.That(reloads).IsEqualTo(1);
         engine.AssertInvariants();
     }
 
-    [TestCase(true, false)]
-    [TestCase(true, true)]
-    [TestCase(false, false)]
-    [TestCase(false, true)]
+    [Test]
+    [Arguments(true, false)]
+    [Arguments(true, true)]
+    [Arguments(false, false)]
+    [Arguments(false, true)]
     public async Task DelayedExpiredReadHonorsAnExtendedDuration(
         bool extendWriteDuration,
         bool enableOtherExpiration
@@ -155,7 +155,6 @@ public sealed class ExpiredReadPublicationTests
         cache.Put(1, "resident");
         cache.CleanUp();
         clock.Advance(originalDuration);
-
         Task staleRead = Task.Factory.StartNew(
             static state => ((Cache<int, string>)state!).TryGet(1, out _),
             cache,
@@ -169,15 +168,16 @@ public sealed class ExpiredReadPublicationTests
         try
         {
             await cleanup.Entered.WaitAsync(Watchdog);
-            staleRead.IsCompleted.Should().BeFalse();
-
+            await Assert.That(staleRead.IsCompleted).IsFalse();
             // Only the policy changes. The Entry, value publication, and original
             // timestamps remain the same, so a revision check alone is insufficient.
             policy.SetDuration(extendedDuration);
-            policy.AgeOf(1).Should().Be(originalDuration);
-            policy.GetExpiresAfter(1).Should().Be(extendedDuration - originalDuration);
-            cache.Policy.TryGetQuietly(1, out string? renewed).Should().BeTrue();
-            renewed.Should().Be("resident");
+            await Assert.That(policy.AgeOf(1)).IsEqualTo(originalDuration);
+            await Assert
+                .That(policy.GetExpiresAfter(1))
+                .IsEqualTo(extendedDuration - originalDuration);
+            await Assert.That(cache.Policy.TryGetQuietly(1, out string? renewed)).IsTrue();
+            await Assert.That(renewed).IsEqualTo("resident");
         }
         finally
         {
@@ -185,23 +185,22 @@ public sealed class ExpiredReadPublicationTests
             await staleRead.WaitAsync(Watchdog);
         }
 
-        cleanup.TimedOut.Should().BeFalse();
-        cache.Policy.TryGetQuietly(1, out string? current).Should().BeTrue();
-        current.Should().Be("resident");
+        await Assert.That(cleanup.TimedOut).IsFalse();
+        await Assert.That(cache.Policy.TryGetQuietly(1, out string? current)).IsTrue();
+        await Assert.That(current).IsEqualTo("resident");
         cache.CleanUp();
-        cache.EstimatedCount.Should().Be(1);
-        cache.Policy.Eviction!.WeightedSize.Should().Be(1);
-        cache.Statistics.ExpiredRemovals.Should().Be(0);
+        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
+        await Assert.That(cache.Policy.Eviction!.WeightedSize).IsEqualTo(1);
+        await Assert.That(cache.Statistics.ExpiredRemovals).IsEqualTo(0);
         engine.AssertInvariants();
-
         // Quiet observations must not touch TTI, and the extension must not turn
         // expiration off. The unchanged publication expires at its new deadline.
         clock.Advance(extendedDuration - originalDuration);
-        cache.Policy.TryGetQuietly(1, out _).Should().BeFalse();
-        cache.TryGet(1, out _).Should().BeFalse();
-        cache.Statistics.ExpiredRemovals.Should().Be(1);
+        await Assert.That(cache.Policy.TryGetQuietly(1, out _)).IsFalse();
+        await Assert.That(cache.TryGet(1, out _)).IsFalse();
+        await Assert.That(cache.Statistics.ExpiredRemovals).IsEqualTo(1);
         cache.CleanUp();
-        cache.EstimatedCount.Should().Be(0);
+        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
         engine.AssertInvariants();
     }
 }

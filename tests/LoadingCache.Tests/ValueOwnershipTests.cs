@@ -1,15 +1,13 @@
-using FluentAssertions;
 using LoadingCache.Ownership;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class ValueOwnershipTests
 {
-    [TestCase(false)]
-    [TestCase(true)]
-    public void RejectedDisposalRemainsBoundedAndCanBeRetriedAfterShutdown(bool throws)
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task RejectedDisposalRemainsBoundedAndCanBeRetriedAfterShutdown(bool throws)
     {
         var reject = new System.Runtime.CompilerServices.StrongBox<bool>(true);
         Action? scheduled = null;
@@ -25,6 +23,7 @@ public sealed class ValueOwnershipTests
                         ? throw new InvalidOperationException("controlled rejection")
                         : false;
                 }
+
                 scheduled = work;
                 return true;
             }
@@ -33,29 +32,25 @@ public sealed class ValueOwnershipTests
         {
             var token = ownership.Publish(value);
             ownership.Retire(token);
-            ownership.GetStatistics().ActiveValueCount.Should().Be(1);
-            ownership.GetStatistics().PendingDisposals.Should().Be(1);
-            ownership
-                .GetStatistics()
-                .LastDisposalError.Should()
-                .BeOfType<InvalidOperationException>();
-            value.DisposeCount.Should().Be(0);
-            ownership
-                .Invoking(static current => current.Publish(new DisposableValue()))
-                .Should()
-                .Throw<ValueOwnershipCapacityException>();
+            await Assert.That(ownership.GetStatistics().ActiveValueCount).IsEqualTo(1);
+            await Assert.That(ownership.GetStatistics().PendingDisposals).IsEqualTo(1);
+            await Assert
+                .That<object>(ownership.GetStatistics().LastDisposalError!)
+                .IsTypeOf<InvalidOperationException>();
+            await Assert.That(value.DisposeCount).IsEqualTo(0);
+            await Assert
+                .That(() => ownership.Publish(new DisposableValue()))
+                .Throws<ValueOwnershipCapacityException>();
             ownership.Dispose();
-
             reject.Value = false;
-            ownership.RetryPendingDisposals().Should().Be(1);
-            ownership.RetryPendingDisposals().Should().Be(0);
-            scheduled.Should().NotBeNull();
+            await Assert.That(ownership.RetryPendingDisposals()).IsEqualTo(1);
+            await Assert.That(ownership.RetryPendingDisposals()).IsEqualTo(0);
+            Assert.NotNull(scheduled);
             scheduled!();
-
-            value.DisposeCount.Should().Be(1);
-            ownership.GetStatistics().PendingDisposals.Should().Be(0);
-            ownership.GetStatistics().ActiveValueCount.Should().Be(0);
-            ownership.RetryPendingDisposals().Should().Be(0);
+            await Assert.That(value.DisposeCount).IsEqualTo(1);
+            await Assert.That(ownership.GetStatistics().PendingDisposals).IsEqualTo(0);
+            await Assert.That(ownership.GetStatistics().ActiveValueCount).IsEqualTo(0);
+            await Assert.That(ownership.RetryPendingDisposals()).IsEqualTo(0);
         }
         finally
         {
@@ -64,53 +59,44 @@ public sealed class ValueOwnershipTests
     }
 
     [Test]
-    public void RetiringEntryDefersDisposalUntilLastLeaseIsReleased()
+    public async Task RetiringEntryDefersDisposalUntilLastLeaseIsReleased()
     {
         var value = new DisposableValue();
         using var ownership = new ValueOwnership<DisposableValue>(1, item => item.Dispose());
         ValueOwnership<DisposableValue>.Token token = ownership.Publish(value);
         CacheLease<DisposableValue> lease = ownership.Acquire(token);
-
         ownership.Retire(token);
-
-        value.DisposeCount.Should().Be(0);
-        lease.Value.Should().BeSameAs(value);
-
+        await Assert.That(value.DisposeCount).IsEqualTo(0);
+        await Assert.That(ReferenceEquals(lease.Value, value)).IsTrue();
         lease.Dispose();
         lease.Dispose();
-
         WaitForDisposal(value);
     }
 
     [Test]
-    public void AliasedEntriesShareOneDisposal()
+    public async Task AliasedEntriesShareOneDisposal()
     {
         var value = new DisposableValue();
         using var ownership = new ValueOwnership<DisposableValue>(1, item => item.Dispose());
         ValueOwnership<DisposableValue>.Token first = ownership.Publish(value);
         ValueOwnership<DisposableValue>.Token second = ownership.Publish(value);
         CacheLease<DisposableValue> lease = ownership.Acquire(first);
-
         ownership.Retire(first);
         ownership.Retire(second);
-        value.DisposeCount.Should().Be(0);
-
+        await Assert.That(value.DisposeCount).IsEqualTo(0);
         lease.Dispose();
-
         WaitForDisposal(value);
     }
 
     [Test]
-    public void RetiringAnOldTokenDoesNotRetireANewAlias()
+    public async Task RetiringAnOldTokenDoesNotRetireANewAlias()
     {
         var value = new DisposableValue();
         using var ownership = new ValueOwnership<DisposableValue>(1, item => item.Dispose());
         ValueOwnership<DisposableValue>.Token oldToken = ownership.Publish(value);
         ValueOwnership<DisposableValue>.Token newToken = ownership.Publish(value);
-
         ownership.Retire(oldToken);
-        value.DisposeCount.Should().Be(0);
-
+        await Assert.That(value.DisposeCount).IsEqualTo(0);
         ownership.Retire(newToken);
         WaitForDisposal(value);
     }
@@ -135,7 +121,6 @@ public sealed class ValueOwnershipTests
             }
         );
         ValueOwnership<DisposableValue>.Token token = ownership.Publish(value);
-
         Task retire = Task.Factory.StartNew(
             static state =>
             {
@@ -151,41 +136,36 @@ public sealed class ValueOwnershipTests
             TaskCreationOptions.DenyChildAttach,
             TaskScheduler.Default
         );
-
         try
         {
             await callbackEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
             await retire.WaitAsync(TimeSpan.FromSeconds(2));
-            value.DisposeCount.Should().Be(0);
+            await Assert.That(value.DisposeCount).IsEqualTo(0);
             releaseCallback.SetResult(null);
-            SpinWait
-                .SpinUntil(() => value.DisposeCount == 1, TimeSpan.FromSeconds(2))
-                .Should()
-                .BeTrue();
-            value.DisposeCount.Should().Be(1);
+            await Assert
+                .That(SpinWait.SpinUntil(() => value.DisposeCount == 1, TimeSpan.FromSeconds(2)))
+                .IsTrue();
+            await Assert.That(value.DisposeCount).IsEqualTo(1);
         }
         finally
         {
             releaseCallback.TrySetResult(null);
             await retire.WaitAsync(TimeSpan.FromSeconds(2));
-            SpinWait
-                .SpinUntil(() => value.DisposeCount == 1, TimeSpan.FromSeconds(2))
-                .Should()
-                .BeTrue();
+            await Assert
+                .That(SpinWait.SpinUntil(() => value.DisposeCount == 1, TimeSpan.FromSeconds(2)))
+                .IsTrue();
         }
     }
 
     [Test]
-    public void RegistryDisposalDefersValuesWithLiveLeases()
+    public async Task RegistryDisposalDefersValuesWithLiveLeases()
     {
         var value = new DisposableValue();
         var ownership = new ValueOwnership<DisposableValue>(1, item => item.Dispose());
         ValueOwnership<DisposableValue>.Token token = ownership.Publish(value);
         CacheLease<DisposableValue> lease = ownership.Acquire(token);
-
         ownership.Dispose();
-
-        value.DisposeCount.Should().Be(0);
+        await Assert.That(value.DisposeCount).IsEqualTo(0);
         lease.Dispose();
         WaitForDisposal(value);
         ownership.Dispose();
@@ -216,34 +196,29 @@ public sealed class ValueOwnershipTests
             exception => observed.TrySetResult(exception)
         );
         ValueOwnership<DisposableValue>.Token token = ownership.Publish(value);
-
         ownership.Retire(token);
-
         await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        value.DisposeCount.Should().Be(0);
+        await Assert.That(value.DisposeCount).IsEqualTo(0);
         release.SetResult(null);
-        (await observed.Task.WaitAsync(TimeSpan.FromSeconds(5)))
-            .Should()
-            .BeOfType<InvalidOperationException>();
-        value.DisposeCount.Should().Be(1);
+        await Assert
+            .That<object>((await observed.Task.WaitAsync(TimeSpan.FromSeconds(5)))!)
+            .IsTypeOf<InvalidOperationException>();
+        await Assert.That(value.DisposeCount).IsEqualTo(1);
     }
 
     [Test]
-    public void ConcurrentLeaseDisposalReleasesOnlyOnce()
+    public async Task ConcurrentLeaseDisposalReleasesOnlyOnce()
     {
         var value = new DisposableValue();
         using var ownership = new ValueOwnership<DisposableValue>(1, item => item.Dispose());
         ValueOwnership<DisposableValue>.Token token = ownership.Publish(value);
         CacheLease<DisposableValue> lease = ownership.Acquire(token);
         ownership.Retire(token);
-
         Parallel.For(0, 64, _ => lease.Dispose());
-
-        SpinWait
-            .SpinUntil(() => value.DisposeCount == 1, TimeSpan.FromSeconds(2))
-            .Should()
-            .BeTrue();
-        value.DisposeCount.Should().Be(1);
+        await Assert
+            .That(SpinWait.SpinUntil(() => value.DisposeCount == 1, TimeSpan.FromSeconds(2)))
+            .IsTrue();
+        await Assert.That(value.DisposeCount).IsEqualTo(1);
     }
 
     [Test]
@@ -263,19 +238,17 @@ public sealed class ValueOwnershipTests
         );
         ValueOwnership<DisposableValue>.Token token = ownership.Publish(value);
         ownership.Retire(token);
-
         await disposed.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Action republish = ownership.Invoking(current =>
+        Action republish = () =>
         {
-            current.Publish(value);
-        });
-        republish.Should().Throw<ValueOwnershipCapacityException>();
+            ownership.Publish(value);
+        };
+        await Assert.That(republish).Throws<ValueOwnershipCapacityException>();
     }
 
     private sealed class DisposableValue : IDisposable
     {
         private int _disposeCount;
-
         public int DisposeCount => Volatile.Read(ref _disposeCount);
 
         public void Dispose()
@@ -286,9 +259,9 @@ public sealed class ValueOwnershipTests
 
     private static void WaitForDisposal(DisposableValue value)
     {
-        SpinWait
-            .SpinUntil(() => value.DisposeCount == 1, TimeSpan.FromSeconds(2))
-            .Should()
-            .BeTrue();
+        if (!(SpinWait.SpinUntil(() => value.DisposeCount == 1, TimeSpan.FromSeconds(2))))
+            Assert.Fail(
+                "Expected SpinWait .SpinUntil(() => value.DisposeCount == 1, TimeSpan.FromSeconds(2)) to be true ()."
+            );
     }
 }

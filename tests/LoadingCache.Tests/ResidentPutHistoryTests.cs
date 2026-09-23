@@ -1,17 +1,14 @@
-using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class ResidentPutHistoryTests
 {
-    [TestCase(false, false)]
-    [TestCase(false, true)]
-    [TestCase(true, false)]
-    [TestCase(true, true)]
-    [Parallelizable(ParallelScope.All)]
+    [Test]
+    [Arguments(false, false)]
+    [Arguments(false, true)]
+    [Arguments(true, false)]
+    [Arguments(true, true)]
     public async Task MissingComputeRetriesAfterPublicationAndAutomaticRemoval(
         bool replace,
         bool rollover
@@ -27,21 +24,23 @@ public sealed class ResidentPutHistoryTests
         {
             engine.SetDictionaryMutationSequenceForTesting(long.MaxValue);
         }
+
         var transform = new MissingTransform();
         Task<CacheMutation<string>> compute = StartCompute(cache, transform);
         try
         {
             await transform.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            cache.GetOrAdd(1, static _ => "loaded").Should().Be("loaded");
+            await Assert.That(cache.GetOrAdd(1, static _ => "loaded")).IsEqualTo("loaded");
             if (replace)
             {
                 cache.Put(1, "replacement");
             }
+
             cache.CleanUp();
             MemoryPressureSnapshot snapshot = engine.CaptureMemoryPressureSnapshot(1, 1)!;
-            snapshot.Candidates.Should().ContainSingle();
-            engine.TrimForMemoryPressure(snapshot).Should().Be(1);
-            cache.TryGet(1, out _).Should().BeFalse();
+            await Assert.That(snapshot.Candidates).HasSingleItem();
+            await Assert.That(engine.TrimForMemoryPressure(snapshot)).IsEqualTo(1);
+            await Assert.That(cache.TryGet(1, out _)).IsFalse();
         }
         finally
         {
@@ -49,14 +48,14 @@ public sealed class ResidentPutHistoryTests
             await compute.WaitAsync(TimeSpan.FromSeconds(5));
         }
 
-        transform.Calls.Should().Be(2);
-        cache.AsDictionary()[1].Should().Be("retried");
+        await Assert.That(transform.Calls).IsEqualTo(2);
+        await Assert.That(cache.AsDictionary()[1]).IsEqualTo("retried");
         cache.AssertInvariants();
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    [Parallelizable(ParallelScope.All)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task MissingSnapshotHonorsInvalidationWithoutDependingOnUnrelatedResidentWrites(
         bool invalidate
     )
@@ -74,7 +73,7 @@ public sealed class ResidentPutHistoryTests
         {
             await transform.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
             if (invalidate)
-                cache.Invalidate(1).Should().BeFalse();
+                await Assert.That(cache.Invalidate(1)).IsFalse();
             else
                 cache.Put(2, "new");
         }
@@ -83,8 +82,9 @@ public sealed class ResidentPutHistoryTests
             transform.Release.TrySetResult();
             await compute.WaitAsync(TimeSpan.FromSeconds(5));
         }
-        transform.Calls.Should().Be(invalidate ? 2 : 1);
-        cache.AsDictionary()[1].Should().Be(invalidate ? "retried" : "stale");
+
+        await Assert.That(transform.Calls).IsEqualTo(invalidate ? 2 : 1);
+        await Assert.That(cache.AsDictionary()[1]).IsEqualTo(invalidate ? "retried" : "stale");
     }
 
     private static Task<CacheMutation<string>> StartCompute(
@@ -108,8 +108,7 @@ public sealed class ResidentPutHistoryTests
         );
 
     [Test]
-    [Parallelizable]
-    public void ComputeDoesNotRetryBecauseItsOwnSnapshotRemovedAnExpiredEntry()
+    public async Task ComputeDoesNotRetryBecauseItsOwnSnapshotRemovedAnExpiredEntry()
     {
         var clock = new FakeTimeProvider();
         using ICache<int, string> cache = CacheBuilder
@@ -122,21 +121,20 @@ public sealed class ResidentPutHistoryTests
         cache.Put(1, "expired");
         clock.Advance(TimeSpan.FromSeconds(1));
         int calls = 0;
-
         cache
             .AsDictionary()
             .Compute(
                 1,
                 (_, current) =>
                 {
-                    current.HasValue.Should().BeFalse();
+                    if (current.HasValue)
+                        Assert.Fail("Expected current.HasValue to be false ().");
                     calls++;
                     return CacheMutation.Set("new");
                 }
             );
-
-        calls.Should().Be(1);
-        cache.AsDictionary()[1].Should().Be("new");
+        await Assert.That(calls).IsEqualTo(1);
+        await Assert.That(cache.AsDictionary()[1]).IsEqualTo("new");
     }
 
     private sealed class MissingTransform
@@ -149,8 +147,10 @@ public sealed class ResidentPutHistoryTests
 
         internal CacheMutation<string> Invoke(int key, CacheValue<string> current)
         {
-            key.Should().Be(1);
-            current.HasValue.Should().BeFalse();
+            if ((key) != (1))
+                Assert.Fail("Expected key to equal (1).");
+            if (current.HasValue)
+                Assert.Fail("Expected current.HasValue to be false ().");
             Calls++;
             if (Calls != 1)
             {

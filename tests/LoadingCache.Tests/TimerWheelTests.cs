@@ -1,15 +1,12 @@
 using System.Globalization;
-using FluentAssertions;
 using LoadingCache.Expiration;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class TimerWheelTests
 {
     [Test]
-    public void ExpiresNodesAtEachHierarchyBoundary()
+    public async Task ExpiresNodesAtEachHierarchyBoundary()
     {
         TimerWheel<string> wheel = new();
         ulong[] deadlines =
@@ -40,67 +37,82 @@ public sealed class TimerWheelTests
                 }
             ),
         ];
-
         List<IdentityTimerNode<string>> due = Drain(wheel, 524_288, 64);
-
-        due.Select(node => node.Value).Should().BeEquivalentTo(nodes.Select(node => node.Value));
-        wheel.Count.Should().Be(0);
+        await Assert
+            .That(due.Select(node => node.Value))
+            .IsEquivalentTo(nodes.Select(node => node.Value));
+        await Assert.That(wheel.Count).IsEqualTo(0);
         wheel.AssertInvariants();
     }
 
     [Test]
-    public void SameBucketFutureNodeIsNotReturnedEarly()
+    public async Task SameBucketFutureNodeIsNotReturnedEarly()
     {
         TimerWheel<string> wheel = new();
         IdentityTimerNode<string> node = new("future");
         wheel.Schedule(node, 60);
-
-        wheel.Advance(10, 32).DueNodes.Should().BeEmpty();
-        node.IsScheduled.Should().BeTrue();
-        wheel.Advance(59, 32).DueNodes.Should().BeEmpty();
-        wheel.Advance(60, 32).DueNodes.Should().ContainSingle().Which.Should().BeSameAs(node);
-
+        await Assert.That(wheel.Advance(10, 32).DueNodes).IsEmpty();
+        await Assert.That(node.IsScheduled).IsTrue();
+        await Assert.That(wheel.Advance(59, 32).DueNodes).IsEmpty();
+        await Assert
+            .That(
+                ReferenceEquals(
+                    (await Assert.That(wheel.Advance(60, 32).DueNodes).HasSingleItem()),
+                    node
+                )
+            )
+            .IsTrue();
         wheel.AssertInvariants();
     }
 
     [Test]
-    public void RescheduleAndDeschedulePreserveIdentityLinks()
+    public async Task RescheduleAndDeschedulePreserveIdentityLinks()
     {
         TimerWheel<string> wheel = new();
         IdentityTimerNode<string> rescheduled = new("rescheduled");
         IdentityTimerNode<string> removed = new("removed");
-
         wheel.Schedule(rescheduled, 100);
-        wheel.Reschedule(rescheduled, 5).Should().BeTrue();
-        wheel.Advance(5, 8).DueNodes.Should().ContainSingle().Which.Should().BeSameAs(rescheduled);
-
+        await Assert.That(wheel.Reschedule(rescheduled, 5)).IsTrue();
+        await Assert
+            .That(
+                ReferenceEquals(
+                    (await Assert.That(wheel.Advance(5, 8).DueNodes).HasSingleItem()),
+                    rescheduled
+                )
+            )
+            .IsTrue();
         wheel.Schedule(removed, 200);
-        wheel.Deschedule(removed).Should().BeTrue();
-        wheel.Deschedule(removed).Should().BeFalse();
-        wheel.Advance(200, 8).DueNodes.Should().BeEmpty();
-
-        wheel.Retire(rescheduled).Should().BeTrue();
-        wheel.Retire(rescheduled).Should().BeFalse();
+        await Assert.That(wheel.Deschedule(removed)).IsTrue();
+        await Assert.That(wheel.Deschedule(removed)).IsFalse();
+        await Assert.That(wheel.Advance(200, 8).DueNodes).IsEmpty();
+        await Assert.That(wheel.Retire(rescheduled)).IsTrue();
+        await Assert.That(wheel.Retire(rescheduled)).IsFalse();
         wheel.AssertInvariants();
     }
 
     [Test]
-    public void RetiringAQueuedNodeDoesNotStrandItsBucket()
+    public async Task RetiringAQueuedNodeDoesNotStrandItsBucket()
     {
         TimerWheel<string> wheel = new();
         IdentityTimerNode<string> retired = new("retired");
         IdentityTimerNode<string> survivor = new("survivor");
         wheel.Schedule(retired, 64);
         wheel.Schedule(survivor, 65);
-
-        wheel.Retire(retired).Should().BeTrue();
-        wheel.Advance(65, 16).DueNodes.Should().ContainSingle().Which.Should().BeSameAs(survivor);
-        wheel.Count.Should().Be(0);
+        await Assert.That(wheel.Retire(retired)).IsTrue();
+        await Assert
+            .That(
+                ReferenceEquals(
+                    (await Assert.That(wheel.Advance(65, 16).DueNodes).HasSingleItem()),
+                    survivor
+                )
+            )
+            .IsTrue();
+        await Assert.That(wheel.Count).IsEqualTo(0);
         wheel.AssertInvariants();
     }
 
     [Test]
-    public void BudgetReturnsAContinuationWithoutDroppingNodes()
+    public async Task BudgetReturnsAContinuationWithoutDroppingNodes()
     {
         TimerWheel<string> wheel = new();
         IdentityTimerNode<string>[] nodes =
@@ -129,13 +141,13 @@ public sealed class TimerWheelTests
             result = wheel.Advance(32, 3);
         }
 
-        due.Should().BeEquivalentTo(nodes);
-        wheel.Count.Should().Be(0);
+        await Assert.That(due).IsEquivalentTo(nodes);
+        await Assert.That(wheel.Count).IsEqualTo(0);
         wheel.AssertInvariants();
     }
 
     [Test]
-    public void BudgetContinuationDoesNotReprocessRescheduledNodes()
+    public async Task BudgetContinuationDoesNotReprocessRescheduledNodes()
     {
         TimerWheel<string> wheel = new();
         IdentityTimerNode<string>[] nodes =
@@ -152,23 +164,21 @@ public sealed class TimerWheelTests
         }
 
         List<IdentityTimerNode<string>> due = Drain(wheel, 1, 10);
-
-        due.Should().BeEquivalentTo(nodes);
-        wheel.Count.Should().Be(0);
+        await Assert.That(due).IsEquivalentTo(nodes);
+        await Assert.That(wheel.Count).IsEqualTo(0);
         wheel.AssertInvariants();
     }
 
     [Test]
-    public void DescheduledContinuationTailDoesNotBusyLoop()
+    public async Task DescheduledContinuationTailDoesNotBusyLoop()
     {
         TimerWheel<int> wheel = new();
         IdentityTimerNode<int> survivor = new(1);
         IdentityTimerNode<int> tail = new(2);
         wheel.Schedule(survivor, 100_000_000);
         wheel.Schedule(tail, 100_000_000);
-
-        wheel.Advance(524_288, 1).HasPending.Should().BeTrue();
-        wheel.Deschedule(tail).Should().BeTrue();
+        await Assert.That(wheel.Advance(524_288, 1).HasPending).IsTrue();
+        await Assert.That(wheel.Deschedule(tail)).IsTrue();
         for (int value = 3; value < 10_003; value++)
         {
             wheel.Schedule(new IdentityTimerNode<int>(value), 100_000_000);
@@ -186,24 +196,22 @@ public sealed class TimerWheelTests
             break;
         }
 
-        settled.Should().BeTrue();
-        wheel.Count.Should().Be(10_001);
-        wheel.GetNextDelay().Should().BeGreaterThan(0);
+        await Assert.That(settled).IsTrue();
+        await Assert.That(wheel.Count).IsEqualTo(10_001);
+        await Assert.That(wheel.GetNextDelay()).IsGreaterThan(0UL);
         wheel.AssertInvariants();
     }
 
     [Test]
-    public void RetiredContinuationTailDoesNotBusyLoop()
+    public async Task RetiredContinuationTailDoesNotBusyLoop()
     {
         TimerWheel<int> wheel = new();
         IdentityTimerNode<int> survivor = new(1);
         IdentityTimerNode<int> tail = new(2);
         wheel.Schedule(survivor, 100_000_000);
         wheel.Schedule(tail, 100_000_000);
-
-        wheel.Advance(524_288, 1).HasPending.Should().BeTrue();
-        wheel.Retire(tail).Should().BeTrue();
-
+        await Assert.That(wheel.Advance(524_288, 1).HasPending).IsTrue();
+        await Assert.That(wheel.Retire(tail)).IsTrue();
         bool settled = false;
         for (int i = 0; i < 100; i++)
         {
@@ -216,24 +224,22 @@ public sealed class TimerWheelTests
             break;
         }
 
-        settled.Should().BeTrue();
-        wheel.Count.Should().Be(1);
-        wheel.GetNextDelay().Should().BeGreaterThan(0);
+        await Assert.That(settled).IsTrue();
+        await Assert.That(wheel.Count).IsEqualTo(1);
+        await Assert.That(wheel.GetNextDelay()).IsGreaterThan(0UL);
         wheel.AssertInvariants();
     }
 
     [Test]
-    public void RescheduledContinuationTailDoesNotBusyLoop()
+    public async Task RescheduledContinuationTailDoesNotBusyLoop()
     {
         TimerWheel<int> wheel = new();
         IdentityTimerNode<int> survivor = new(1);
         IdentityTimerNode<int> tail = new(2);
         wheel.Schedule(survivor, 100_000_000);
         wheel.Schedule(tail, 100_000_000);
-
-        wheel.Advance(524_288, 1).HasPending.Should().BeTrue();
-        wheel.Reschedule(tail, 600_000).Should().BeTrue();
-
+        await Assert.That(wheel.Advance(524_288, 1).HasPending).IsTrue();
+        await Assert.That(wheel.Reschedule(tail, 600_000)).IsTrue();
         bool settled = false;
         for (int i = 0; i < 100; i++)
         {
@@ -246,30 +252,43 @@ public sealed class TimerWheelTests
             break;
         }
 
-        settled.Should().BeTrue();
-        wheel.Count.Should().Be(2);
-        wheel.Advance(600_000, 16).DueNodes.Should().ContainSingle().Which.Should().BeSameAs(tail);
+        await Assert.That(settled).IsTrue();
+        await Assert.That(wheel.Count).IsEqualTo(2);
+        await Assert
+            .That(
+                ReferenceEquals(
+                    (await Assert.That(wheel.Advance(600_000, 16).DueNodes).HasSingleItem()),
+                    tail
+                )
+            )
+            .IsTrue();
         wheel.AssertInvariants();
     }
 
     [Test]
-    public void CrossWheelDescheduleCannotMutateTheOwningWheel()
+    public async Task CrossWheelDescheduleCannotMutateTheOwningWheel()
     {
         TimerWheel<string> owner = new();
         TimerWheel<string> other = new();
         IdentityTimerNode<string> node = new("owned");
         owner.Schedule(node, 100);
-
-        other.Deschedule(node).Should().BeFalse();
-        node.IsScheduled.Should().BeTrue();
-        other.Retire(node).Should().BeFalse();
-        owner.Advance(100, 16).DueNodes.Should().ContainSingle().Which.Should().BeSameAs(node);
+        await Assert.That(other.Deschedule(node)).IsFalse();
+        await Assert.That(node.IsScheduled).IsTrue();
+        await Assert.That(other.Retire(node)).IsFalse();
+        await Assert
+            .That(
+                ReferenceEquals(
+                    (await Assert.That(owner.Advance(100, 16).DueNodes).HasSingleItem()),
+                    node
+                )
+            )
+            .IsTrue();
         owner.AssertInvariants();
         other.AssertInvariants();
     }
 
     [Test]
-    public void WrapAroundUsesUnsignedMonotonicDistance()
+    public async Task WrapAroundUsesUnsignedMonotonicDistance()
     {
         const ulong start = ulong.MaxValue - 2;
         TimerWheel<string> wheel = new(start);
@@ -277,97 +296,102 @@ public sealed class TimerWheelTests
         IdentityTimerNode<string> afterWrap = new("after-wrap");
         wheel.Schedule(beforeWrap, unchecked(start + 1));
         wheel.Schedule(afterWrap, unchecked(start + 4));
-
         TimerAdvanceResult<string> result = wheel.Advance(1, 16);
-
-        result.DueNodes.Should().BeEquivalentTo([beforeWrap, afterWrap]);
-        wheel.Count.Should().Be(0);
+        await Assert.That(result.DueNodes).IsEquivalentTo([beforeWrap, afterWrap]);
+        await Assert.That(wheel.Count).IsEqualTo(0);
         wheel.AssertInvariants();
     }
 
     [Test]
-    public void LargeForwardJumpVisitsOuterWheelAndExpiresDueNodes()
+    public async Task LargeForwardJumpVisitsOuterWheelAndExpiresDueNodes()
     {
         TimerWheel<string> wheel = new();
         IdentityTimerNode<string> node = new("large-jump");
         wheel.Schedule(node, 1000);
-
         TimerAdvanceResult<string> result = wheel.Advance(1_000_000, 128);
-
-        result.DueNodes.Should().ContainSingle().Which.Should().BeSameAs(node);
-        wheel.Count.Should().Be(0);
+        await Assert
+            .That(ReferenceEquals((await Assert.That(result.DueNodes).HasSingleItem()), node))
+            .IsTrue();
+        await Assert.That(wheel.Count).IsEqualTo(0);
         wheel.AssertInvariants();
     }
 
     [Test]
-    public void PastDeadlineIsPlacedInTheCurrentBucketForImmediateCleanup()
+    public async Task PastDeadlineIsPlacedInTheCurrentBucketForImmediateCleanup()
     {
         TimerWheel<string> wheel = new(100);
         IdentityTimerNode<string> node = new("past");
         wheel.Schedule(node, 50);
-
-        wheel.GetNextDelay().Should().Be(0);
-        wheel.Advance(100, 16).DueNodes.Should().ContainSingle().Which.Should().BeSameAs(node);
+        await Assert.That(wheel.GetNextDelay()).IsEqualTo(0UL);
+        await Assert
+            .That(
+                ReferenceEquals(
+                    (await Assert.That(wheel.Advance(100, 16).DueNodes).HasSingleItem()),
+                    node
+                )
+            )
+            .IsTrue();
         wheel.AssertInvariants();
     }
 
     [Test]
-    public void DeadlineBeyondTheSignedHalfRangeIsRejected()
+    public async Task DeadlineBeyondTheSignedHalfRangeIsRejected()
     {
         TimerWheel<string> wheel = new();
         IdentityTimerNode<string> node = new("too-far");
-
         Action action = () => wheel.Schedule(node, (ulong)long.MaxValue + 1);
-
-        action.Should().Throw<ArgumentOutOfRangeException>();
+        await Assert.That(action).Throws<ArgumentOutOfRangeException>();
     }
 
     [Test]
-    public void MaximumSupportedForwardDurationUsesTheOuterWheel()
+    public async Task MaximumSupportedForwardDurationUsesTheOuterWheel()
     {
         TimerWheel<string> wheel = new();
         IdentityTimerNode<string> node = new("maximum");
         wheel.Schedule(node, long.MaxValue);
-
-        wheel
-            .Advance(long.MaxValue, int.MaxValue)
-            .DueNodes.Should()
-            .ContainSingle()
-            .Which.Should()
-            .BeSameAs(node);
-        wheel.Count.Should().Be(0);
+        await Assert
+            .That(
+                ReferenceEquals(
+                    (
+                        await Assert
+                            .That(wheel.Advance(long.MaxValue, int.MaxValue).DueNodes)
+                            .HasSingleItem()
+                    ),
+                    node
+                )
+            )
+            .IsTrue();
+        await Assert.That(wheel.Count).IsEqualTo(0);
         wheel.AssertInvariants();
     }
 
     [Test]
-    public void BackwardClockMoveDoesNotExpireFutureNodes()
+    public async Task BackwardClockMoveDoesNotExpireFutureNodes()
     {
         TimerWheel<string> wheel = new(100);
         IdentityTimerNode<string> node = new("future");
         wheel.Schedule(node, 200);
-
-        wheel.Advance(90, 16).DueNodes.Should().BeEmpty();
-        node.IsScheduled.Should().BeTrue();
-        wheel.CurrentTime.Should().Be(100);
+        await Assert.That(wheel.Advance(90, 16).DueNodes).IsEmpty();
+        await Assert.That(node.IsScheduled).IsTrue();
+        await Assert.That(wheel.CurrentTime).IsEqualTo(100UL);
         wheel.AssertInvariants();
     }
 
     [Test]
-    public void NextDelayIsBoundedByTheNextBucketBoundary()
+    public async Task NextDelayIsBoundedByTheNextBucketBoundary()
     {
         TimerWheel<string> wheel = new();
         IdentityTimerNode<string> node = new("next");
         wheel.Schedule(node, 100);
-
-        wheel.GetNextDelay().Should().Be(64);
-        wheel.Advance(64, 16).DueNodes.Should().BeEmpty();
-        wheel.GetNextDelay().Should().Be(36);
-        wheel.Advance(100, 16).DueNodes.Should().ContainSingle();
-        wheel.GetNextDelay().Should().Be(ulong.MaxValue);
+        await Assert.That(wheel.GetNextDelay()).IsEqualTo(64UL);
+        await Assert.That(wheel.Advance(64, 16).DueNodes).IsEmpty();
+        await Assert.That(wheel.GetNextDelay()).IsEqualTo(36UL);
+        await Assert.That(wheel.Advance(100, 16).DueNodes).HasSingleItem();
+        await Assert.That(wheel.GetNextDelay()).IsEqualTo(ulong.MaxValue);
     }
 
     [Test]
-    public void FixedSeedOracleFindsEveryDueNodeAfterRepeatedAdvances()
+    public async Task FixedSeedOracleFindsEveryDueNodeAfterRepeatedAdvances()
     {
         Random random = new(0x5EED);
         TimerWheel<int> wheel = new();
@@ -408,8 +432,8 @@ public sealed class TimerWheelTests
             final = wheel.Advance(50_000, 64);
         }
 
-        expired.Should().BeEquivalentTo(scheduled.Keys);
-        wheel.Count.Should().Be(0);
+        await Assert.That(expired).IsEquivalentTo(scheduled.Keys);
+        await Assert.That(wheel.Count).IsEqualTo(0);
         wheel.AssertInvariants();
     }
 
