@@ -1,19 +1,17 @@
 using FluentAssertions;
 using LoadingCache.Maintenance;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
-[Parallelizable(ParallelScope.All)]
 public sealed class ReadBufferUnitIncrementTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
 
-    [TestCase(true, long.MaxValue - 1)]
-    [TestCase(true, long.MaxValue)]
-    [TestCase(false, long.MaxValue - 1)]
-    [TestCase(false, long.MaxValue)]
+    [Test]
+    [Arguments(true, long.MaxValue - 1)]
+    [Arguments(true, long.MaxValue)]
+    [Arguments(false, long.MaxValue - 1)]
+    [Arguments(false, long.MaxValue)]
     public void ActualDroppedOffersSaturateTheCallingThreadsShard(bool full, long initial)
     {
         using StripedReadBuffer<int> buffer = new(1, full ? 1 : 2);
@@ -47,8 +45,9 @@ public sealed class ReadBufferUnitIncrementTests
         }
     }
 
-    [TestCase(true)]
-    [TestCase(false)]
+    [Test]
+    [Arguments(true)]
+    [Arguments(false)]
     public void UnsaturatedDroppedOffersCountExactlyOnTheCallingThreadsShard(bool full)
     {
         using StripedReadBuffer<int> buffer = new(1, full ? 1 : 2);
@@ -114,6 +113,7 @@ public sealed class ReadBufferUnitIncrementTests
                             unexpectedResults++;
                         }
                     }
+
                     return unexpectedResults;
                 },
                 (buffer, start),

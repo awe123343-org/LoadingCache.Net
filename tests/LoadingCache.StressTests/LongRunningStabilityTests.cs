@@ -4,13 +4,10 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using FluentAssertions;
-using NUnit.Framework;
 
 namespace LoadingCache.StressTests;
 
 /// <summary>Continuous seeded traffic; the seed fixes inputs, not operating-system schedules.</summary>
-[TestFixture]
-[Parallelizable(ParallelScope.All)]
 public sealed class LongRunningStabilityTests
 {
     private const int Seed = 20260913;
@@ -21,14 +18,16 @@ public sealed class LongRunningStabilityTests
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(30);
 
     /// <summary>Runs resident, fixed-expiration, and variable-expiration caches in one process.</summary>
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public Task ContinuousMixedLifecycleMaintainsBounds(bool statistics) =>
         RunLifecycleAsync(statistics, accessOnly: false);
 
     /// <summary>Runs resident, access-only, and variable-expiration caches in one process.</summary>
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public Task ContinuousAccessOnlyLifecycleMaintainsBounds(bool statistics) =>
         RunLifecycleAsync(statistics, accessOnly: true);
 
@@ -40,7 +39,7 @@ public sealed class LongRunningStabilityTests
         seconds.Should().BeInRange(1, 86_400);
         string directory =
             Environment.GetEnvironmentVariable("LOADINGCACHE_SOAK_OUTPUT")
-            ?? Path.Combine(TestContext.CurrentContext.WorkDirectory, "artifacts", "soak");
+            ?? Path.Combine(Environment.CurrentDirectory, "artifacts", "soak");
         Directory.CreateDirectory(directory);
         string output = Path.Combine(
             directory,
@@ -138,6 +137,7 @@ public sealed class LongRunningStabilityTests
                 {
                     await cache.AssertQuiescentAsync().ConfigureAwait(false);
                 }
+
                 if (batch % 16 == 0)
                 {
                     foreach (SoakCache cache in caches)
@@ -147,6 +147,7 @@ public sealed class LongRunningStabilityTests
                         cache.Cache.EstimatedCount.Should().Be(0);
                     }
                 }
+
                 if (elapsed.Elapsed >= nextProgress)
                 {
                     WriteProgress(
@@ -163,6 +164,7 @@ public sealed class LongRunningStabilityTests
                     );
                     nextProgress = elapsed.Elapsed + TimeSpan.FromSeconds(1);
                 }
+
                 if (elapsed.Elapsed < nextRotation)
                     continue;
                 foreach (SoakCache cache in caches)
@@ -174,6 +176,7 @@ public sealed class LongRunningStabilityTests
                         retired.Dequeue();
                     }
                 }
+
                 caches = CreateCaches(statistics, ++cycle, accessOnly);
                 jobs = [];
                 GC.Collect(
@@ -197,6 +200,7 @@ public sealed class LongRunningStabilityTests
                 );
                 nextRotation = elapsed.Elapsed + rotationInterval;
             }
+
             WriteProgress(
                 log,
                 "workload-complete",
@@ -227,7 +231,7 @@ public sealed class LongRunningStabilityTests
                 }
             );
             await TestContext
-                .Error.WriteLineAsync(
+                .Current!.ErrorOutputWriter.WriteLineAsync(
                     $"scenario={scenario}; seed={Seed}; failure and final 128 operations per worker: {output}"
                 )
                 .ConfigureAwait(false);
@@ -247,6 +251,7 @@ public sealed class LongRunningStabilityTests
                 }
             }
         }
+
         Write(
             log,
             new
@@ -259,7 +264,7 @@ public sealed class LongRunningStabilityTests
             }
         );
         await TestContext
-            .Progress.WriteLineAsync(
+            .Current!.OutputWriter.WriteLineAsync(
                 $"soak scenario={scenario}; stats={statistics}; batches={batch}; cycles={cycle}; output={output}"
             )
             .ConfigureAwait(false);
@@ -289,6 +294,7 @@ public sealed class LongRunningStabilityTests
                     }
                     catch (OperationCanceledException) when (canceled.IsCancellationRequested) { }
                 }
+
                 break;
             case < 500:
                 Validate(
@@ -318,6 +324,7 @@ public sealed class LongRunningStabilityTests
                 {
                     Validate(value, key, state.Instance);
                 }
+
                 break;
             case < 970:
                 state.Clock.Advance(TimeSpan.FromMilliseconds(random.Next(1, 8)));
@@ -334,6 +341,7 @@ public sealed class LongRunningStabilityTests
                 );
                 break;
         }
+
         state.Peak.Should().BeLessThanOrEqualTo(LoadLimit);
     }
 
@@ -431,8 +439,7 @@ public sealed class LongRunningStabilityTests
                     MaximumWeight = mode == 0 ? null : 256,
                     MaximumResidentCount = mode == 0 ? null : MaximumResidents,
                     Weigher = mode == 0 ? null : static (_, value) => value.Weight,
-                    MaxConcurrentLoads = LoadLimit,
-                    // This fixture has only a single-key loader; the resident mode also
+                    MaxConcurrentLoads = LoadLimit, // This fixture has only a single-key loader; the resident mode also
                     // exercises entry-only Put commits while expiration modes stay coordinated.
                     SupportsBulkLoading = false,
                     RecordStatistics = statistics,
@@ -508,6 +515,7 @@ public sealed class LongRunningStabilityTests
                         break;
                     }
                 }
+
                 if (watchdog.Elapsed > Watchdog)
                 {
                     throw new TimeoutException(
@@ -515,8 +523,10 @@ public sealed class LongRunningStabilityTests
                             + JsonSerializer.Serialize(Cache.GetStatistics())
                     );
                 }
+
                 await Task.Yield();
             }
+
             _engine.AssertInvariants();
             Cache.EstimatedCount.Should().BeLessThanOrEqualTo(MaximumResidents);
             long maximum = Cache.Policy.Eviction!.Maximum;
@@ -531,6 +541,7 @@ public sealed class LongRunningStabilityTests
             {
                 Validate(resident.Value, resident.Key, Instance);
             }
+
             Peak.Should().BeLessThanOrEqualTo(LoadLimit);
             if (!_statistics)
             {

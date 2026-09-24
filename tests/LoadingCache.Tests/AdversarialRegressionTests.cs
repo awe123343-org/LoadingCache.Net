@@ -1,17 +1,17 @@
 using System.Runtime.CompilerServices;
 using FluentAssertions;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
 public sealed class AdversarialRegressionTests
 {
     [Test]
-    public async Task DisposeAtBeforeCompletionFaultsSharedWaiterWhileHookIsHeld()
+    public async Task DisposeAtBeforeCompletionFaultsSharedWaiterWhileHookIsHeld(
+        CancellationToken cancellationToken
+    )
     {
         await using var completion = new BlockingTestHook(TestTimeout);
         var hooks = new LoadingCacheTestHooks { BeforeCompletion = completion.Invoke };
-
         var load = Signal<int>();
         IAsyncLoadingCache<int, int> cache = Create<int, int>(
             (_, _) => load.Task,
@@ -19,16 +19,15 @@ public sealed class AdversarialRegressionTests
         );
         try
         {
-            var pending = Get(cache, 1).AsTask();
+            var pending = Get(cache, 1, cancellationToken).AsTask();
             try
             {
                 load.TrySetResult(123);
-                await AwaitWithTestTimeout(completion.Entered);
-
+                await AwaitWithTestTimeout(completion.Entered, cancellationToken);
                 try
                 {
-                    await AwaitWithTestTimeout(cache.DisposeAsync().AsTask());
-                    await ((Func<Task>)(() => AwaitWithTestTimeout(pending)))
+                    await AwaitWithTestTimeout(cache.DisposeAsync().AsTask(), cancellationToken);
+                    await ((Func<Task>)(() => AwaitWithTestTimeout(pending, cancellationToken)))
                         .Should()
                         .ThrowExactlyAsync<ObjectDisposedException>();
                 }
@@ -63,13 +62,12 @@ public sealed class AdversarialRegressionTests
     }
 
     [Test]
-    public async Task DisposedCacheRejectsOperationsAndGetters()
+    public async Task DisposedCacheRejectsOperationsAndGetters(CancellationToken cancellationToken)
     {
         var cache = Create<int, int>((_, _) => Task.FromResult(1));
         await cache.DisposeAsync();
-
         await FluentActions
-            .Awaiting(() => Get(cache, 1).AsTask())
+            .Awaiting(() => Get(cache, 1, cancellationToken).AsTask())
             .Should()
             .ThrowExactlyAsync<ObjectDisposedException>();
         FluentActions
@@ -97,7 +95,9 @@ public sealed class AdversarialRegressionTests
     }
 
     [Test]
-    public async Task StatisticsSeparateMissesFromLoaderStartsAndCoalescedWaiters()
+    public async Task StatisticsSeparateMissesFromLoaderStartsAndCoalescedWaiters(
+        CancellationToken cancellationToken
+    )
     {
         const int callerCount = 128;
         var loaderEntered = Signal();
@@ -113,7 +113,6 @@ public sealed class AdversarialRegressionTests
             },
             Options(recordStatistics: true)
         );
-
         var ready = Enumerable.Range(0, callerCount).Select(_ => Signal()).ToArray();
         var requested = Enumerable.Range(0, callerCount).Select(_ => Signal()).ToArray();
         var go = Signal();
@@ -125,22 +124,30 @@ public sealed class AdversarialRegressionTests
                 1,
                 ready[index],
                 requested[index],
-                go.Task
+                go.Task,
+                cancellationToken
             );
         }
+
         try
         {
-            await AwaitWithTestTimeout(Task.WhenAll(ready.Select(signal => signal.Task)));
+            await AwaitWithTestTimeout(
+                Task.WhenAll(ready.Select(signal => signal.Task)),
+                cancellationToken
+            );
             go.TrySetResult(true);
-            await AwaitWithTestTimeout(loaderEntered.Task);
-            await AwaitWithTestTimeout(Task.WhenAll(requested.Select(signal => signal.Task)));
+            await AwaitWithTestTimeout(loaderEntered.Task, cancellationToken);
+            await AwaitWithTestTimeout(
+                Task.WhenAll(requested.Select(signal => signal.Task)),
+                cancellationToken
+            );
             releaseLoader.TrySetResult(true);
-            int[] values = await AwaitWithTestTimeout(Task.WhenAll(waiters));
-
+            int[] values = await AwaitWithTestTimeout(Task.WhenAll(waiters), cancellationToken);
             foreach (int value in values)
             {
                 value.Should().Be(130);
             }
+
             var statistics = cache.GetStatistics();
             statistics.Misses.Should().Be(callerCount);
             statistics.LoadsStarted.Should().Be(1);
@@ -166,7 +173,9 @@ public sealed class AdversarialRegressionTests
     }
 
     [Test]
-    public async Task DisabledStatisticsKeepCountersZeroButExposeRunningGauge()
+    public async Task DisabledStatisticsKeepCountersZeroButExposeRunningGauge(
+        CancellationToken cancellationToken
+    )
     {
         var loaderEntered = Signal();
         var releaseLoader = Signal();
@@ -179,18 +188,17 @@ public sealed class AdversarialRegressionTests
             },
             Options(recordStatistics: false)
         );
-
-        var pending = Get(cache, 1).AsTask();
+        var pending = Get(cache, 1, cancellationToken).AsTask();
         try
         {
-            await AwaitWithTestTimeout(loaderEntered.Task);
+            await AwaitWithTestTimeout(loaderEntered.Task, cancellationToken);
             var running = cache.GetStatistics();
             running.Hits.Should().Be(0);
             running.Misses.Should().Be(0);
             running.LoadsStarted.Should().Be(0);
             running.InFlightLoads.Should().Be(1);
             releaseLoader.TrySetResult(true);
-            (await AwaitWithTestTimeout(pending)).Should().Be(131);
+            (await AwaitWithTestTimeout(pending, cancellationToken)).Should().Be(131);
         }
         finally
         {
@@ -206,7 +214,9 @@ public sealed class AdversarialRegressionTests
     }
 
     [Test]
-    public async Task SameFlightFaultIsObservedByAllWaitersAndFailureCanRetry()
+    public async Task SameFlightFaultIsObservedByAllWaitersAndFailureCanRetry(
+        CancellationToken cancellationToken
+    )
     {
         const int callerCount = 128;
         var loaderEntered = Signal();
@@ -225,7 +235,6 @@ public sealed class AdversarialRegressionTests
                 throw failure;
             }
         );
-
         var ready = Enumerable.Range(0, callerCount).Select(_ => Signal()).ToArray();
         var requested = Enumerable.Range(0, callerCount).Select(_ => Signal()).ToArray();
         var go = Signal();
@@ -237,24 +246,33 @@ public sealed class AdversarialRegressionTests
                 1,
                 ready[index],
                 requested[index],
-                go.Task
+                go.Task,
+                cancellationToken
             );
         }
+
         try
         {
-            await AwaitWithTestTimeout(Task.WhenAll(ready.Select(signal => signal.Task)));
+            await AwaitWithTestTimeout(
+                Task.WhenAll(ready.Select(signal => signal.Task)),
+                cancellationToken
+            );
             go.TrySetResult(true);
-            await AwaitWithTestTimeout(loaderEntered.Task);
-            await AwaitWithTestTimeout(Task.WhenAll(requested.Select(signal => signal.Task)));
+            await AwaitWithTestTimeout(loaderEntered.Task, cancellationToken);
+            await AwaitWithTestTimeout(
+                Task.WhenAll(requested.Select(signal => signal.Task)),
+                cancellationToken
+            );
             var failure = new InvalidOperationException("gated failure");
             releaseFailure.TrySetResult(failure);
-            var exceptions = await AwaitWithTestTimeout(Task.WhenAll(waiters));
+            var exceptions = await AwaitWithTestTimeout(Task.WhenAll(waiters), cancellationToken);
             foreach (var exception in exceptions)
             {
                 exception.Should().BeOfType<InvalidOperationException>();
             }
+
             calls.Should().Be(1);
-            (await Get(cache, 1)).Should().Be(132);
+            (await Get(cache, 1, cancellationToken)).Should().Be(132);
             calls.Should().Be(2);
         }
         finally
@@ -273,15 +291,16 @@ public sealed class AdversarialRegressionTests
     }
 
     [Test]
-    public async Task TimestampWrapDoesNotResurrectOrPrematurelyExpireValues()
+    public async Task TimestampWrapDoesNotResurrectOrPrematurelyExpireValues(
+        CancellationToken cancellationToken
+    )
     {
         var clock = new WrappingTimeProvider(long.MaxValue - 2);
         await using var cache = Create<int, int>(
             (_, _) => Task.FromResult(133),
             Options(expireAfterAccess: TimeSpan.FromSeconds(3), timeProvider: clock)
         );
-
-        await Get(cache, 1);
+        await Get(cache, 1, cancellationToken);
         clock.Advance(2);
         cache.TryGet(1, out _).Should().BeTrue();
         clock.Advance(1);
@@ -295,7 +314,7 @@ public sealed class AdversarialRegressionTests
     }
 
     [Test]
-    public async Task ComparerEqualReentrancyIsDetected()
+    public async Task ComparerEqualReentrancyIsDetected(CancellationToken cancellationToken)
     {
         var loader = new DependentLoader();
         await using var cache = Create<string, int>(
@@ -303,22 +322,28 @@ public sealed class AdversarialRegressionTests
             comparer: StringComparer.OrdinalIgnoreCase
         );
         loader.Cache = cache;
-
         await cache
-            .Awaiting(static current => AwaitWithTestTimeout(Get(current, "KEY").AsTask()))
+            .Awaiting(current =>
+                AwaitWithTestTimeout(
+                    Get(current, "KEY", cancellationToken).AsTask(),
+                    cancellationToken
+                )
+            )
             .Should()
             .ThrowExactlyAsync<LoadingCacheReentrancyException>();
         loader.Calls.Should().Be(1);
     }
 
     [Test]
-    public async Task DifferentKeyDependencyIsAllowedAndScopeIsRestored()
+    public async Task DifferentKeyDependencyIsAllowedAndScopeIsRestored(
+        CancellationToken cancellationToken
+    )
     {
         var loader = new DependentLoader();
         await using var cache = Create<string, int>(loader.LoadDifferentKeyAsync);
         loader.Cache = cache;
-        (await Get(cache, "K")).Should().Be(141);
-        (await Get(cache, "J")).Should().Be(140);
+        (await Get(cache, "K", cancellationToken)).Should().Be(141);
+        (await Get(cache, "J", cancellationToken)).Should().Be(140);
     }
 
     private sealed class DependentLoader
@@ -351,12 +376,13 @@ public sealed class AdversarialRegressionTests
     }
 
     [Test]
-    public async Task LoadPermitRemainsReservedUntilBeforeCompletionReturns()
+    public async Task LoadPermitRemainsReservedUntilBeforeCompletionReturns(
+        CancellationToken cancellationToken
+    )
     {
         await using var completion = new BlockingTestHook(TestTimeout);
         int calls = 0;
         var hooks = new LoadingCacheTestHooks { BeforeCompletion = completion.Invoke };
-
         IAsyncLoadingCache<int, int> cache = Create<int, int>(
             (_, _) =>
             {
@@ -365,17 +391,27 @@ public sealed class AdversarialRegressionTests
             },
             Options(maxConcurrentLoads: 1, testHooks: hooks)
         );
-
-        Task<int> first = Task.Run(() => Get(cache, 1).AsTask());
+        Task<int> first = Task.Run(
+            () => Get(cache, 1, cancellationToken).AsTask(),
+            cancellationToken
+        );
         try
         {
-            await AwaitWithTestTimeout(completion.Entered);
-            await ((Func<Task>)(() => AwaitWithTestTimeout(Get(cache, 2).AsTask())))
+            await AwaitWithTestTimeout(completion.Entered, cancellationToken);
+            await (
+                (Func<Task>)(
+                    () =>
+                        AwaitWithTestTimeout(
+                            Get(cache, 2, cancellationToken).AsTask(),
+                            cancellationToken
+                        )
+                )
+            )
                 .Should()
                 .ThrowExactlyAsync<CacheLoadRejectedException>();
             completion.Release();
-            (await AwaitWithTestTimeout(first)).Should().Be(150);
-            (await Get(cache, 2)).Should().Be(151);
+            (await AwaitWithTestTimeout(first, cancellationToken)).Should().Be(150);
+            (await Get(cache, 2, cancellationToken)).Should().Be(151);
             completion.TimedOut.Should().BeFalse();
         }
         finally
@@ -433,13 +469,6 @@ public sealed class AdversarialRegressionTests
 
     private static ValueTask<TValue> Get<TKey, TValue>(
         IAsyncLoadingCache<TKey, TValue> cache,
-        TKey key
-    )
-        where TKey : notnull
-        where TValue : notnull => cache.GetAsync(key, TestContext.CurrentContext.CancellationToken);
-
-    private static ValueTask<TValue> Get<TKey, TValue>(
-        IAsyncLoadingCache<TKey, TValue> cache,
         TKey key,
         CancellationToken cancellationToken
     )
@@ -490,12 +519,13 @@ public sealed class AdversarialRegressionTests
         int key,
         TaskCompletionSource<bool> ready,
         TaskCompletionSource<bool> requested,
-        Task gate
+        Task gate,
+        CancellationToken cancellationToken
     )
     {
         ready.TrySetResult(true);
         await gate.ConfigureAwait(false);
-        var flight = Get(cache, key).AsTask();
+        var flight = Get(cache, key, cancellationToken).AsTask();
         requested.TrySetResult(true);
         return await flight.ConfigureAwait(false);
     }
@@ -505,12 +535,13 @@ public sealed class AdversarialRegressionTests
         int key,
         TaskCompletionSource<bool> ready,
         TaskCompletionSource<bool> requested,
-        Task gate
+        Task gate,
+        CancellationToken cancellationToken
     )
     {
         ready.TrySetResult(true);
         await gate.ConfigureAwait(false);
-        var flight = Get(cache, key).AsTask();
+        var flight = Get(cache, key, cancellationToken).AsTask();
         requested.TrySetResult(true);
         return await CaptureExceptionAsync(() => flight).ConfigureAwait(false);
     }
@@ -563,10 +594,9 @@ public sealed class AdversarialRegressionTests
         return false;
     }
 
-    private static async Task AwaitWithTestTimeout(Task task)
+    private static async Task AwaitWithTestTimeout(Task task, CancellationToken cancellationToken)
     {
-        await task.WaitAsync(TestTimeout, TestContext.CurrentContext.CancellationToken)
-            .ConfigureAwait(false);
+        await task.WaitAsync(TestTimeout, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task AwaitForCleanup(Task task)
@@ -583,10 +613,12 @@ public sealed class AdversarialRegressionTests
         catch (Exception) when (task.IsCompleted) { }
     }
 
-    private static async Task<T> AwaitWithTestTimeout<T>(Task<T> task)
+    private static async Task<T> AwaitWithTestTimeout<T>(
+        Task<T> task,
+        CancellationToken cancellationToken
+    )
     {
-        return await task.WaitAsync(TestTimeout, TestContext.CurrentContext.CancellationToken)
-            .ConfigureAwait(false);
+        return await task.WaitAsync(TestTimeout, cancellationToken).ConfigureAwait(false);
     }
 
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(10);
@@ -594,7 +626,6 @@ public sealed class AdversarialRegressionTests
     private sealed class WrappingTimeProvider(long initialTimestamp) : TimeProvider
     {
         private long _timestamp = initialTimestamp;
-
         public override long TimestampFrequency => 1;
 
         public override long GetTimestamp() => Volatile.Read(ref _timestamp);

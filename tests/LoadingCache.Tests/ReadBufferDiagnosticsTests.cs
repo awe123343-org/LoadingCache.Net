@@ -1,11 +1,9 @@
 using FluentAssertions;
 using LoadingCache.Diagnostics;
 using LoadingCache.Maintenance;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class ReadBufferDiagnosticsTests
 {
     [Test]
@@ -42,7 +40,6 @@ public sealed class ReadBufferDiagnosticsTests
                 buffer.StripeCountForTesting.Should().Be(2);
                 buffer.Dispose();
                 tableCaptured.Release();
-
                 ReadBufferStatistics statistics = await snapshot.WaitAsync(watchdog);
                 statistics.Enqueued.Should().Be(2);
                 statistics.Dequeued.Should().Be(1);
@@ -62,8 +59,9 @@ public sealed class ReadBufferDiagnosticsTests
         }
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public void DiagnosticShardsAreBoundedAndAllocatedOnlyWhenRecording(bool recordStatistics)
     {
         using StripedReadBuffer<int> buffer = new(1, 1, recordStatistics);
@@ -99,7 +97,6 @@ public sealed class ReadBufferDiagnosticsTests
             live.DroppedFailed.Should().Be(stripes);
             live.DroppedShutdown.Should().Be(7);
             live.Queued.Should().Be(1);
-
             buffer.Dispose();
             ReadBufferStatistics disposed = buffer.GetStatistics();
             disposed.DroppedFull.Should().Be(expectedFull);
@@ -107,7 +104,6 @@ public sealed class ReadBufferDiagnosticsTests
             disposed.DroppedShutdown.Should().Be(8);
             disposed.Dropped.Should().Be(expectedFull + stripes + 8);
             disposed.Queued.Should().Be(0);
-
             buffer.Dispose();
             buffer.GetStatistics().Dropped.Should().Be(disposed.Dropped);
             buffer.TryOffer(2).Should().Be(ReadBufferOfferResult.Shutdown);
@@ -191,7 +187,6 @@ public sealed class ReadBufferDiagnosticsTests
             buffer.TryOffer(2).Should().Be(ReadBufferOfferResult.Success);
             buffer.HasPublished.Should().BeTrue();
             buffer.GetStatistics().Queued.Should().Be(2);
-
             List<int> observed = [];
             buffer.DrainTo(observed.Add, 1).Should().Be(1);
             observed.Should().Equal(1);
@@ -204,7 +199,6 @@ public sealed class ReadBufferDiagnosticsTests
             buffer.TryOffer(6).Should().Be(ReadBufferOfferResult.Full);
             buffer.GetStatistics().Queued.Should().Be(4);
             AssertDisabledCounters(buffer.GetStatistics());
-
             buffer.Dispose();
             buffer.TryOffer(7).Should().Be(ReadBufferOfferResult.Shutdown);
             buffer.HasPublished.Should().BeFalse();
@@ -218,9 +212,10 @@ public sealed class ReadBufferDiagnosticsTests
         }
     }
 
-    [TestCase(false, false)]
-    [TestCase(true, false)]
-    [TestCase(false, true)]
+    [Test]
+    [Arguments(false, false)]
+    [Arguments(true, false)]
+    [Arguments(false, true)]
     public void EngineRecordsReadCountersOnlyForStatisticsOrMetricsAndAlwaysSchedulesMaintenance(
         bool recordStatistics,
         bool enableMetrics
@@ -245,25 +240,21 @@ public sealed class ReadBufferDiagnosticsTests
         {
             cache.Put(1, 1);
             scheduler.RunAll();
-
             cache.TryGet(1, out int value).Should().BeTrue();
             value.Should().Be(1);
             scheduler.Pending.Should().Be(0);
             cache.Statistics.MaintenanceBacklog.Should().Be(1);
             cache.TryGet(1, out _).Should().BeTrue();
             scheduler.Pending.Should().Be(1);
-
             long recorded = recordStatistics || enableMetrics ? 1 : 0;
             ReadBufferStatistics queued = engine.GetPolicyReadBufferStatistics();
             queued.Queued.Should().Be(1);
             queued.Enqueued.Should().Be(recorded);
             queued.DroppedFull.Should().Be(recorded);
             cache.Statistics.DroppedReadEvents.Should().Be(recordStatistics ? 1 : 0);
-
             scheduler.RunAll();
             cache.Statistics.MaintenanceBacklog.Should().Be(0);
             engine.GetPolicyReadBufferStatistics().Dequeued.Should().Be(recorded);
-
             cache.TryGet(1, out _).Should().BeTrue();
             cache.Dispose();
             ReadBufferStatistics disposed = engine.GetPolicyReadBufferStatistics();
@@ -298,7 +289,6 @@ public sealed class ReadBufferDiagnosticsTests
             buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Success);
             buffer.SetForcedCasFailuresForTesting(3);
             buffer.TryOffer(2).Should().Be(ReadBufferOfferResult.Failed);
-
             ReadBufferStatistics transport = buffer.GetStatistics();
             transport.Enqueued.Should().Be(1);
             transport.DroppedFailed.Should().Be(1);
@@ -306,13 +296,11 @@ public sealed class ReadBufferDiagnosticsTests
             transport.DroppedShutdown.Should().Be(0);
             cache.Statistics.DroppedReadEvents.Should().Be(1);
             cache.Statistics.MaintenanceBacklog.Should().Be(1);
-
             buffer.SetForcedCasFailuresForTesting(0);
             buffer.TryOffer(2).Should().Be(ReadBufferOfferResult.Success);
             buffer.TryOffer(3).Should().Be(ReadBufferOfferResult.Full);
             buffer.GetStatistics().DroppedFull.Should().Be(1);
             cache.Statistics.DroppedReadEvents.Should().Be(2);
-
             buffer.Dispose();
             cache.Statistics.DroppedReadEvents.Should().Be(4);
             cache.Statistics.MaintenanceBacklog.Should().Be(0);
@@ -338,7 +326,6 @@ public sealed class ReadBufferDiagnosticsTests
     private sealed class ManualScheduler : IMaintenanceScheduler
     {
         private readonly Queue<Action> _callbacks = new();
-
         internal int Pending => _callbacks.Count;
 
         public bool TrySchedule(Action callback)

@@ -1,16 +1,15 @@
 using FluentAssertions;
-using NUnit.Framework;
+using FluentAssertions.Execution;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class ParallelResidentPutTests
 {
-    [TestCase(false, false)]
-    [TestCase(false, true)]
-    [TestCase(true, false)]
-    [TestCase(true, true)]
-    [Parallelizable(ParallelScope.All)]
+    [Test]
+    [Arguments(false, false)]
+    [Arguments(false, true)]
+    [Arguments(true, false)]
+    [Arguments(true, true)]
     public void StableReplacementUsesEntryOwnershipUnlessBulkRequiresCoordination(
         bool supportsBulk,
         bool statistics
@@ -30,9 +29,7 @@ public sealed class ParallelResidentPutTests
         probe.Engine = engine;
         engine.Put(1, "old");
         engine.CleanUp();
-
         engine.Put(1, "new");
-
         probe.Calls.Should().Be(1);
         probe.CoordinationHeld.Should().Be(supportsBulk);
         engine.TryGet(1, out string? value).Should().BeTrue();
@@ -41,9 +38,9 @@ public sealed class ParallelResidentPutTests
         engine.AssertInvariants();
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    [Parallelizable(ParallelScope.All)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task OptOutCannotInstallAnActualBulkLoader(bool asynchronous)
     {
         await using CacheEngine<int, string> engine = CacheBuilder
@@ -58,10 +55,12 @@ public sealed class ParallelResidentPutTests
                     current
                         .GetAllAsync(
                             static (_, _) =>
-                                throw new AssertionException("Single loader must not execute."),
+                                throw new AssertionFailedException(
+                                    "Single loader must not execute."
+                                ),
                             null,
                             static (_, _) =>
-                                throw new AssertionException("Bulk loader must not execute."),
+                                throw new AssertionFailedException("Bulk loader must not execute."),
                             [1],
                             CancellationToken.None
                         )
@@ -76,14 +75,17 @@ public sealed class ParallelResidentPutTests
                 .Invoking(static current =>
                     current.GetAll(
                         [1],
-                        static _ => throw new AssertionException("Single loader must not execute."),
+                        static _ =>
+                            throw new AssertionFailedException("Single loader must not execute."),
                         null,
-                        static _ => throw new AssertionException("Bulk loader must not execute.")
+                        static _ =>
+                            throw new AssertionFailedException("Bulk loader must not execute.")
                     )
                 )
                 .Should()
                 .ThrowExactly<InvalidOperationException>();
         }
+
         engine.EstimatedCount.Should().Be(0);
         engine.AssertInvariants();
     }

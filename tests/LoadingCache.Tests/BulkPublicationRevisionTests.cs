@@ -1,16 +1,15 @@
 using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class BulkPublicationRevisionTests
 {
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task LateBulkPublicationFailureCannotRemoveANewerRefresh(bool recordStatistics)
     {
         await using var timerArm = new BlockingTestHook(Watchdog);
@@ -18,10 +17,11 @@ public sealed class BulkPublicationRevisionTests
         await VerifyLateBulkFailure(timerArm, refreshPublished, recordStatistics);
     }
 
-    [TestCase(false, 1)]
-    [TestCase(false, 2)]
-    [TestCase(true, 1)]
-    [TestCase(true, 2)]
+    [Test]
+    [Arguments(false, 1)]
+    [Arguments(false, 2)]
+    [Arguments(true, 1)]
+    [Arguments(true, 2)]
     public void PartialBulkPublicationFailureCleansReadyAndPendingEntries(
         bool recordStatistics,
         int failedPublication
@@ -44,7 +44,6 @@ public sealed class BulkPublicationRevisionTests
             static _ => throw new InvalidOperationException("Unexpected single load."),
             bulkLoader: static _ => new Dictionary<int, string> { [1] = "bulk-1", [2] = "bulk-2" }
         );
-
         // The failing entry has already cleared Flight but has not published
         // IsReady. An earlier key may be ready and a later key still pending.
         cache
@@ -57,7 +56,6 @@ public sealed class BulkPublicationRevisionTests
         cache.EstimatedCount.Should().Be(0);
         cache.Statistics.InFlightLoads.Should().Be(0);
         engine.AssertInvariants();
-
         // Retrying the same keys proves neither a partially initialized entry
         // nor an unprocessed pending key survived the failed publication.
         cache
@@ -113,14 +111,12 @@ public sealed class BulkPublicationRevisionTests
             loader.Result.TrySetResult(
                 new Dictionary<int, string> { [1] = "bulk-1", [2] = "bulk-2" }
             );
-
             // Both requested values are ready, but bulk completion still owns
             // its promises and pauses outside the engine and entry locks.
             await timerArm.Entered.WaitAsync(Watchdog);
             bulk.IsCompleted.Should().BeFalse();
             cache.TryGetTask(1, out Task<string>? originalTask).Should().BeTrue();
             (await originalTask!).Should().Be("bulk-1");
-
             refresh = Task
                 .Factory.StartNew(
                     static state =>
@@ -136,7 +132,6 @@ public sealed class BulkPublicationRevisionTests
             publishedTask.Should().NotBeSameAs(originalTask);
             (await publishedTask).Should().Be("refreshed");
             refresh.IsCompleted.Should().BeFalse();
-
             // The old bulk outcome can remove its unchanged key 2, but its
             // epoch/generation is not authority over key 1's newer revision.
             timerArm.Release();
@@ -226,12 +221,9 @@ public sealed class BulkPublicationRevisionTests
     private sealed class ControlledBulkLoader : IBulkAsyncCacheLoader<int, string>
     {
         private int _reloadCalls;
-
         internal int ReloadCalls => Volatile.Read(ref _reloadCalls);
-
         internal TaskCompletionSource Started { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
-
         internal TaskCompletionSource<IReadOnlyDictionary<int, string>> Result { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 

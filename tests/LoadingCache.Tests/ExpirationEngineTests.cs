@@ -1,6 +1,5 @@
 using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
@@ -19,17 +18,14 @@ public sealed class ExpirationEngineTests
             ReadDuration = TimeSpan.FromSeconds(30),
         };
         await using IAsyncLoadingCache<int, string> cache = CreateVariableCache(clock, expiry);
-
         (await cache.GetAsync(1)).Should().Be("1");
         expiry.CreateCalls.Should().Be(1);
         cache.Policy.VariableExpiration!.GetExpiresAfter(1).Should().Be(TimeSpan.FromSeconds(10));
-
         clock.Advance(TimeSpan.FromSeconds(2));
         cache.TryGet(1, out string? readValue).Should().BeTrue();
         readValue.Should().Be("1");
         expiry.ReadCalls.Should().Be(1);
         cache.Policy.VariableExpiration.GetExpiresAfter(1).Should().Be(TimeSpan.FromSeconds(30));
-
         cache.Set(1, "updated");
         expiry.UpdateCalls.Should().Be(1);
         cache.Policy.VariableExpiration.GetExpiresAfter(1).Should().Be(TimeSpan.FromSeconds(20));
@@ -46,7 +42,6 @@ public sealed class ExpirationEngineTests
                 .ExpireAfterWrite(TimeSpan.FromSeconds(1))
                 .ExpireAfter(new TestExpiry())
                 .Build();
-
         action.Should().ThrowExactly<InvalidOperationException>();
     }
 
@@ -58,14 +53,11 @@ public sealed class ExpirationEngineTests
             clock,
             new TestExpiry { CreateDuration = TimeSpan.MaxValue }
         );
-
         (await cache.GetAsync(1)).Should().Be("1");
         cache.Policy.VariableExpiration!.SetExpiresAfter(1, TimeSpan.Zero).Should().BeTrue();
         cache.TryGet(1, out _).Should().BeFalse();
-
         cache.Put(2, "negative", TimeSpan.FromTicks(-1));
         cache.TryGet(2, out _).Should().BeFalse();
-
         cache.Put(3, "long", TimeSpan.MaxValue);
         clock.Advance(TimeSpan.FromDays(365));
         cache.TryGet(3, out string? value).Should().BeTrue();
@@ -87,7 +79,6 @@ public sealed class ExpirationEngineTests
             Task probe = Task.Run(() => cache.Policy.VariableExpiration!.GetExpiresAfter(1));
             probe.Wait(Watchdog).Should().BeTrue();
         };
-
         try
         {
             (await cache.GetAsync(1)).Should().Be("1");
@@ -123,7 +114,6 @@ public sealed class ExpirationEngineTests
                 TaskScheduler.Default
             );
             await callback.Entered.WaitAsync(Watchdog, CancellationToken.None);
-
             cache
                 .Policy.VariableExpiration!.SetExpiresAfter(1, TimeSpan.FromSeconds(7))
                 .Should()
@@ -183,7 +173,6 @@ public sealed class ExpirationEngineTests
             (key, _) =>
                 Task.FromResult(key.ToString(System.Globalization.CultureInfo.InvariantCulture))
         );
-
         (await cache.GetAsync(1)).Should().Be("1");
         Task<bool> first = Task.Factory.StartNew(
             static state => ((IAsyncLoadingCache<int, string>)state!).TryGet(1, out _),
@@ -202,13 +191,11 @@ public sealed class ExpirationEngineTests
         try
         {
             bothEntered.Wait(Watchdog).Should().BeTrue();
-
             // The second callback is released first.  The engine hook proves that
             // its revision was committed before the first callback is released.
             releaseSecond.Set();
             await committed.Task.WaitAsync(Watchdog);
             releaseFirst.Set();
-
             (await Task.WhenAll(first, second).WaitAsync(Watchdog, CancellationToken.None))
                 .Should()
                 .OnlyContain(result => result);
@@ -237,7 +224,6 @@ public sealed class ExpirationEngineTests
             .TimeProvider(clock)
             .ExpireAfterAccess(TimeSpan.FromSeconds(1))
             .Build();
-
         for (int key = 0; key < entryCount; key++)
         {
             cache.Put(key, key.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -256,7 +242,6 @@ public sealed class ExpirationEngineTests
         cache.CleanUp();
         cache.CleanUp();
         cache.EstimatedCount.Should().Be(entryCount);
-
         clock.Advance(TimeSpan.FromMilliseconds(500));
         cache.CleanUp();
         cache.CleanUp();
@@ -274,11 +259,9 @@ public sealed class ExpirationEngineTests
             .TimeProvider(clock)
             .ExpireAfterWrite(TimeSpan.FromSeconds(10))
             .Build();
-
         cache.Put(1, "value");
         cache.Policy.ExpireAfterWrite!.GetExpiresAfter(1).Should().Be(TimeSpan.FromSeconds(10));
         cache.Policy.ExpireAfterWrite.AgeOf(1).Should().Be(TimeSpan.Zero);
-
         clock.Advance(TimeSpan.FromSeconds(2));
         cache.Policy.ExpireAfterWrite.AgeOf(1).Should().Be(TimeSpan.FromSeconds(2));
         cache.Policy.ExpireAfterWrite.SetDuration(TimeSpan.FromSeconds(1));
@@ -297,7 +280,6 @@ public sealed class ExpirationEngineTests
             .ExpireAfterWrite(TimeSpan.FromSeconds(5))
             .EnableExpirationScheduler()
             .Build();
-
         cache.Put(1, "value");
         cache.EstimatedCount.Should().Be(1);
         clock.Advance(TimeSpan.FromSeconds(5));
@@ -338,7 +320,6 @@ public sealed class ExpirationEngineTests
             }
         );
         using var cache = new Cache<int, string>(engine);
-
         cache.Put(1, "value");
         IFixedExpirationPolicy<int, string> writeExpiry = cache.Policy.ExpireAfterWrite!;
         Task staleArm = Task.Run(cache.CleanUp);
@@ -354,7 +335,6 @@ public sealed class ExpirationEngineTests
                 )
                 .Should()
                 .BeTrue();
-
             releaseArm.Set();
             await Task.WhenAll(staleArm, shorterArm).WaitAsync(Watchdog, CancellationToken.None);
             // The wheel arms at the beginning of the containing bucket (currently
@@ -385,7 +365,6 @@ public sealed class ExpirationEngineTests
                 (key, _) =>
                     Task.FromResult(key.ToString(System.Globalization.CultureInfo.InvariantCulture))
             );
-
         (await cache.GetAsync(1)).Should().Be("1");
         clock.Advance(TimeSpan.FromSeconds(3));
         cache.EstimatedCount.Should().Be(0);
@@ -402,7 +381,6 @@ public sealed class ExpirationEngineTests
             ThrowOnRead = true,
         };
         await using IAsyncLoadingCache<int, string> cache = CreateVariableCache(clock, expiry);
-
         (await cache.GetAsync(1)).Should().Be("1");
         Exception? failure = null;
         try
@@ -415,7 +393,6 @@ public sealed class ExpirationEngineTests
         }
 
         failure.Should().BeOfType<InvalidOperationException>();
-
         expiry.ThrowOnRead = false;
         cache.TryGet(1, out string? value).Should().BeTrue();
         value.Should().Be("1");
@@ -444,6 +421,7 @@ public sealed class ExpirationEngineTests
         internal Func<int, TimeSpan>? ReadDurationFactory { get; init; }
         internal bool ThrowOnRead { get; set; }
         internal Action? OnRead { get; set; }
+
         internal int CreateCalls;
         internal int UpdateCalls;
         internal int ReadCalls;
@@ -479,7 +457,6 @@ public sealed class ExpirationEngineTests
     private sealed class RecordingTimerProvider : TimeProvider, IDisposable
     {
         private readonly RecordingTimer _timer = new();
-
         public override long TimestampFrequency => global::System.Diagnostics.Stopwatch.Frequency;
 
         public override long GetTimestamp() => 0;
@@ -501,7 +478,6 @@ public sealed class ExpirationEngineTests
         {
             private readonly object _sync = new();
             private TimeSpan _lastDueTime = Timeout.InfiniteTimeSpan;
-
             internal TimeSpan LastDueTime
             {
                 get

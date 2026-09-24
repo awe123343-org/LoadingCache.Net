@@ -1,19 +1,17 @@
 using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
-[Parallelizable(ParallelScope.All)]
 public sealed class FixedExpirationReadTests
 {
-    [TestCase("write", false)]
-    [TestCase("write", true)]
-    [TestCase("access", false)]
-    [TestCase("access", true)]
-    [TestCase("both", false)]
-    [TestCase("both", true)]
+    [Test]
+    [Arguments("write", false)]
+    [Arguments("write", true)]
+    [Arguments("access", false)]
+    [Arguments("access", true)]
+    [Arguments("both", false)]
+    [Arguments("both", true)]
     public async Task ResidentReadsKeepStatisticsAndExpireAtTheExactDeadline(
         string expiration,
         bool recordStatistics
@@ -48,7 +46,6 @@ public sealed class FixedExpirationReadTests
         cache.Put(3, "resident");
         cache.Policy.RefreshAfterWrite.Should().BeNull();
         clock.Advance(duration - TimeSpan.FromTicks(1));
-
         cache.TryGet(1, out string? value).Should().BeTrue();
         value.Should().Be("resident");
         (await loading.GetAsync(2)).Should().Be("resident");
@@ -58,14 +55,12 @@ public sealed class FixedExpirationReadTests
         cache.Statistics.Hits.Should().Be(recordStatistics ? 3 : 0);
         cache.Statistics.Misses.Should().Be(0);
         cache.Statistics.LoadsStarted.Should().Be(0);
-
         // Access-only entries expire from the successful reads above. A write deadline
         // remains anchored to publication even when access expiration is also enabled.
         clock.Advance(expiration == "access" ? duration : TimeSpan.FromTicks(1));
         cache.TryGet(1, out _).Should().BeFalse();
         (await loading.GetAsync(2)).Should().Be("async loaded");
         cache.GetOrAdd(3, Load).Should().Be("sync loaded");
-
         asyncCalls.Should().Be(1);
         syncCalls.Should().Be(1);
         CacheStatistics statistics = cache.Statistics;
@@ -75,7 +70,6 @@ public sealed class FixedExpirationReadTests
         statistics.LoadSuccesses.Should().Be(recordStatistics ? 2 : 0);
         statistics.ExpiredRemovals.Should().Be(recordStatistics ? 3 : 0);
         return;
-
         string Load(int _)
         {
             Interlocked.Increment(ref syncCalls);
@@ -83,8 +77,9 @@ public sealed class FixedExpirationReadTests
         }
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task EachResidentReadTouchesAccessTimeAndHonorsDurationChanges(bool alsoWrite)
     {
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
@@ -105,7 +100,6 @@ public sealed class FixedExpirationReadTests
                 throw new InvalidOperationException("A resident read invoked its loader.")
         );
         cache.Put(1, "resident");
-
         clock.Advance(TimeSpan.FromSeconds(9));
         cache.TryGet(1, out string? value).Should().BeTrue();
         value.Should().Be("resident");
@@ -120,16 +114,16 @@ public sealed class FixedExpirationReadTests
             )
             .Should()
             .Be("resident");
-
         cache.Policy.ExpireAfterAccess!.AgeOf(1).Should().Be(TimeSpan.Zero);
         cache.Policy.ExpireAfterAccess.SetDuration(TimeSpan.FromSeconds(2));
         clock.Advance(TimeSpan.FromSeconds(2));
         cache.TryGet(1, out _).Should().BeFalse();
     }
 
-    [TestCase("write")]
-    [TestCase("access")]
-    [TestCase("both")]
+    [Test]
+    [Arguments("write")]
+    [Arguments("access")]
+    [Arguments("both")]
     public void CustomTimestampFrequencyPreservesSubTickExpiration(string expiration)
     {
         var clock = new SubTickTimeProvider();
@@ -142,13 +136,14 @@ public sealed class FixedExpirationReadTests
         {
             builder.ExpireAfterWrite(TimeSpan.FromTicks(1));
         }
+
         if (expiration is "access" or "both")
         {
             builder.ExpireAfterAccess(TimeSpan.FromTicks(1));
         }
+
         using ICache<int, string> cache = builder.Build();
         cache.Put(1, "resident");
-
         // Three provider timestamp units make one TimeSpan tick. An elapsed
         // fraction of a tick must retain TimeProvider.GetElapsedTime rounding.
         clock.SetTimestamp(2);
@@ -158,8 +153,9 @@ public sealed class FixedExpirationReadTests
         cache.TryGet(1, out _).Should().BeFalse();
     }
 
-    [TestCase(1)]
-    [TestCase(4)]
+    [Test]
+    [Arguments(1)]
+    [Arguments(4)]
     public void BackwardCustomTimestampDoesNotMoveAccessTime(int backwardUnits)
     {
         var clock = new SubTickTimeProvider();
@@ -172,7 +168,6 @@ public sealed class FixedExpirationReadTests
             .ExpireAfterAccess(TimeSpan.FromTicks(2))
             .Build();
         cache.Put(1, "resident");
-
         clock.SetTimestamp(30 - backwardUnits);
         cache.TryGet(1, out _).Should().BeTrue();
         // Neither a fraction of a negative TimeSpan tick nor a whole negative
@@ -188,7 +183,6 @@ public sealed class FixedExpirationReadTests
     private sealed class SubTickTimeProvider : TimeProvider
     {
         private long _timestamp;
-
         public override long TimestampFrequency => TimeSpan.TicksPerSecond * 3;
 
         public override long GetTimestamp() => Volatile.Read(ref _timestamp);

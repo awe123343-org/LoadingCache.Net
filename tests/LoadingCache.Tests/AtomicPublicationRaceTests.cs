@@ -2,18 +2,16 @@ using FluentAssertions;
 using JetBrains.Annotations;
 using LoadingCache.Maintenance;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
-[Parallelizable(ParallelScope.All)]
 public sealed class AtomicPublicationRaceTests
 {
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task TaskLookupDuringResidentPutKeepsValueAndTaskPaired(bool materializeOldTask)
     {
         await using var publication = new BlockingTestHook(Watchdog);
@@ -82,13 +80,15 @@ public sealed class AtomicPublicationRaceTests
         }
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public Task ExplicitReferenceRefreshPublicationSurvivesLaterSet(bool fixedExpiration) =>
         VerifyRefreshPublication(new Payload(), new Payload(), new Payload(), fixedExpiration);
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public Task ExplicitInt64RefreshPublicationSurvivesLaterSet(bool fixedExpiration) =>
         VerifyRefreshPublication(
             0x12345678abcdef01L,
@@ -164,10 +164,11 @@ public sealed class AtomicPublicationRaceTests
         cache.Policy.Eviction!.WeightedSize.Should().Be(1);
     }
 
-    [TestCase(false, false)]
-    [TestCase(true, false)]
-    [TestCase(false, true)]
-    [TestCase(true, true)]
+    [Test]
+    [Arguments(false, false)]
+    [Arguments(true, false)]
+    [Arguments(false, true)]
+    [Arguments(true, true)]
     public Task ExplicitReferenceRefreshFailureFencesLaterSet(
         bool replaceBeforeFailure,
         bool fixedExpiration
@@ -180,10 +181,11 @@ public sealed class AtomicPublicationRaceTests
             fixedExpiration
         );
 
-    [TestCase(false, false)]
-    [TestCase(true, false)]
-    [TestCase(false, true)]
-    [TestCase(true, true)]
+    [Test]
+    [Arguments(false, false)]
+    [Arguments(true, false)]
+    [Arguments(false, true)]
+    [Arguments(true, true)]
     public Task ExplicitInt64RefreshFailureFencesLaterSet(
         bool replaceBeforeFailure,
         bool fixedExpiration
@@ -196,8 +198,9 @@ public sealed class AtomicPublicationRaceTests
             fixedExpiration
         );
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public Task FixedExpirationLargeStructRefreshFailureFencesLaterSet(bool replaceBeforeFailure) =>
         VerifyRefreshRollback(
             new LargeValue(1, 2, 3, 4),
@@ -207,8 +210,9 @@ public sealed class AtomicPublicationRaceTests
             fixedExpiration: true
         );
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public Task AccessExpirationReferenceRefreshFailureFencesLaterSet(bool replaceBeforeFailure) =>
         VerifyRefreshRollback(
             new Payload(),
@@ -219,8 +223,9 @@ public sealed class AtomicPublicationRaceTests
             accessExpiration: true
         );
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public Task AccessExpirationInt64RefreshFailureFencesLaterSet(bool replaceBeforeFailure) =>
         VerifyRefreshRollback(
             0x12345678abcdef01L,
@@ -231,8 +236,9 @@ public sealed class AtomicPublicationRaceTests
             accessExpiration: true
         );
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public Task AccessExpirationLargeStructRefreshFailureFencesLaterSet(
         bool replaceBeforeFailure
     ) =>
@@ -501,13 +507,11 @@ public sealed class AtomicPublicationRaceTests
             await readExpiry.Entered.WaitAsync(Watchdog);
             publication.Release();
             await ObserveControlledFailure(refresh);
-
             retry = cache.RefreshAsync(1).AsTask();
             (await retry.WaitAsync(Watchdog)).Should().Be("retry");
             clock.GetTimestamp().Should().Be(timestamp);
             readExpiry.Release();
             (await reader.WaitAsync(Watchdog)).Should().Be("failed refresh");
-
             cache.Policy.VariableExpiration!.GetExpiresAfter(1).Should().Be(TimeSpan.FromHours(1));
             cache.TryGet(1, out string? current).Should().BeTrue();
             current.Should().Be("retry");
@@ -531,8 +535,9 @@ public sealed class AtomicPublicationRaceTests
         readExpiry.TimedOut.Should().BeFalse();
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task OldResidentReadCannotTouchReplacementPolicyIdentity(bool clear)
     {
         await using var access = new BlockingTestHook(Watchdog);
@@ -582,8 +587,9 @@ public sealed class AtomicPublicationRaceTests
         policy.GetReadBufferStatistics().Queued.Should().Be(0);
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public void BuiltInPolicyDropsQueuedOldAccessAfterSlotReplacement(bool clear)
     {
         var scheduler = new ManualScheduler();

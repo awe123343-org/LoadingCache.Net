@@ -1,10 +1,8 @@
 using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class NestedEvictionScopeTests
 {
     [Test]

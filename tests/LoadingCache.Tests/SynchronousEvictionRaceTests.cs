@@ -1,11 +1,9 @@
 using System.Collections.Concurrent;
 using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class SynchronousEvictionRaceTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
@@ -63,6 +61,7 @@ public sealed class SynchronousEvictionRaceTests
             second.Release();
             await Task.WhenAll(firstPut, secondPut).WaitAsync(Timeout);
         }
+
         notifications.Should().BeEquivalentTo([1, 2]);
         first.TimedOut.Should().BeFalse();
         second.TimedOut.Should().BeFalse();
@@ -132,6 +131,7 @@ public sealed class SynchronousEvictionRaceTests
             callback.Release();
             (await waiting.WaitAsync(Timeout)).Should().Be(1);
         }
+
         calls.Should().Be(1);
         callback.TimedOut.Should().BeFalse();
     }
@@ -177,6 +177,7 @@ public sealed class SynchronousEvictionRaceTests
             callback.Release();
             (await waiting.WaitAsync(Timeout)).Count.Should().Be(2);
         }
+
         notifications.Should().BeEquivalentTo([1, 2, 3]);
         callback.TimedOut.Should().BeFalse();
     }
@@ -196,7 +197,6 @@ public sealed class SynchronousEvictionRaceTests
             .Weigher(static (_, _) => 2)
             .EvictionListener(_ => callback.Invoke())
             .BuildAsyncLoading(loader);
-
         Task<IReadOnlyDictionary<int, int>> bulk = cache.GetAllAsync([1, 2]).AsTask();
         Task<int> leader = cache.GetAsync(1).AsTask();
         Task<int> joined = cache.GetAsync(2).AsTask();
@@ -213,9 +213,7 @@ public sealed class SynchronousEvictionRaceTests
             await callback.Entered.WaitAsync(Timeout);
             leader.IsCompleted.Should().BeFalse();
             joined.IsCompleted.Should().BeFalse();
-
             await cache.DisposeAsync().AsTask().WaitAsync(Timeout);
-
             leader.IsCompleted.Should().BeTrue("shutdown must end pending shared promises");
             joined.IsCompleted.Should().BeTrue("a nonleader shares the same bulk outcome");
             await FluentActions
@@ -270,7 +268,6 @@ public sealed class SynchronousEvictionRaceTests
             .EvictionListener(_ => callback.Invoke())
             .RecordStatistics()
             .BuildLoading(new GatedSyncBulkLoader(backend));
-
         Task<IReadOnlyDictionary<int, int>> bulk = Task.Factory.StartNew(
             static state => ((ILoadingCache<int, int>)state!).GetAll([1, 2]),
             cache,
@@ -292,7 +289,6 @@ public sealed class SynchronousEvictionRaceTests
             WaitForSyncJoin(cache);
             backend.Release();
             await callback.Entered.WaitAsync(Timeout);
-
             await Task.Run(cache.Dispose).WaitAsync(Timeout);
             await FluentActions
                 .Awaiting(() => joined.WaitAsync(Timeout))
@@ -337,6 +333,7 @@ public sealed class SynchronousEvictionRaceTests
         {
             cache.Put(key, key);
         }
+
         cache.Policy.Eviction!.SetMaximum(1);
         notifications.Count.Should().Be(99);
         notifications.Distinct().Count().Should().Be(99);

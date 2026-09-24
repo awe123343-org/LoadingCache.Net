@@ -2,28 +2,23 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
 using LoadingCache.Maintenance;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class WriteBufferTests
 {
     [Test]
     public void FullBufferRejectsWithoutDroppingTheNewEvent()
     {
         BoundedWriteBuffer<int> buffer = new(2);
-
         buffer.TryEnqueue(1).Should().BeTrue();
         buffer.TryEnqueue(2).Should().BeTrue();
         buffer.TryEnqueue(3).Should().BeFalse();
-
         buffer.TryDequeue(out int first).Should().BeTrue();
         buffer.TryDequeue(out int second).Should().BeTrue();
         buffer.TryDequeue(out _).Should().BeFalse();
         first.Should().Be(1);
         second.Should().Be(2);
-
         WriteBufferStatistics statistics = buffer.GetStatistics();
         statistics.Capacity.Should().Be(2);
         statistics.Queued.Should().Be(0);
@@ -38,16 +33,13 @@ public sealed class WriteBufferTests
     public void ClearAndDisposeAreTheOnlyExplicitDiscardBoundaries()
     {
         BoundedWriteBuffer<int> buffer = new(4);
-
         buffer.TryEnqueue(1).Should().BeTrue();
         buffer.TryEnqueue(2).Should().BeTrue();
         buffer.Clear().Should().Be(2);
         buffer.TryDequeue(out _).Should().BeFalse();
-
         buffer.TryEnqueue(3).Should().BeTrue();
         buffer.Dispose();
         buffer.TryEnqueue(4).Should().BeFalse();
-
         WriteBufferStatistics statistics = buffer.GetStatistics();
         statistics.DroppedClear.Should().Be(2);
         statistics.DroppedShutdown.Should().Be(2);
@@ -67,7 +59,6 @@ public sealed class WriteBufferTests
         try
         {
             RunProducers(buffer, accepted, total);
-
             List<int> observed = [];
             while (buffer.TryDequeue(out int value))
             {
@@ -98,9 +89,7 @@ public sealed class WriteBufferTests
 
             Task consumer = StartConsumer(buffer);
             Task disposer = StartDisposer(buffer);
-
             await Task.WhenAll(consumer, disposer);
-
             WriteBufferStatistics statistics = buffer.GetStatistics();
             statistics.IsDisposed.Should().BeTrue();
             statistics.Queued.Should().Be(0);
@@ -117,12 +106,10 @@ public sealed class WriteBufferTests
     {
         BoundedWriteBuffer<object> buffer = new(1);
         WeakReference reference = EnqueueObject(buffer);
-
         try
         {
             buffer.Dispose();
             ForceCollection(reference);
-
             reference.IsAlive.Should().BeFalse();
         }
         finally
@@ -147,15 +134,12 @@ public sealed class WriteBufferTests
             writeBufferCapacity: 1
         );
         WindowTinyLfuEnginePolicy.EngineEntryToken first = new(new object(), 1);
-
         policy.OnPublish(first, 1);
         first.Node.Should().BeNull();
         policy.HasPendingWrites.Should().BeTrue();
-
         policy.FlushWrites();
         first.Node.Should().NotBeNull();
         policy.HasPendingWrites.Should().BeFalse();
-
         policy.OnRemove(first);
         first.Node.Should().NotBeNull();
         policy.FlushWrites();
@@ -179,18 +163,14 @@ public sealed class WriteBufferTests
         );
         WindowTinyLfuEnginePolicy.EngineEntryToken first = new(new object(), 1);
         WindowTinyLfuEnginePolicy.EngineEntryToken second = new(new object(), 2);
-
         policy.OnPublish(first, 1);
         policy.OnPublish(second, 1);
-
         WriteBufferStatistics beforeFlush = policy.GetWriteBufferStatistics();
         beforeFlush.Full.Should().BeGreaterThan(0);
         beforeFlush.Enqueued.Should().Be(2);
         beforeFlush.Dequeued.Should().Be(1);
         second.Node.Should().BeNull();
-
         policy.FlushWrites();
-
         second.Node.Should().NotBeNull();
         policy.ResidentCount.Should().Be(2);
         WriteBufferStatistics afterFlush = policy.GetWriteBufferStatistics();
@@ -213,13 +193,11 @@ public sealed class WriteBufferTests
             writeBufferCapacity: 2
         );
         WindowTinyLfuEnginePolicy.EngineEntryToken token = new(new object(), 1);
-
         policy.OnPublish(token, 1);
         policy.FlushWrites();
         policy.OnRemove(token);
         policy.OnPublish(token, 1);
         policy.FlushWrites();
-
         token.Node.Should().NotBeNull();
         policy.ResidentCount.Should().Be(1);
         policy.WeightedSize.Should().Be(1);
@@ -242,14 +220,11 @@ public sealed class WriteBufferTests
         );
         WindowTinyLfuEnginePolicy.EngineEntryToken resident = new(new object(), 1);
         WindowTinyLfuEnginePolicy.EngineEntryToken invalidated = new(new object(), 2);
-
         policy.OnPublish(resident, 1);
         policy.FlushWrites();
         policy.OnPublish(invalidated, 1);
         policy.OnRemove(invalidated);
-
         policy.FlushWrites();
-
         resident.Node.Should().NotBeNull();
         invalidated.Node.Should().BeNull();
         policy.ResidentCount.Should().Be(1);
@@ -274,12 +249,10 @@ public sealed class WriteBufferTests
         );
         object entry = new();
         WindowTinyLfuEnginePolicy.EngineEntryToken token = new(entry, 1);
-
         policy.OnPublish(token, 1);
         policy.FlushWrites();
         policy.OnPublish(token, 3);
         policy.FlushWrites();
-
         token.Node.Should().BeNull();
         policy.ResidentCount.Should().Be(0);
         policy.WeightedSize.Should().Be(0);
@@ -306,11 +279,9 @@ public sealed class WriteBufferTests
         object rejectedEntry = new();
         WindowTinyLfuEnginePolicy.EngineEntryToken resident = new(residentEntry, 1);
         WindowTinyLfuEnginePolicy.EngineEntryToken rejected = new(rejectedEntry, 2);
-
         policy.OnPublish(resident, long.MaxValue);
         policy.OnPublish(rejected, 1);
         policy.FlushWrites();
-
         resident.Node.Should().NotBeNull();
         rejected.Node.Should().BeNull();
         policy.ResidentCount.Should().Be(1);
@@ -336,12 +307,10 @@ public sealed class WriteBufferTests
         WindowTinyLfuEnginePolicy.EngineEntryToken first = new(new object(), 1);
         WindowTinyLfuEnginePolicy.EngineEntryToken second = new(new object(), 2);
         WindowTinyLfuEnginePolicy.EngineEntryToken third = new(new object(), 3);
-
         policy.OnPublish(first, 0);
         policy.OnPublish(second, 0);
         policy.OnPublish(third, 0);
         policy.FlushWrites();
-
         policy.ResidentCount.Should().Be(1);
         policy.WeightedSize.Should().Be(0);
         policy.Snapshot(hottest: false, limit: 4).Should().ContainSingle();
@@ -365,10 +334,8 @@ public sealed class WriteBufferTests
         );
         object entry = new();
         WindowTinyLfuEnginePolicy.EngineEntryToken token = new(entry, 1);
-
         policy.OnPublish(token, 3);
         policy.FlushWrites();
-
         token.Node.Should().BeNull();
         policy.ResidentCount.Should().Be(0);
         policy.WeightedSize.Should().Be(0);
@@ -391,9 +358,7 @@ public sealed class WriteBufferTests
             writeBufferCapacity: 4
         );
         WindowTinyLfuEnginePolicy.EngineEntryToken token = new(new object(), 1);
-
         policy.Invoking(p => p.OnPublish(token, -1)).Should().Throw<ArgumentOutOfRangeException>();
-
         token.PendingPolicyWrites.Should().Be(0);
         policy.HasPendingWrites.Should().BeFalse();
         policy.GetWriteBufferStatistics().Enqueued.Should().Be(0);
@@ -424,20 +389,16 @@ public sealed class WriteBufferTests
         WindowTinyLfuEnginePolicy.EngineEntryToken first = new(new object(), 1);
         WindowTinyLfuEnginePolicy.EngineEntryToken second = new(new object(), 2);
         WindowTinyLfuEnginePolicy.EngineEntryToken third = new(new object(), 3);
-
         policy.OnPublish(first, 1);
         policy.OnPublish(second, 1);
         policy.OnPublish(third, 1);
         policy.FlushWrites();
-
         policy
             .Invoking(static p => p.SetMaximum(1, weighted: true))
             .Should()
             .Throw<InvalidOperationException>();
         policy.Maximum.Should().Be(1);
-
         policy.Clear();
-
         policy.Maximum.Should().Be(1);
         policy.ResidentCount.Should().Be(0);
         policy.AssertInvariants();
@@ -466,19 +427,15 @@ public sealed class WriteBufferTests
         );
         WindowTinyLfuEnginePolicy.EngineEntryToken first = new(new object(), 1);
         WindowTinyLfuEnginePolicy.EngineEntryToken second = new(new object(), 2);
-
         policy.OnPublish(first, 2);
         policy.OnPublish(second, 2);
         policy.FlushWrites();
-
         policy
             .Invoking(static p => p.SetMaximum(1, weighted: false))
             .Should()
             .Throw<InvalidOperationException>();
         policy.Maximum.Should().Be(1);
-
         policy.Clear();
-
         policy.Maximum.Should().Be(1);
         policy.ResidentCount.Should().Be(0);
         policy.AssertInvariants();
@@ -510,15 +467,12 @@ public sealed class WriteBufferTests
         WindowTinyLfuEnginePolicy.EngineEntryToken first = new(new object(), 1);
         WindowTinyLfuEnginePolicy.EngineEntryToken second = new(new object(), 2);
         WindowTinyLfuEnginePolicy.EngineEntryToken third = new(new object(), 3);
-
         policy.OnPublish(first, 1);
         policy.OnPublish(second, 1);
         policy.OnPublish(third, 1);
-
         policy.Invoking(static p => p.FlushWrites()).Should().Throw<InvalidOperationException>();
         evicted.Should().HaveCount(2);
         policy.AssertInvariants();
-
         policy.FlushWrites();
         policy.AssertInvariants();
     }
@@ -541,13 +495,11 @@ public sealed class WriteBufferTests
         object residentEntry = new();
         WindowTinyLfuEnginePolicy.EngineEntryToken resident = new(residentEntry, 1);
         WindowTinyLfuEnginePolicy.EngineEntryToken invalidated = new(new object(), 2);
-
         policy.OnPublish(resident, 1);
         policy.FlushWrites();
         policy.OnPublish(invalidated, 1);
         policy.OnRemove(invalidated);
         policy.FlushWrites();
-
         resident.Node.Should().NotBeNull();
         invalidated.Node.Should().BeNull();
         policy.ResidentCount.Should().Be(1);
@@ -571,11 +523,9 @@ public sealed class WriteBufferTests
         );
         WindowTinyLfuEnginePolicy.EngineEntryToken first = new(new object(), 1);
         WindowTinyLfuEnginePolicy.EngineEntryToken second = new(new object(), 2);
-
         policy.OnPublish(first, 1);
         policy.OnPublish(second, 1);
         policy.FlushWrites();
-
         policy.HasPendingWrites.Should().BeFalse();
         policy.ResidentCount.Should().Be(1);
         policy.AssertInvariants();
@@ -597,14 +547,12 @@ public sealed class WriteBufferTests
         );
         WindowTinyLfuEnginePolicy.EngineEntryToken first = new(new object(), 1);
         WindowTinyLfuEnginePolicy.EngineEntryToken second = new(new object(), 2);
-
         policy.OnPublish(first, 1);
         policy.FlushWrites();
         policy.SetWriteSequenceForTesting(long.MaxValue - 1);
         policy.OnPublish(first, 1);
         policy.OnPublish(second, 1);
         policy.FlushWrites();
-
         first.Node.Should().NotBeNull();
         second.Node.Should().NotBeNull();
         policy.ResidentCount.Should().Be(2);

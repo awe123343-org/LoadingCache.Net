@@ -1,13 +1,12 @@
 using FluentAssertions;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class ReadBeforeEvictionTests
 {
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public void PublishedProbationAccessPrecedesWeightEviction(bool recordStatistics)
     {
         List<object> evicted = [];
@@ -30,7 +29,6 @@ public sealed class ReadBeforeEvictionTests
         policy.OnPublish(window, 1);
         policy.FlushWrites();
         evicted.Should().BeEmpty();
-
         // The first two residents are in probation. This accepted access must protect the
         // oldest before the following weight increase needs a victim. No new admission or
         // frequency comparison is involved, so the result does not depend on the sketch seed.
@@ -38,7 +36,6 @@ public sealed class ReadBeforeEvictionTests
         policy.GetReadBufferStatistics().Queued.Should().Be(1);
         policy.OnPublish(growing, 2);
         policy.CleanUp();
-
         evicted.Should().Equal(growing.Entry);
         policy.Snapshot(hottest: true, limit: 3).Should().BeEquivalentTo([hot.Entry, window.Entry]);
         policy.WeightedSize.Should().Be(2);

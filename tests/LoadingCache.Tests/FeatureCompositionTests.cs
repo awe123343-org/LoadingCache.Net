@@ -1,7 +1,6 @@
 using FluentAssertions;
 using JetBrains.Annotations;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
@@ -54,6 +53,7 @@ public sealed class FeatureCompositionTests
                 )
                 .Unwrap();
         }
+
         IReadOnlyDictionary<int, int>[] results;
         try
         {
@@ -71,6 +71,7 @@ public sealed class FeatureCompositionTests
             results = await Task.WhenAll(callers)
                 .WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
         }
+
         results.Should().OnlyContain(result => result[1] == 10 && result[2] == 20);
         cache.GetStatistics().LoadSuccesses.Should().Be(1);
     }
@@ -125,13 +126,11 @@ public sealed class FeatureCompositionTests
         object key = new();
         object value = new();
         cache.Put(key, value);
-
         time.Advance(TimeSpan.FromSeconds(1));
         var notification = await removal.Task.WaitAsync(
             TimeSpan.FromSeconds(10),
             CancellationToken.None
         );
-
         notification.Key.Should().BeSameAs(key);
         notification.Value.Should().BeSameAs(value);
         notification.Cause.Should().Be(RemovalCause.MemoryPressure);
@@ -159,12 +158,10 @@ public sealed class FeatureCompositionTests
         object second = new();
         cache.Put(1, first);
         cache.Put(1, second);
-
         var notification = await removed.Task.WaitAsync(
             TimeSpan.FromSeconds(10),
             CancellationToken.None
         );
-
         notification.Cause.Should().Be(RemovalCause.Replaced);
         notification.Value.Should().BeSameAs(first);
         cache.TryGet(1, out object? current).Should().BeTrue();

@@ -1,16 +1,15 @@
 using FluentAssertions;
 using LoadingCache.Maintenance;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class CoordinatorOwnershipTests
 {
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task InlineRearmCannotReleaseAReplacementOwner(bool replacementCompletes)
     {
         await using BlockingTestHook schedulerReturning = new(Watchdog);
@@ -103,19 +102,16 @@ public sealed class CoordinatorOwnershipTests
             await olderReturning.Entered.WaitAsync(Watchdog);
             newer = Task.Run(coordinator.CleanUp);
             await newerReturning.Entered.WaitAsync(Watchdog);
-
             olderReturning.Release();
             await older.WaitAsync(Watchdog);
             coordinator.State.Should().Be(MaintenanceCoordinatorState.Scheduled);
             coordinator.GetStatistics().FallbackRequired.Should().BeFalse();
             fallbacks.Count.Should().Be(0);
-
             newerReturning.Release();
             MaintenanceCleanupResult result = await newer.WaitAsync(Watchdog);
             result.FallbackRequired.Should().BeTrue();
             coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
             coordinator.GetStatistics().FallbackRequired.Should().BeTrue();
-
             coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
             scheduler.RunNext();
             passes.Should().Be(3);
@@ -153,7 +149,6 @@ public sealed class CoordinatorOwnershipTests
             coordinator.CleanUp().Performed.Should().BeTrue();
             coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
             coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
-
             rejecting.Release();
             (await original.WaitAsync(Watchdog)).Should().Be(MaintenanceRequestResult.Accepted);
             coordinator.State.Should().Be(MaintenanceCoordinatorState.Scheduled);
@@ -172,7 +167,6 @@ public sealed class CoordinatorOwnershipTests
     private sealed class CallbackCounter
     {
         private int _count;
-
         internal int Count => Volatile.Read(ref _count);
 
         internal void Increment() => Interlocked.Increment(ref _count);
@@ -204,7 +198,6 @@ public sealed class CoordinatorOwnershipTests
     ) : IMaintenanceScheduler
     {
         private readonly Queue<Action> _callbacks = new();
-
         internal int ScheduleCalls { get; private set; }
 
         public bool TrySchedule(Action callback)

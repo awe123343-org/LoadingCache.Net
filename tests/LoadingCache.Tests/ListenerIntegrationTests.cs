@@ -1,13 +1,12 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
+using FluentAssertions.Execution;
 using LoadingCache.Notifications;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class ListenerIntegrationTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
@@ -19,7 +18,6 @@ public sealed class ListenerIntegrationTests
         var completed = new TaskCompletionSource<object?>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
-
         using ICache<int, string> cache = CacheBuilder
             .Create<int, string>()
             .MaximumSize(4)
@@ -34,13 +32,10 @@ public sealed class ListenerIntegrationTests
             })
             .RecordStatistics()
             .Build();
-
         cache.Put(1, "first");
         cache.Put(1, "second");
         cache.Invalidate(1).Should().BeTrue();
-
         await completed.Task.WaitAsync(TestTimeout);
-
         observed
             .Select(notification => notification.Cause)
             .Should()
@@ -55,7 +50,6 @@ public sealed class ListenerIntegrationTests
         var observed = new TaskCompletionSource<RemovalNotification<int, string>>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
-
         using ICache<int, string> cache = CacheBuilder
             .Create<int, string>()
             .MaximumSize(1)
@@ -63,11 +57,9 @@ public sealed class ListenerIntegrationTests
             .EvictionListener(notification => observed.TrySetResult(notification))
             .RecordStatistics()
             .Build();
-
         cache.Put(1, "one");
         cache.Put(2, "two");
         cache.CleanUp();
-
         RemovalNotification<int, string> notification = await observed.Task.WaitAsync(TestTimeout);
         notification.Cause.Should().Be(RemovalCause.Size);
         notification.Value.Should().Be("one");
@@ -88,10 +80,8 @@ public sealed class ListenerIntegrationTests
             evictionListener: notification => observed = notification,
             maximumSize: 1
         );
-
         cache.Put(1, "one");
         cache.Put(2, "two");
-
         observed.Should().NotBeNull();
         observed!.Value.Cause.Should().Be(RemovalCause.Size);
         observed.Value.Key.Should().Be(1);
@@ -109,10 +99,8 @@ public sealed class ListenerIntegrationTests
             evictionListener: _ => throw new InvalidOperationException("eviction failure"),
             maximumSize: 1
         );
-
         cache.Put(1, "one");
         cache.Put(2, "two");
-
         cache.Statistics.ListenerFailures.Should().Be(1);
         cache.TryGet(2, out string? current).Should().BeTrue();
         current.Should().Be("two");
@@ -145,12 +133,9 @@ public sealed class ListenerIntegrationTests
             .RemovalListener(_ => throw new InvalidOperationException("listener failure"))
             .RecordStatistics()
             .Build();
-
         cache.Put(1, "one");
         cache.Invalidate(1).Should().BeTrue();
-
         await Eventually(() => cache.Statistics.ListenerFailures == 1);
-
         cache.Put(2, "two");
         cache.TryGet(2, out string? value).Should().BeTrue();
         value.Should().Be("two");
@@ -168,12 +153,10 @@ public sealed class ListenerIntegrationTests
             .MaxConcurrentLoads(4)
             .RemovalListener(_ => observed.TrySetResult(null))
             .Build();
-
         cache.Put(1, "one");
         cache.Invalidate(1).Should().BeTrue();
         await observed.Task.WaitAsync(TestTimeout);
         await Eventually(() => cache.GetNotificationStatistics().Delivered >= 1);
-
         CacheNotificationStatistics statistics = cache.GetNotificationStatistics();
         statistics.IsDisposed.Should().BeFalse();
         statistics.Enqueued.Should().BeGreaterThanOrEqualTo(1);
@@ -229,12 +212,9 @@ public sealed class ListenerIntegrationTests
             scheduler: scheduler,
             notificationCapacity: 2
         );
-
         cache.Put(1, "one");
         cache.Invalidate(1).Should().BeTrue();
-
         await Eventually(() => cache.GetNotificationStatistics().ScheduleRejections == 1);
-
         CacheNotificationStatistics notificationStats = cache.GetNotificationStatistics();
         notificationStats.DroppedSchedule.Should().Be(1);
         notificationStats.Dropped.Should().Be(1);
@@ -254,15 +234,12 @@ public sealed class ListenerIntegrationTests
             scheduler: scheduler,
             notificationCapacity: 1
         );
-
         cache.Put(1, "one");
         cache.Invalidate(1).Should().BeTrue();
         await Eventually(() => scheduler.Pending == 1);
-
         cache.Put(2, "two");
         cache.Invalidate(2).Should().BeTrue();
         await Eventually(() => cache.GetNotificationStatistics().DroppedFull == 1);
-
         cache.GetNotificationStatistics().Dropped.Should().Be(1);
         delivered.Task.IsCompleted.Should().BeFalse();
         scheduler.RunNext();
@@ -295,16 +272,13 @@ public sealed class ListenerIntegrationTests
             cache.Put(1, "one");
             cache.Invalidate(1).Should().BeTrue();
             await Eventually(() => scheduler.Pending == 1);
-
             Task drain = Task.Run(scheduler.RunNext);
             await entered.Task.WaitAsync(TestTimeout);
             cache.Dispose();
             drain.IsCompleted.Should().BeFalse();
-
             CacheNotificationStatistics afterDispose = cache.GetNotificationStatistics();
             afterDispose.IsDisposed.Should().BeTrue();
             afterDispose.DroppedShutdown.Should().Be(0);
-
             release.TrySetResult(null);
             await drain.WaitAsync(TestTimeout);
         }
@@ -328,9 +302,7 @@ public sealed class ListenerIntegrationTests
             cache.Put(1, "one");
             cache.Invalidate(1).Should().BeTrue();
             await Eventually(() => scheduler.Pending == 1);
-
             cache.Dispose();
-
             CacheNotificationStatistics afterDispose = cache.GetNotificationStatistics();
             afterDispose.IsDisposed.Should().BeTrue();
             afterDispose.DroppedShutdown.Should().Be(1);
@@ -363,11 +335,9 @@ public sealed class ListenerIntegrationTests
             .RemovalListener(notification => removal.TrySetResult(notification))
             .RecordStatistics()
             .BuildLoading(_ => $"value-{Interlocked.Increment(ref calls)}");
-
         cache.Get(1).Should().Be("value-1");
         time.Advance(TimeSpan.FromSeconds(1));
         cache.Get(1).Should().Be("value-2");
-
         RemovalNotification<int, string> evictionNotification = await eviction.Task.WaitAsync(
             TestTimeout
         );
@@ -398,12 +368,10 @@ public sealed class ListenerIntegrationTests
             .RemovalListener(notification => removal.TrySetResult(notification))
             .RecordStatistics()
             .Build();
-
         WeakReference reference = StoreWeakValue(cache);
         ForceCollection(reference);
         reference.IsAlive.Should().BeFalse();
         cache.TryGet(1, out _).Should().BeFalse();
-
         RemovalNotification<int, CollectedValue> evictionNotification =
             await eviction.Task.WaitAsync(TestTimeout);
         RemovalNotification<int, CollectedValue> removalNotification = await removal.Task.WaitAsync(
@@ -440,12 +408,10 @@ public sealed class ListenerIntegrationTests
                         : Task.FromException<string>(new InvalidOperationException("refresh"));
                 }
             );
-
         (await cache.GetAsync(1)).Should().Be("old");
         time.Advance(TimeSpan.FromSeconds(1));
         (await cache.GetAsync(1)).Should().Be("old");
         await Eventually(() => cache.Statistics.RefreshFailures == 1);
-
         cache.TryGet(1, out string? value).Should().BeTrue();
         value.Should().Be("old");
         notifications.Should().BeEmpty();
@@ -501,7 +467,7 @@ public sealed class ListenerIntegrationTests
         {
             if (DateTimeOffset.UtcNow >= deadline)
             {
-                throw new AssertionException("The condition did not become true in time.");
+                throw new AssertionFailedException("The condition did not become true in time.");
             }
 
             await Task.Yield();
@@ -523,7 +489,6 @@ public sealed class ListenerIntegrationTests
     {
         private readonly object _gate = new();
         private readonly Queue<Action> _callbacks = new();
-
         internal bool Reject { get; init; }
 
         internal int Pending

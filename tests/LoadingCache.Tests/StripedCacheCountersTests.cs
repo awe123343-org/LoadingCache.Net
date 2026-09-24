@@ -1,13 +1,10 @@
 using System.Collections.Concurrent;
 using System.Numerics;
-using System.Runtime.CompilerServices;
 using FluentAssertions;
 using LoadingCache.Diagnostics;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class StripedCacheCountersTests
 {
     [Test]
@@ -16,7 +13,6 @@ public sealed class StripedCacheCountersTests
         StripedCacheCounters counters = new(8);
         const int workerCount = 8;
         const int incrementsPerWorker = 20_000;
-
         Parallel.For(
             0,
             workerCount,
@@ -29,7 +25,6 @@ public sealed class StripedCacheCountersTests
                 }
             }
         );
-
         CacheCounterSnapshot snapshot = counters.Snapshot();
         snapshot[CacheCounterKind.Hits].Should().Be(workerCount * incrementsPerWorker);
         snapshot[CacheCounterKind.TotalLoadTimeTicks]
@@ -41,10 +36,8 @@ public sealed class StripedCacheCountersTests
     public void SingleStripeCounterSaturatesAtLongMaxValue()
     {
         StripedCacheCounters counters = new(1);
-
         counters.Add(CacheCounterKind.Misses, long.MaxValue - 1);
         counters.Add(CacheCounterKind.Misses, 2);
-
         counters.Snapshot()[CacheCounterKind.Misses].Should().Be(long.MaxValue);
     }
 
@@ -52,22 +45,20 @@ public sealed class StripedCacheCountersTests
     public void EveryCounterSaturatesAcrossRepeatedUnitAdds()
     {
         StripedCacheCounters counters = new(1);
-
         for (int index = 0; index < (int)CacheCounterKind.Count; index++)
         {
             CacheCounterKind counter = (CacheCounterKind)index;
             counters.Add(counter, long.MaxValue - 1);
-
             counters.Add(counter);
             counters.Snapshot()[counter].Should().Be(long.MaxValue);
-
             counters.Add(counter);
             counters.Snapshot()[counter].Should().Be(long.MaxValue);
         }
     }
 
-    [TestCase(37L)]
-    [TestCase(long.MaxValue - 17)]
+    [Test]
+    [Arguments(37L)]
+    [Arguments(long.MaxValue - 17)]
     public async Task CollidingUnitAndArbitraryAddsAreExactAfterQuiescence(long initialValue)
     {
         StripedCacheCounters counters = new(4);
@@ -128,7 +119,6 @@ public sealed class StripedCacheCountersTests
             (BigInteger)initialValue,
             static (total, delta) => total + (BigInteger)incrementsPerWorker * (delta + 1)
         );
-
         long expected = (long)BigInteger.Min(sum, long.MaxValue);
         counters.Snapshot()[CacheCounterKind.TotalLoadTimeTicks].Should().Be(expected);
     }
@@ -137,10 +127,8 @@ public sealed class StripedCacheCountersTests
     public void AggregateSnapshotSaturatesAcrossStripes()
     {
         StripedCacheCounters counters = new(4);
-
         counters.AddToStripeForTesting(0, CacheCounterKind.EvictedWeight, long.MaxValue - 10);
         counters.AddToStripeForTesting(1, CacheCounterKind.EvictedWeight, 11);
-
         counters.Snapshot()[CacheCounterKind.EvictedWeight].Should().Be(long.MaxValue);
     }
 
@@ -148,11 +136,9 @@ public sealed class StripedCacheCountersTests
     public void InvalidCounterAndDeltaAreRejectedWithoutMutation()
     {
         StripedCacheCounters counters = new(1);
-
         Action invalidCounter = () => counters.Add((CacheCounterKind)byte.MaxValue);
         Action countSentinel = () => counters.Add(CacheCounterKind.Count);
         Action invalidDelta = () => counters.Add(CacheCounterKind.Hits, -1);
-
         invalidCounter.Should().Throw<ArgumentOutOfRangeException>();
         countSentinel.Should().Throw<ArgumentOutOfRangeException>();
         invalidDelta.Should().Throw<ArgumentOutOfRangeException>();
@@ -165,7 +151,6 @@ public sealed class StripedCacheCountersTests
         Action zero = () => CreateCounters(0);
         Action nonPowerOfTwo = () => CreateCounters(3);
         Action tooLarge = () => CreateCounters(128);
-
         zero.Should().Throw<ArgumentOutOfRangeException>();
         nonPowerOfTwo.Should().Throw<ArgumentOutOfRangeException>();
         tooLarge.Should().Throw<ArgumentOutOfRangeException>();
@@ -187,7 +172,6 @@ public sealed class StripedCacheCountersTests
         using CancellationTokenSource stop = new();
         CancellationToken stopToken = stop.Token;
         ConcurrentBag<Exception> failures = [];
-
         Task writer = Task.Run(
             () =>
             {
@@ -206,7 +190,6 @@ public sealed class StripedCacheCountersTests
             },
             CancellationToken.None
         );
-
         try
         {
             for (int index = 0; index < 10_000; index++)
@@ -232,7 +215,6 @@ public sealed class StripedCacheCountersTests
     {
         StripedCacheCounters counters = new(8);
         int slotCount = counters.CounterSlotCount;
-
         Parallel.For(
             0,
             256,
@@ -241,7 +223,6 @@ public sealed class StripedCacheCountersTests
                 counters.Add(CacheCounterKind.Misses, index + 1L);
             }
         );
-
         counters.StripeCount.Should().Be(8);
         counters.CounterSlotCount.Should().Be(slotCount);
         counters.Snapshot()[CacheCounterKind.Misses].Should().Be(256L * 257 / 2);
@@ -251,39 +232,14 @@ public sealed class StripedCacheCountersTests
     public void ZeroDeltaDoesNotChangeCounters()
     {
         StripedCacheCounters counters = new(1);
-
         counters.Add(CacheCounterKind.Hits, 0);
         counters.AddToStripeForTesting(0, CacheCounterKind.Hits, 0);
-
         counters.Snapshot()[CacheCounterKind.Hits].Should().Be(0);
     }
 
     [Test]
-    public async Task HotCounterUpdatesDoNotAllocatePerEvent()
-    {
-        if (await AllocationTestProcess.RunIsolatedIfNeededAsync("counter").ConfigureAwait(false))
-            return;
-        StripedCacheCounters counters = new(1);
-        counters.Add(CacheCounterKind.Hits);
-
-        MeasureCounter(counters).Should().Be(0);
-    }
-
-    // NoInlining keeps this kernel out of the async test; AggressiveOptimization
-    // compiles it before the allocation baseline. Otherwise OSR can grow the CLR
-    // CastCache during JIT cast analysis (6,192 B observed on Windows .NET 10).
-    // Keep the zero-byte assertion; only this measurement kernel bypasses tiering.
-    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
-    private static long MeasureCounter(StripedCacheCounters counters)
-    {
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int index = 0; index < 100_000; index++)
-        {
-            counters.Add(CacheCounterKind.Hits);
-        }
-
-        return GC.GetAllocatedBytesForCurrentThread() - before;
-    }
+    public Task HotCounterUpdatesDoNotAllocatePerEvent() =>
+        AllocationTestProcess.VerifyAsync("counter");
 
     private static void CreateCounters(int stripeCount) =>
         _ = new StripedCacheCounters(stripeCount);

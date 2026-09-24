@@ -1,20 +1,18 @@
 using FluentAssertions;
 using LoadingCache.Policy;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class PolicyTests
 {
-    [TestCase(1)]
-    [TestCase(2)]
-    [TestCase(3)]
-    [TestCase(17)]
+    [Test]
+    [Arguments(1)]
+    [Arguments(2)]
+    [Arguments(3)]
+    [Arguments(17)]
     public void TinyCapacitiesConvergeWithoutEmptySegmentFailures(int capacity)
     {
         WindowTinyLfuPolicy<int> policy = new(capacity, seed: 7, maximumCount: capacity);
-
         for (int i = 0; i < capacity * 4; i++)
         {
             PolicyNode<int> node = new(i, 1, Hash(i));
@@ -22,7 +20,6 @@ public sealed class PolicyTests
         }
 
         policy.Maintain();
-
         policy.ResidentCount.Should().BeLessThanOrEqualTo(capacity);
         policy.WeightedSize.Should().BeLessThanOrEqualTo(capacity);
         policy.WindowMaximum.Should().BeInRange(1, capacity);
@@ -34,7 +31,6 @@ public sealed class PolicyTests
     public void NegativeWeightIsRejectedBeforeNodeCanEnterPolicy()
     {
         Action action = () => _ = new PolicyNode<string>("negative", -1, 1);
-
         action.Should().Throw<ArgumentOutOfRangeException>();
     }
 
@@ -44,9 +40,7 @@ public sealed class PolicyTests
         WindowTinyLfuPolicy<int> policy = new(4, seed: 5);
         PolicyNode<int> node = new(1, 1, Hash(1));
         policy.Add(node);
-
         Action action = () => policy.UpdateWeight(node, -1);
-
         action.Should().Throw<ArgumentOutOfRangeException>();
         node.IsAlive.Should().BeTrue();
         node.Weight.Should().Be(1);
@@ -59,17 +53,13 @@ public sealed class PolicyTests
         WindowTinyLfuPolicy<string> policy = new(1, seed: 11);
         PolicyNode<string> first = new("first", 0, 1);
         PolicyNode<string> second = new("second", 0, 2);
-
         policy.Add(first);
         policy.Add(second);
-
         policy.WeightedSize.Should().Be(0);
         policy.ResidentCount.Should().Be(2);
         first.IsAlive.Should().BeTrue();
         second.IsAlive.Should().BeTrue();
-
         IReadOnlyList<PolicyNode<string>> evicted = policy.SetMaximumCount(1);
-
         evicted.Should().HaveCount(1);
         policy.ResidentCount.Should().Be(1);
         policy.WeightedSize.Should().Be(0);
@@ -80,9 +70,7 @@ public sealed class PolicyTests
     {
         WindowTinyLfuPolicy<int> policy = new(3, seed: 13);
         PolicyNode<int> node = new(7, 4, Hash(7));
-
         IReadOnlyList<PolicyNode<int>> evicted = policy.Add(node);
-
         evicted.Should().ContainSingle().Which.Should().BeSameAs(node);
         node.IsAlive.Should().BeFalse();
         node.Queue.Should().Be(PolicyQueue.None);
@@ -96,7 +84,6 @@ public sealed class PolicyTests
         WindowTinyLfuPolicy<int> policy = new(long.MaxValue, seed: 17);
         PolicyNode<int> maximum = new(1, long.MaxValue, Hash(1));
         PolicyNode<int> overflow = new(2, 1, Hash(2));
-
         policy.Add(maximum);
         for (int i = 0; i < 15; i++)
         {
@@ -104,7 +91,6 @@ public sealed class PolicyTests
         }
 
         IReadOnlyList<PolicyNode<int>> evicted = policy.Add(overflow);
-
         evicted.Should().ContainSingle().Which.Should().BeSameAs(maximum);
         maximum.IsAlive.Should().BeFalse();
         overflow.IsAlive.Should().BeTrue();
@@ -118,7 +104,6 @@ public sealed class PolicyTests
         WindowTinyLfuPolicy<int> policy = new(long.MaxValue, seed: 79);
         PolicyNode<int> existing = new(1, long.MaxValue - 1, Hash(1));
         PolicyNode<int> changing = new(2, 1, Hash(2));
-
         policy.Add(existing);
         policy.Add(changing);
         for (int i = 0; i < 3; i++)
@@ -127,7 +112,6 @@ public sealed class PolicyTests
         }
 
         IReadOnlyList<PolicyNode<int>> evicted = policy.UpdateWeight(changing, 2);
-
         evicted.Should().ContainSingle().Which.Should().BeSameAs(existing);
         existing.IsAlive.Should().BeFalse();
         changing.IsAlive.Should().BeTrue();
@@ -141,7 +125,6 @@ public sealed class PolicyTests
         const long weight = long.MaxValue / 2 + 1;
         PolicyNode<int> hot = new(1, weight, Hash(1));
         PolicyNode<int> cold = new(2, weight, Hash(2));
-
         policy.Add(hot);
         for (int i = 0; i < 15; i++)
         {
@@ -149,7 +132,6 @@ public sealed class PolicyTests
         }
 
         IReadOnlyList<PolicyNode<int>> evicted = policy.Add(cold);
-
         evicted.Should().ContainSingle().Which.Should().BeSameAs(cold);
         hot.IsAlive.Should().BeTrue();
         policy.WeightedSize.Should().Be(weight);
@@ -161,10 +143,8 @@ public sealed class PolicyTests
         WindowTinyLfuPolicy<int> policy = new(1, seed: 19);
         PolicyNode<int> victim = new(1, 1, Hash(1));
         PolicyNode<int> candidate = new(2, 1, Hash(2));
-
         policy.Add(victim);
         IReadOnlyList<PolicyNode<int>> evicted = policy.Add(candidate);
-
         evicted.Should().ContainSingle().Which.Should().BeSameAs(victim);
         victim.IsAlive.Should().BeFalse();
         candidate.IsAlive.Should().BeTrue();
@@ -177,19 +157,15 @@ public sealed class PolicyTests
         WindowTinyLfuPolicy<int> policy = new(2, seed: 53);
         PolicyNode<int> hotVictim = new(1, 1, Hash(1));
         PolicyNode<int> admitted = new(2, 1, Hash(2));
-
         policy.Add(hotVictim);
         policy.Add(admitted);
-
         hotVictim.Queue.Should().Be(PolicyQueue.Probation);
         hotVictim.IsCandidate.Should().BeFalse();
         policy.RecordAccess(hotVictim).Should().BeTrue();
         hotVictim.Queue.Should().Be(PolicyQueue.Probation);
         hotVictim.IsCandidate.Should().BeFalse();
-
         PolicyNode<int> candidate = new(3, 1, Hash(3));
         IReadOnlyList<PolicyNode<int>> evicted = policy.Add(candidate);
-
         evicted.Should().ContainSingle().Which.Should().BeSameAs(admitted);
         hotVictim.IsAlive.Should().BeTrue();
         candidate.IsAlive.Should().BeTrue();
@@ -203,7 +179,6 @@ public sealed class PolicyTests
         PolicyNode<int> coldVictim = new(1, 1, Hash(1));
         PolicyNode<int> middle = new(2, 1, Hash(2));
         PolicyNode<int> hotCandidate = new(3, 1, Hash(3));
-
         policy.Add(coldVictim);
         policy.Add(middle);
         policy.Add(hotCandidate);
@@ -214,7 +189,6 @@ public sealed class PolicyTests
 
         PolicyNode<int> trigger = new(4, 1, Hash(4));
         policy.Add(trigger);
-
         coldVictim.IsAlive.Should().BeFalse();
         hotCandidate.IsAlive.Should().BeTrue();
         policy.ResidentCount.Should().Be(3);
@@ -226,13 +200,10 @@ public sealed class PolicyTests
         WindowTinyLfuPolicy<int> policy = new(10, seed: 29);
         PolicyNode<int> first = new(1, 1, Hash(1));
         PolicyNode<int> second = new(2, 1, Hash(2));
-
         policy.Add(first);
         policy.Add(second);
         first.Queue.Should().Be(PolicyQueue.Probation);
-
         policy.RecordAccess(first).Should().BeTrue();
-
         first.Queue.Should().Be(PolicyQueue.Protected);
         policy.ProtectedCount.Should().Be(1);
         policy.MainProtectedWeightedSize.Should().Be(1);
@@ -244,11 +215,9 @@ public sealed class PolicyTests
         WindowTinyLfuPolicy<int> policy = new(4, seed: 31);
         PolicyNode<int> oldNode = new(1, 1, Hash(1));
         PolicyNode<int> currentNode = new(2, 1, Hash(2));
-
         policy.Add(oldNode);
         policy.Remove(oldNode).Should().ContainSingle().Which.Should().BeSameAs(oldNode);
         policy.Add(currentNode);
-
         policy.RecordAccess(oldNode).Should().BeFalse();
         policy.Remove(oldNode).Should().BeEmpty();
         currentNode.IsAlive.Should().BeTrue();
@@ -269,7 +238,6 @@ public sealed class PolicyTests
         }
 
         IReadOnlyList<PolicyNode<int>> evicted = policy.SetMaximum(3);
-
         evicted.Should().NotBeEmpty();
         evicted.Should().OnlyContain(node => nodes.Contains(node));
         policy.WeightedSize.Should().BeLessThanOrEqualTo(3);
@@ -284,14 +252,12 @@ public sealed class PolicyTests
         PolicyNode<int> node = new(1, 1, Hash(1));
         policy.Add(node);
         long sampleSize = policy.SketchSampleSize;
-
         for (long i = 0; i < sampleSize; i++)
         {
             policy.RecordMiss(Hash((int)i));
         }
 
         policy.Maintain();
-
         Math.Abs(policy.StepSize).Should().BeGreaterThanOrEqualTo(1);
         policy.WindowMaximum.Should().BeInRange(1, policy.Maximum);
         policy.ProtectedMaximum.Should().BeLessThanOrEqualTo(policy.MainMaximum);
@@ -304,7 +270,6 @@ public sealed class PolicyTests
         List<PolicyNode<int>> nodes = AddNodes(policy, 256);
         long initialWindow = policy.WindowMaximum;
         long sampleSize = policy.SketchSampleSize;
-
         for (long i = policy.MissesInSample; i < sampleSize; i++)
         {
             policy.RecordAccess(nodes[0]);
@@ -313,7 +278,6 @@ public sealed class PolicyTests
         policy.Maintain(10_000);
         long grownWindow = policy.WindowMaximum;
         grownWindow.Should().BeGreaterThan(initialWindow);
-
         for (long i = 0; i < sampleSize; i++)
         {
             policy.RecordMiss(Hash((int)(i + 10_000)));
@@ -329,7 +293,6 @@ public sealed class PolicyTests
         WindowTinyLfuPolicy<int> policy = new(256, seed: 61);
         List<PolicyNode<int>> nodes = AddNodes(policy, 256);
         long sampleSize = policy.SketchSampleSize;
-
         for (long i = policy.MissesInSample; i < sampleSize; i++)
         {
             policy.RecordAccess(nodes[0]);
@@ -337,7 +300,6 @@ public sealed class PolicyTests
 
         policy.Maintain(1);
         policy.Adjustment.Should().NotBe(0);
-
         for (long i = 0; i < sampleSize; i++)
         {
             policy.RecordMiss(Hash((int)(i + 20_000)));
@@ -346,7 +308,6 @@ public sealed class PolicyTests
         policy.Maintain(1);
         policy.MissesInSample.Should().Be(sampleSize);
         policy.Adjustment.Should().NotBe(0);
-
         policy.Maintain(10_000);
         policy.Adjustment.Should().Be(0);
     }
@@ -357,7 +318,6 @@ public sealed class PolicyTests
         WindowTinyLfuPolicy<int> policy = new(100, seed: 89);
         List<PolicyNode<int>> nodes = AddNodes(policy, 100);
         long initialWindow = policy.WindowMaximum;
-
         for (int i = 0; i < 1_200; i++)
         {
             policy.RecordAccess(nodes[^1]);
@@ -384,9 +344,7 @@ public sealed class PolicyTests
 
         int frequency = policy.Frequency(hash);
         policy.SketchSampleCount.Should().BeGreaterThan(0);
-
         policy.SetMaximum(128);
-
         policy.SketchSampleCount.Should().Be(0);
         policy.Frequency(hash).Should().Be(frequency);
     }
@@ -398,7 +356,6 @@ public sealed class PolicyTests
         FrequencySketch second = new(43);
         first.EnsureCapacity(1_024);
         second.EnsureCapacity(1_024);
-
         for (int i = 0; i < 100; i++)
         {
             first.Increment(Hash(123));
@@ -420,7 +377,6 @@ public sealed class PolicyTests
         }
 
         IReadOnlyList<PolicyNode<int>> evicted = policy.SetMaximumCount(2);
-
         evicted.Should().HaveCount(3);
         policy.ResidentCount.Should().Be(2);
         policy.WeightedSize.Should().Be(0);
@@ -433,7 +389,6 @@ public sealed class PolicyTests
         WindowTinyLfuPolicy<int> second = new(8, seed: 71, maximumCount: 8);
         Dictionary<int, PolicyNode<int>> firstLive = new();
         Dictionary<int, PolicyNode<int>> secondLive = new();
-
         for (int i = 0; i < 32; i++)
         {
             long weight = i % 4 == 0 ? 2 : 1;
@@ -468,7 +423,6 @@ public sealed class PolicyTests
     {
         WindowTinyLfuPolicy<int> policy = new(16, seed: 73, maximumCount: 16);
         List<PolicyNode<int>> nodes = AddNodes(policy, 8);
-
         policy.RecordAccess(nodes[0]);
         policy.RecordAccess(nodes[1]);
         policy.UpdateWeight(nodes[2], 5);
@@ -478,7 +432,6 @@ public sealed class PolicyTests
         policy.SetMaximumCount(4);
         PolicyNode<int> added = new(99, 1, Hash(99));
         policy.Add(added);
-
         int aliveCount = 0;
         long weightedSize = 0;
         foreach (PolicyNode<int> node in nodes)

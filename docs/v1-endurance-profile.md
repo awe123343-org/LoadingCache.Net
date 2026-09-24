@@ -4,7 +4,7 @@ Profile `v1-endurance-1`, frozen on 16 September 2026 before formal measurement.
 
 ## Workload
 
-Phase one reuses four `LongRunningStabilityTests` cases (mixed/access-only, statistics off/on) and two `FeatureCombinationStabilityTests` cases (off/on). Each executes for at least 1,800 monotonic seconds. Six NUnit workers run six cases concurrently in one process, with eight traffic workers per fixture; this is not three continuous hours. Run net8 then net10 separately, avoiding shared benchmark CPU lanes. Preserve the original bulk/weak/listener assertions.
+Phase one reuses four `LongRunningStabilityTests` cases (mixed/access-only, statistics off/on) and two `FeatureCombinationStabilityTests` cases (off/on). Each executes for at least 1,800 monotonic seconds. TUnit runs six cases concurrently (`--maximum-parallel-tests 6`) in one process, with eight traffic workers per fixture; this is not three continuous hours. Run net8 then net10 separately, avoiding shared benchmark CPU lanes. Preserve the original bulk/weak/listener assertions.
 
 Phase two is one separate 28,800-second process exercising sync manual/loading and async manual/loading. Each cache has size=256, explicit concurrent/pending limits=4 and notification capacity=32. Eight workers use batches of 64 operations; seed=20260916 fixes generated choices, not OS interleaving. Keys=1,024, payload=256 bytes plus metadata; mix=60% get/load, 20% put, 15% invalidate, 5% resident/task read. Async loading yields; sync loading remains genuinely synchronous. Check key/generation/payload on every returned value.
 

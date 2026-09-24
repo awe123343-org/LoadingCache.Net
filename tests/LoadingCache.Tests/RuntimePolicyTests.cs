@@ -1,6 +1,5 @@
 using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
@@ -53,6 +52,7 @@ public sealed class RuntimePolicyTests
                 TaskScheduler.Default
             );
         }
+
         await Task.WhenAll(workers).WaitAsync(TimeSpan.FromSeconds(30), CancellationToken.None);
         eviction.SetMaximum(4);
         cache.CleanUp();

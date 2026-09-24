@@ -1,6 +1,5 @@
 using FluentAssertions;
 using LoadingCache.Maintenance;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
@@ -19,22 +18,18 @@ public sealed class EngineMaintenanceTests
             readStripeCapacity: 1
         );
         using var cache = new Cache<int, string>(engine);
-
         cache.Put(1, "ready");
         scheduler.Pending.Should().Be(1);
         scheduler.RunNext();
         scheduler.Pending.Should().Be(0);
-
         cache.TryGet(1, out string? first).Should().BeTrue();
         first.Should().Be("ready");
         engine.GetPolicyReadBufferStatistics().Queued.Should().Be(1);
         scheduler.Pending.Should().Be(0);
-
         cache.TryGet(1, out string? second).Should().BeTrue();
         second.Should().Be("ready");
         engine.GetPolicyReadBufferStatistics().DroppedFull.Should().Be(1);
         scheduler.Pending.Should().Be(1);
-
         scheduler.RunNext();
         engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
         engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
@@ -54,7 +49,6 @@ public sealed class EngineMaintenanceTests
             }
         );
         using var cache = new Cache<int, string>(engine);
-
         // Activate read recording without overriding either production buffer default.
         cache.Policy.Eviction!.SetMaximum(4);
         cache.Put(1, "ready");
@@ -62,7 +56,6 @@ public sealed class EngineMaintenanceTests
         scheduler.RunNext();
         scheduler.Pending.Should().Be(0);
         int writeScheduleCalls = scheduler.ScheduleCalls;
-
         for (int index = 0; index < 64; index++)
         {
             cache.TryGet(1, out string? value).Should().BeTrue();
@@ -75,13 +68,11 @@ public sealed class EngineMaintenanceTests
         full.Enqueued.Should().Be(64);
         full.DroppedFull.Should().Be(0);
         scheduler.ScheduleCalls.Should().Be(writeScheduleCalls);
-
         cache.TryGet(1, out string? last).Should().BeTrue();
         last.Should().Be("ready");
         engine.GetPolicyReadBufferStatistics().DroppedFull.Should().Be(1);
         scheduler.Pending.Should().Be(1);
         scheduler.ScheduleCalls.Should().Be(writeScheduleCalls + 1);
-
         scheduler.RunNext();
         ReadBufferStatistics drained = engine.GetPolicyReadBufferStatistics();
         drained.Queued.Should().Be(0);
@@ -104,12 +95,10 @@ public sealed class EngineMaintenanceTests
             readStripeCapacity: 8
         );
         using var cache = new Cache<int, string>(engine);
-
         cache.Put(1, "ready");
         cache.TryGet(1, out string? first).Should().BeTrue();
         first.Should().Be("ready");
         scheduler.Pending.Should().Be(1);
-
         Task worker = Task.Run(scheduler.RunNext);
         Task<bool>? hit = null;
         try
@@ -149,7 +138,6 @@ public sealed class EngineMaintenanceTests
             readStripeCapacity: 2
         );
         using var cache = new Cache<int, string>(engine);
-
         cache.Put(1, "ready");
         for (int index = 0; index < 32; index++)
         {
@@ -160,7 +148,6 @@ public sealed class EngineMaintenanceTests
         statistics.Queued.Should().BeLessThanOrEqualTo(2);
         statistics.DroppedFull.Should().BeGreaterThan(0);
         scheduler.ScheduleCalls.Should().Be(1);
-
         // Reliable mapping writes do not depend on admission to the lossy read
         // transport.
         cache.Put(2, "write");
@@ -179,11 +166,9 @@ public sealed class EngineMaintenanceTests
             readStripeCapacity: 1
         );
         using var cache = new Cache<int, string>(engine);
-
         cache.Put(1, "ready");
         cache.TryGet(1, out _).Should().BeTrue();
         cache.TryGet(1, out _).Should().BeTrue();
-
         ReadBufferStatistics buffer = engine.GetPolicyReadBufferStatistics();
         buffer.Queued.Should().Be(0);
         MaintenanceStatistics maintenance = engine.GetMaintenanceStatistics();
@@ -213,7 +198,6 @@ public sealed class EngineMaintenanceTests
         using (cache)
         {
             cache.Put(1, "ready");
-
             // The first hit fills the one-slot stripe without scheduling. The
             // second hit observes full backpressure and starts the rejected
             // maintenance path. The hook then keeps one event queued at every
@@ -225,14 +209,11 @@ public sealed class EngineMaintenanceTests
             engine.GetMaintenanceStatistics().BudgetExhaustions.Should().BeGreaterThan(0);
             engine.GetMaintenanceStatistics().FallbackRequired.Should().BeTrue();
             engine.GetPolicyReadBufferStatistics().Queued.Should().Be(1);
-
             state.StopFilling();
-
             // The stripe is full, so this hit's event is dropped. It must still
             // observe the clear signal, request the rejected scheduler again,
             // and synchronously drain the old event.
             cache.TryGet(1, out _).Should().BeTrue();
-
             engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
             engine.GetMaintenanceStatistics().FallbackRequired.Should().BeFalse();
             engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
@@ -263,17 +244,13 @@ public sealed class EngineMaintenanceTests
             cache.Put(1, "ready");
             cache.TryGet(1, out _).Should().BeTrue();
             scheduler.Pending.Should().Be(1);
-
             scheduler.RunNext();
-
             state.MaintenanceCalls.Should().Be(1);
             scheduler.ScheduleCalls.Should().Be(2);
             engine.GetMaintenanceStatistics().FallbackRequired.Should().BeTrue();
             engine.GetPolicyReadBufferStatistics().Queued.Should().Be(1);
-
             state.StopFilling();
             cache.TryGet(1, out _).Should().BeTrue();
-
             // The first worker's rejected re-arm left the read signal set. A
             // subsequent full stripe must claim a fresh maintenance request.
             engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
@@ -294,7 +271,6 @@ public sealed class EngineMaintenanceTests
             readStripeCapacity: 512
         );
         using var cache = new Cache<int, string>(engine);
-
         cache.Put(1, "ready");
         cache.TryGet(1, out _).Should().BeTrue();
         Task worker = Task.Run(scheduler.RunNext);
@@ -331,7 +307,6 @@ public sealed class EngineMaintenanceTests
             readStripeCapacity: 8
         );
         using var cache = new Cache<int, string>(engine);
-
         cache.Put(1, "ready");
         cache.TryGet(1, out _).Should().BeTrue();
         Task worker = Task.Run(scheduler.RunNext);
@@ -345,6 +320,7 @@ public sealed class EngineMaintenanceTests
             hook.Release();
             await worker.WaitAsync(Watchdog, CancellationToken.None);
         }
+
         hook.TimedOut.Should().BeFalse();
         engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
         engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
@@ -373,7 +349,6 @@ public sealed class EngineMaintenanceTests
         engine.GetPolicyReadBufferStatistics().Queued.Should().Be(44);
         engine.GetMaintenanceStatistics().FallbackRequired.Should().BeTrue();
         scheduler.Pending.Should().Be(0);
-
         scheduler.Reject = false;
         for (int index = 44; index < 512; index++)
         {
@@ -385,7 +360,6 @@ public sealed class EngineMaintenanceTests
         scheduler.RunNext();
         scheduler.Pending.Should().Be(1);
         scheduler.RunNext();
-
         engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
         engine.GetPolicyReadBufferStatistics().Dequeued.Should().Be(768);
         engine.GetPolicyReadBufferStatistics().DroppedFull.Should().Be(1);
@@ -400,7 +374,6 @@ public sealed class EngineMaintenanceTests
         ManualMaintenanceScheduler scheduler = new();
         CacheEngine<int, string> engine = CreateEngine(scheduler, readStripeCount: 1);
         using var cache = new Cache<int, string>(engine);
-
         cache.Put(1, "old");
         cache.TryGet(1, out _).Should().BeTrue();
         cache.Clear();
@@ -409,7 +382,6 @@ public sealed class EngineMaintenanceTests
         cache.Policy.Eviction!.WeightedSize.Should().Be(1);
         cache.TryGet(1, out string? clearValue).Should().BeTrue();
         clearValue.Should().Be("after-clear");
-
         cache.TryGet(1, out _).Should().BeTrue();
         cache.Put(1, "after-set");
         cache.CleanUp();
@@ -433,7 +405,6 @@ public sealed class EngineMaintenanceTests
         sized.EstimatedCount.Should().BeLessThanOrEqualTo(2);
         sized.Policy.Eviction!.WeightedSize.Should().BeLessThanOrEqualTo(2);
         sizedEngine.AssertInvariants();
-
         CacheEngine<int, string> weightedEngine = new(
             new CacheEngineOptions<int, string>
             {
@@ -477,7 +448,6 @@ public sealed class EngineMaintenanceTests
                 MaintenanceReadStripeCapacity = readStripeCapacity,
             }
         );
-
         // These tests deliberately pause write maintenance, which also delays lazy sketch
         // initialization. A supported policy resize activates read recording before the pause;
         // cold-start bypass and its activation boundary have separate regression coverage.
@@ -488,11 +458,8 @@ public sealed class EngineMaintenanceTests
     private sealed class ManualMaintenanceScheduler : IMaintenanceScheduler
     {
         private readonly Queue<Action> _callbacks = new();
-
         internal bool Reject { get; set; }
-
         internal int ScheduleCalls { get; private set; }
-
         internal int Pending => _callbacks.Count;
 
         public bool TrySchedule(Action callback)
@@ -516,9 +483,7 @@ public sealed class EngineMaintenanceTests
     private sealed class AcceptThenRejectMaintenanceScheduler : IMaintenanceScheduler
     {
         private readonly Queue<Action> _callbacks = new();
-
         internal int ScheduleCalls { get; private set; }
-
         internal int Pending => _callbacks.Count;
 
         public bool TrySchedule(Action callback)
@@ -544,7 +509,6 @@ public sealed class EngineMaintenanceTests
         private Cache<int, string>? _cache;
         private int _keepFilling = 1;
         private int _maintenanceCalls;
-
         internal int MaintenanceCalls => Volatile.Read(ref _maintenanceCalls);
 
         internal void Attach(Cache<int, string> cache) => _cache = cache;

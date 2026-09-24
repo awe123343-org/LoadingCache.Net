@@ -1,6 +1,5 @@
 using System.Runtime.CompilerServices;
 using FluentAssertions;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
@@ -21,7 +20,6 @@ public sealed class EngineRetentionTests
             .BuildAsyncLoading((_, _) => release.Task);
         Task<Payload> oldWaiter = cache.GetAsync(0).AsTask();
         WeakReference[] retiredValues = PopulateAndClear(cache);
-
         try
         {
             oldWaiter.IsCompleted.Should().BeFalse();
@@ -60,7 +58,6 @@ public sealed class EngineRetentionTests
         _ = await cache.GetAsync(0);
         Task<Payload> refresh = cache.RefreshAsync(0).AsTask();
         WeakReference[] retiredValues = PopulateAndClear(cache);
-
         try
         {
             refresh.IsCompleted.Should().BeFalse();
@@ -86,7 +83,6 @@ public sealed class EngineRetentionTests
             .MaximumSize(8)
             .MaxConcurrentLoads(1)
             .Build();
-
         WeakReference[] retiredValues = ReplaceAndInvalidate(cache);
         cache.CleanUp();
         CollectTargets(retiredValues);
@@ -106,6 +102,7 @@ public sealed class EngineRetentionTests
             references[index] = new WeakReference(value);
             cache.Set(index + 1, value);
         }
+
         cache.Clear();
         return references;
     }
@@ -120,6 +117,7 @@ public sealed class EngineRetentionTests
             references[index] = new WeakReference(value);
             cache.Put(index % 8, value);
         }
+
         cache.Clear();
         return references;
     }

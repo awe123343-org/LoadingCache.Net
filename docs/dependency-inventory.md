@@ -1,5 +1,10 @@
 # Resolved dependency and attribution inventory
 
+Historical snapshot: test dependencies below were superseded by the 2026-09-23
+TUnit migration. Current direct package metadata is in
+[dependency evidence](dependency-evidence.json); current versions are pinned in
+`Directory.Packages.props`. Retained archive hashes describe the original capture.
+
 Captured 2026-09-16T23:35:07.325577+00:00: 22 existing project restore graphs, 72 distinct NuGet ID/version pairs. Inputs unchanged while captured: **True**.
 
 This is an offline inventory of the actual local resolved graphs, not a fresh restore, a vulnerability scan, or legal approval. Direct means a restore-graph root; SDK auto references and download-only targeting/compiler packs are labelled separately. A dependency's presence in a test/sample/build tool does not make it a shipped library dependency. Existing assets can be historical; final candidate verification must connect them to its restore/build evidence.

@@ -1,5 +1,5 @@
 using FluentAssertions;
-using NUnit.Framework;
+using FluentAssertions.Execution;
 
 namespace LoadingCache.Tests;
 
@@ -13,12 +13,9 @@ public sealed class EnginePersonalityTests
             .MaximumSize(8)
             .MaxConcurrentLoads(8)
             .Build();
-
         cache.Policy.Eviction.Should().NotBeNull();
         cache.Policy.Eviction!.Maximum.Should().Be(8);
-
         cache.Put(1, "one");
-
         cache.TryGet(1, out string? value).Should().BeTrue();
         value.Should().Be("one");
         cache.EstimatedCount.Should().Be(1);
@@ -37,7 +34,6 @@ public sealed class EnginePersonalityTests
                 Interlocked.Increment(ref calls);
                 return key.ToString(System.Globalization.CultureInfo.InvariantCulture);
             });
-
         cache.Get(7).Should().Be("7");
         cache.Get(7).Should().Be("7");
         calls.Should().Be(1);
@@ -54,17 +50,14 @@ public sealed class EnginePersonalityTests
             .MaximumSize(8)
             .MaxConcurrentLoads(8)
             .BuildAsync();
-
         ValueTask<string> first = cache.GetOrAddAsync(1, Load);
         ValueTask<string> second = cache.GetOrAddAsync(1, Load);
         await entered.Task.WaitAsync(TestTimeout, CancellationToken.None);
         release.TrySetResult(true);
-
         (await first).Should().Be("1");
         (await second).Should().Be("1");
         calls.Should().Be(1);
         return;
-
         Task<string> Load(int key, CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref calls);
@@ -93,7 +86,6 @@ public sealed class EnginePersonalityTests
                     return key.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 }
             );
-
         (await cache.GetAsync(3)).Should().Be("3");
         (await cache.GetAsync(3)).Should().Be("3");
         calls.Should().Be(1);
@@ -109,19 +101,16 @@ public sealed class EnginePersonalityTests
             .MaximumSize(8)
             .MaxConcurrentLoads(8)
             .BuildAsync();
-
         using var canceled = new CancellationTokenSource();
         ValueTask<int> first = cache.GetOrAddAsync(1, Load, canceled.Token);
         await entered.Task.WaitAsync(TestTimeout, CancellationToken.None);
         ValueTask<int> second = cache.GetOrAddAsync(1, Load, CancellationToken.None);
         await canceled.CancelAsync();
-
         Func<Task<int>> waitFirst = first.AsTask;
         await waitFirst.Should().ThrowAsync<OperationCanceledException>();
         release.TrySetResult(true);
         (await second).Should().Be(42);
         return;
-
         Task<int> Load(int _, CancellationToken cancellationToken)
         {
             entered.TrySetResult(true);
@@ -138,7 +127,6 @@ public sealed class EnginePersonalityTests
                 .MaximumWeight(100)
                 .Weigher((_, value) => value.Length)
                 .Build();
-
         action.Should().ThrowExactly<InvalidOperationException>();
     }
 
@@ -153,7 +141,6 @@ public sealed class EnginePersonalityTests
                 .MaximumResidentCount(10)
                 .Weigher((_, _) => 1)
                 .Build();
-
         action.Should().ThrowExactly<InvalidOperationException>();
     }
 
@@ -178,7 +165,6 @@ public sealed class EnginePersonalityTests
                 }
             )
             .Build();
-
         Task put = Task.Factory.StartNew(
             static state => ((ICache<int, string>)state!).Put(1, "value"),
             cache,
@@ -216,7 +202,6 @@ public sealed class EnginePersonalityTests
                 (key, _) =>
                     Task.FromResult(key.ToString(System.Globalization.CultureInfo.InvariantCulture))
             );
-
         (await cache.GetAsync(1)).Should().Be("1");
         (await cache.GetAsync(2)).Should().Be("2");
         (await cache.GetAsync(3)).Should().Be("3");
@@ -234,11 +219,9 @@ public sealed class EnginePersonalityTests
             .MaximumSize(8)
             .MaxConcurrentLoads(8)
             .BuildAsyncLoading((_, _) => load.Task);
-
         Task<string> pending = cache.GetAsync(1).AsTask();
         cache.Set(1, "new");
         load.TrySetResult("old");
-
         (await pending).Should().Be("old");
         (await cache.GetAsync(1)).Should().Be("new");
     }
@@ -256,13 +239,11 @@ public sealed class EnginePersonalityTests
             .BuildAsyncLoading(
                 (_, _) => Interlocked.Increment(ref calls) == 1 ? oldLoad.Task : newLoad.Task
             );
-
         Task<string> old = cache.GetAsync(1).AsTask();
         cache.Clear();
         Task<string> current = cache.GetAsync(1).AsTask();
         newLoad.TrySetResult("new");
         oldLoad.TrySetResult("old");
-
         (await current).Should().Be("new");
         (await old).Should().Be("old");
         (await cache.GetAsync(1)).Should().Be("new");
@@ -279,7 +260,6 @@ public sealed class EnginePersonalityTests
             .MaximumSize(8)
             .MaxConcurrentLoads(2)
             .BuildAsync();
-
         Task<int> first = cache.GetOrAddAsync(1, Load).AsTask();
         Task<int> second = cache.GetOrAddAsync(2, Load).AsTask();
         try
@@ -294,8 +274,8 @@ public sealed class EnginePersonalityTests
             release.TrySetResult(true);
             await Task.WhenAll(first, second).WaitAsync(TestTimeout, CancellationToken.None);
         }
-        return;
 
+        return;
         async Task<int> Load(int key, CancellationToken _)
         {
             int now = Interlocked.Increment(ref active);
@@ -327,14 +307,12 @@ public sealed class EnginePersonalityTests
         );
         var source = NewSignal<string>();
         await using var cache = new AsyncLoadingCache<int, string>(engine, (_, _) => source.Task);
-
         Task<string> load = cache.GetAsync(1).AsTask();
         Task<bool>? probe = null;
         try
         {
             source.SetResult("1");
             await publication.Entered.WaitAsync(TestTimeout, CancellationToken.None);
-
             probe = Task.Factory.StartNew(
                 static state => ((AsyncLoadingCache<int, string>)state!).TryGet(1, out _),
                 cache,
@@ -343,7 +321,6 @@ public sealed class EnginePersonalityTests
                 TaskScheduler.Default
             );
             (await probe.WaitAsync(TestTimeout, CancellationToken.None)).Should().BeFalse();
-
             publication.Release();
             (await load.WaitAsync(TestTimeout, CancellationToken.None)).Should().Be("1");
             cache.TryGet(1, out string? value).Should().BeTrue();
@@ -373,7 +350,6 @@ public sealed class EnginePersonalityTests
         );
         await using var cache = new AsyncCache<int, string>(engine);
         var source = NewSignal<string>();
-
         Task installer = Task.Factory.StartNew(
             static state =>
             {
@@ -394,11 +370,10 @@ public sealed class EnginePersonalityTests
             await installation.Entered.WaitAsync(TestTimeout, CancellationToken.None);
             ValueTask<string> joined = cache.GetOrAddAsync(
                 1,
-                (_, _) => throw new AssertionException("The stored task was not joined.")
+                (_, _) => throw new AssertionFailedException("The stored task was not joined.")
             );
             source.SetResult("stored");
             installation.Release();
-
             await installer.WaitAsync(TestTimeout, CancellationToken.None);
             (await joined.AsTask().WaitAsync(TestTimeout, CancellationToken.None))
                 .Should()
@@ -436,7 +411,7 @@ public sealed class EnginePersonalityTests
         {
             if (DateTimeOffset.UtcNow >= deadline)
             {
-                throw new AssertionException(
+                throw new AssertionFailedException(
                     "The controlled concurrency condition was not reached."
                 );
             }

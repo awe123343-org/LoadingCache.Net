@@ -3,7 +3,6 @@ using System.Diagnostics;
 using FluentAssertions;
 using LoadingCache.Maintenance;
 using LoadingCache.MemoryCacheProbe;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
@@ -11,8 +10,9 @@ public sealed class ProbeCleanupTests
 {
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task PausedMaintenanceMayNeedMoreThan256CleanupAttempts(bool statistics)
     {
         var scheduler = new ControlledScheduler();
@@ -41,7 +41,6 @@ public sealed class ProbeCleanupTests
                 .GetMaintenanceStatistics()
                 .State.Should()
                 .Be(MaintenanceCoordinatorState.Running);
-
             drain = Task.Factory.StartNew(
                 static state => ProbeCleanup.Drain((ObservedCache)state!, Watchdog),
                 cache,
@@ -50,7 +49,6 @@ public sealed class ProbeCleanupTests
                 TaskScheduler.Default
             );
             int passes = await drain.WaitAsync(Watchdog, CancellationToken.None);
-
             passes.Should().BeGreaterThan(256);
             cache.Statistics.MaintenanceBacklog.Should().Be(0);
             cache.Policy.Eviction!.WeightedSize.Should().BeLessThanOrEqualTo(4);
@@ -66,8 +64,9 @@ public sealed class ProbeCleanupTests
         engine.AssertInvariants();
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task WorkerWithoutProgressStillFailsAtTheWatchdog(bool statistics)
     {
         var scheduler = new ControlledScheduler();
@@ -82,7 +81,6 @@ public sealed class ProbeCleanupTests
             await hook.Entered.WaitAsync(Watchdog, CancellationToken.None);
             cache.TryGet(1, out _).Should().BeTrue();
             engine.GetPolicyReadBufferStatistics().Queued.Should().Be(1);
-
             TimeSpan deadline = TimeSpan.FromMilliseconds(100);
             var elapsed = new System.Runtime.CompilerServices.StrongBox<TimeSpan>(TimeSpan.Zero);
             drain = Task.Factory.StartNew(
@@ -114,7 +112,6 @@ public sealed class ProbeCleanupTests
                 TaskScheduler.Default
             );
             Func<Task> result = async () => await drain.WaitAsync(Watchdog, CancellationToken.None);
-
             await result
                 .Should()
                 .ThrowAsync<InvalidOperationException>()

@@ -1,11 +1,9 @@
 using System.Runtime.CompilerServices;
 using FluentAssertions;
 using LoadingCache.Maintenance;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class ReadBufferBatchTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
@@ -23,7 +21,6 @@ public sealed class ReadBufferBatchTests
         buffer.SetForcedCasFailuresForTesting(0);
         OfferOnStripe(buffer, 10, 1).Should().Be(ReadBufferOfferResult.Success);
         buffer.DrainTo(static _ => { }, 4).Should().Be(2);
-
         int publications = 0;
         buffer.SetHooksForTesting(
             beforeReserve: null,
@@ -48,13 +45,11 @@ public sealed class ReadBufferBatchTests
             OfferOnStripe(buffer, 11, 1).Should().Be(ReadBufferOfferResult.Success);
             buffer.HasPublished.Should().BeTrue();
             buffer.GetStatistics().Queued.Should().Be(1);
-
             List<int> observed = [];
             buffer.DrainTo(observed.Add, 4).Should().Be(1);
             observed.Should().Equal(11);
             buffer.HasPublished.Should().BeFalse();
             buffer.GetStatistics().Queued.Should().Be(0);
-
             publication.Release();
             (await paused.WaitAsync(TestTimeout)).Should().Be(ReadBufferOfferResult.Success);
             buffer.DrainTo(observed.Add, 4).Should().Be(1);
@@ -89,14 +84,14 @@ public sealed class ReadBufferBatchTests
         }
     }
 
-    [TestCase(long.MaxValue - 2)]
-    [TestCase(-2L)]
+    [Test]
+    [Arguments(long.MaxValue - 2)]
+    [Arguments(-2L)]
     public void BoundedBatchReleasesTheConsumedPrefixAcrossCounterWrap(long counter)
     {
         using StripedReadBuffer<int> buffer = new(1, 4);
         buffer.TryEnqueue(0).Should().BeTrue();
         buffer.SetCounterForTesting(counter);
-
         for (int value = 1; value <= 4; value++)
         {
             buffer.TryEnqueue(value).Should().BeTrue();
@@ -106,7 +101,6 @@ public sealed class ReadBufferBatchTests
         buffer.DrainTo(observed.Add, 3).Should().Be(3);
         buffer.GetStatistics().Queued.Should().Be(1);
         buffer.GetStatistics().Dequeued.Should().Be(3);
-
         for (int value = 5; value <= 7; value++)
         {
             buffer.TryEnqueue(value).Should().BeTrue();
@@ -148,7 +142,6 @@ public sealed class ReadBufferBatchTests
             );
         });
         drain.Should().Throw<InvalidOperationException>();
-
         ReadBufferStatistics interrupted = buffer.GetStatistics();
         interrupted.Queued.Should().Be(1);
         interrupted.Dequeued.Should().Be(3);
@@ -179,7 +172,6 @@ public sealed class ReadBufferBatchTests
                 }
             }
         );
-
         Task<bool> paused = Task.Factory.StartNew(
             static state => ((StripedReadBuffer<int>)state!).TryEnqueue(1),
             buffer,
@@ -193,13 +185,11 @@ public sealed class ReadBufferBatchTests
             buffer.TryEnqueue(2).Should().BeTrue();
             buffer.GetStatistics().Queued.Should().Be(2);
             buffer.GetStatistics().Enqueued.Should().Be(2);
-
             List<int> observed = [];
             buffer.DrainTo(observed.Add, 4).Should().Be(1);
             observed.Should().Equal(0);
             buffer.GetStatistics().Queued.Should().Be(1);
             buffer.HasPublished.Should().BeFalse();
-
             publication.Release();
             (await paused.WaitAsync(TestTimeout)).Should().BeTrue();
             buffer.DrainTo(observed.Add, 4).Should().Be(2);
@@ -223,8 +213,9 @@ public sealed class ReadBufferBatchTests
         }
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task DisposeReleasesOtherQueuedValuesWhileAProducerStillHoldsTheSlotArray(
         bool recordStatistics
     )
@@ -246,13 +237,11 @@ public sealed class ReadBufferBatchTests
             {
                 await publication.Entered.WaitAsync(TestTimeout);
                 buffer.Dispose();
-
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
                 GC.Collect();
                 queued.TryGetTarget(out _).Should().BeFalse();
                 paused.IsCompleted.Should().BeFalse();
-
                 publication.Release();
                 (await paused.WaitAsync(TestTimeout)).Should().BeFalse();
                 buffer.GetStatistics().Queued.Should().Be(0);

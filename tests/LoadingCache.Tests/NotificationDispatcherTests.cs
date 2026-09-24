@@ -1,10 +1,8 @@
 using FluentAssertions;
 using LoadingCache.Notifications;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class NotificationDispatcherTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
@@ -17,7 +15,6 @@ public sealed class NotificationDispatcherTests
         {
             using BoundedNotificationDispatcher<int> dispatcher = new(0, _ => { });
         };
-
         action.Should().Throw<ArgumentOutOfRangeException>();
     }
 
@@ -27,15 +24,12 @@ public sealed class NotificationDispatcherTests
         ManualNotificationScheduler scheduler = new();
         List<int> observed = [];
         using BoundedNotificationDispatcher<int> dispatcher = new(4, observed.Add, scheduler);
-
         dispatcher.TryEnqueue(1).Should().BeTrue();
         dispatcher.TryEnqueue(2).Should().BeTrue();
         dispatcher.TryEnqueue(3).Should().BeTrue();
         scheduler.ScheduleCalls.Should().Be(1);
         scheduler.Pending.Should().Be(1);
-
         scheduler.RunNext();
-
         observed.Should().Equal(1, 2, 3);
         NotificationDispatchStatistics statistics = dispatcher.GetStatistics();
         statistics.Enqueued.Should().Be(3);
@@ -52,17 +46,13 @@ public sealed class NotificationDispatcherTests
         ManualNotificationScheduler scheduler = new();
         List<int> observed = [];
         using BoundedNotificationDispatcher<int> dispatcher = new(2, observed.Add, scheduler);
-
         dispatcher.TryEnqueue(1).Should().BeTrue();
         dispatcher.TryEnqueue(2).Should().BeTrue();
         dispatcher.TryEnqueue(3).Should().BeFalse();
-
         NotificationDispatchStatistics beforeDrain = dispatcher.GetStatistics();
         beforeDrain.Queued.Should().Be(2);
         beforeDrain.DroppedFull.Should().Be(1);
-
         scheduler.RunNext();
-
         observed.Should().Equal(1, 2);
         dispatcher.GetStatistics().Dropped.Should().Be(1);
     }
@@ -84,11 +74,9 @@ public sealed class NotificationDispatcherTests
             },
             scheduler
         );
-
         dispatcher.TryEnqueue(1).Should().BeTrue();
         dispatcher.TryEnqueue(2).Should().BeTrue();
         Action action = scheduler.RunNext;
-
         action.Should().NotThrow();
         observed.Should().Equal(1, 2);
         NotificationDispatchStatistics statistics = dispatcher.GetStatistics();
@@ -110,9 +98,7 @@ public sealed class NotificationDispatcherTests
         {
             dispatcher.TryEnqueue(1).Should().BeTrue();
             dispatcher.TryEnqueue(2).Should().BeTrue();
-
             scheduler.RunNext();
-
             observed.Should().Equal(1, 2, 3);
             scheduler.ScheduleCalls.Should().Be(1);
         }
@@ -124,17 +110,14 @@ public sealed class NotificationDispatcherTests
         ManualNotificationScheduler scheduler = new() { Reject = true };
         List<int> observed = [];
         using BoundedNotificationDispatcher<int> dispatcher = new(4, observed.Add, scheduler);
-
         dispatcher.TryEnqueue(1).Should().BeFalse();
         NotificationDispatchStatistics rejected = dispatcher.GetStatistics();
         rejected.ScheduleRejections.Should().Be(1);
         rejected.DroppedSchedule.Should().Be(1);
         rejected.Queued.Should().Be(0);
-
         scheduler.Reject = false;
         dispatcher.TryEnqueue(2).Should().BeTrue();
         scheduler.RunNext();
-
         observed.Should().Equal(2);
         dispatcher.GetStatistics().HandlerFailures.Should().Be(0);
     }
@@ -154,17 +137,14 @@ public sealed class NotificationDispatcherTests
             },
             scheduler
         );
-
         dispatcher.TryEnqueue(1).Should().BeTrue();
         Task drain = Task.Run(scheduler.RunNext);
         try
         {
             entered.Task.WaitAsync(TestTimeout).GetAwaiter().GetResult();
-
             dispatcher.TryEnqueue(2).Should().BeTrue();
             Task dispose = Task.Run(dispatcher.Dispose);
             dispose.Wait(TestTimeout).Should().BeTrue();
-
             NotificationDispatchStatistics disposed = dispatcher.GetStatistics();
             disposed.IsDisposed.Should().BeTrue();
             disposed.DroppedShutdown.Should().Be(1);
@@ -200,7 +180,6 @@ public sealed class NotificationDispatcherTests
             },
             scheduler
         );
-
         dispatcher.TryEnqueue(1).Should().BeTrue();
         dispatcher.TryEnqueue(2).Should().BeTrue();
         Action callback = scheduler.Peek();
@@ -248,14 +227,12 @@ public sealed class NotificationDispatcherTests
                 releaseFirstHandoff.Task.GetAwaiter().GetResult();
             }
         );
-
         dispatcher.TryEnqueue(1).Should().BeTrue();
         Task firstDrain = Task.Run(scheduler.RunNext);
         bool firstDrainCompleted;
         try
         {
             firstHandoff.Task.WaitAsync(TestTimeout).GetAwaiter().GetResult();
-
             dispatcher.TryEnqueue(2).Should().BeTrue();
             scheduler.Pending.Should().Be(1);
             scheduler.RunNext();
@@ -279,7 +256,6 @@ public sealed class NotificationDispatcherTests
             1,
             _ => observed.TrySetResult(Context.Value)
         );
-
         Context.Value = "request-context";
         try
         {
@@ -314,11 +290,8 @@ public sealed class NotificationDispatcherTests
     private sealed class ManualNotificationScheduler : INotificationScheduler
     {
         private readonly Queue<Action> _callbacks = new();
-
         internal bool Reject { get; set; }
-
         internal int ScheduleCalls { get; private set; }
-
         internal int Pending => _callbacks.Count;
 
         internal Action Peek() => _callbacks.Peek();

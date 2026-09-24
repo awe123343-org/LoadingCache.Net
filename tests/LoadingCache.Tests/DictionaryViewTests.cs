@@ -1,7 +1,7 @@
 using FluentAssertions;
+using FluentAssertions.Execution;
 using JetBrains.Annotations;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
@@ -17,9 +17,7 @@ public sealed class DictionaryViewTests
             .Comparer(StringComparer.OrdinalIgnoreCase)
             .Build();
         SyncCacheDictionary<string, string> dictionary = cache.AsDictionary();
-
         dictionary.Add("Key", "one");
-
         dictionary.ContainsKey("key").Should().BeTrue();
         dictionary["KEY"].Should().Be("one");
         dictionary.TryAdd("kEy", "two").Should().BeFalse();
@@ -40,10 +38,8 @@ public sealed class DictionaryViewTests
         using ICache<int, string> cache = CreateCache<int, string>();
         SyncCacheDictionary<int, string> dictionary = cache.AsDictionary();
         dictionary[1] = "one";
-
         KeyValuePair<int, string>[] snapshot = [.. dictionary];
         dictionary[2] = "two";
-
         snapshot.Should().Equal([new KeyValuePair<int, string>(1, "one")]);
         dictionary.Keys.Should().Equal(1, 2);
         dictionary.Values.Should().Equal("one", "two");
@@ -64,7 +60,6 @@ public sealed class DictionaryViewTests
             .Build();
         SyncCacheDictionary<int, string> dictionary = cache.AsDictionary();
         dictionary[1] = "one";
-
         dictionary.Count.Should().Be(1);
         clock.Advance(TimeSpan.FromSeconds(1));
         dictionary.ContainsKey(1).Should().BeFalse();
@@ -85,12 +80,10 @@ public sealed class DictionaryViewTests
             TaskCreationOptions.RunContinuationsAsynchronously
         );
         ValueTask<string> pending = cache.GetOrAddAsync(1, (_, _) => source.Task);
-
         dictionary.TryGetValue(1, out _).Should().BeFalse();
         dictionary.Count.Should().Be(0);
         dictionary.Remove(1).Should().BeFalse();
         dictionary.TryAdd(1, "replacement").Should().BeFalse();
-
         dictionary[1] = "replacement";
         source.SetResult("stale");
         (await pending).Should().Be("stale");
@@ -116,7 +109,6 @@ public sealed class DictionaryViewTests
                 }
             );
         AsyncCacheDictionary<int, string> dictionary = cache.AsDictionary();
-
         (await cache.GetAsync(1)).Should().Be("1:1");
         clock.Advance(TimeSpan.FromSeconds(1));
         dictionary.TryGetValue(1, out string? value).Should().BeTrue();
@@ -155,15 +147,12 @@ public sealed class DictionaryViewTests
                 }
             );
         AsyncCacheDictionary<int, string> dictionary = cache.AsDictionary();
-
         (await cache.GetAsync(1)).Should().Be("1:one");
         clock.Advance(TimeSpan.FromSeconds(1));
         (await cache.GetAsync(1)).Should().Be("1:one");
         (await refreshStarted.Task.WaitAsync(TimeSpan.FromSeconds(10))).Should().BeTrue();
-
         clock.Advance(TimeSpan.FromSeconds(1));
         dictionary.TryAdd(1, "replacement").Should().BeFalse();
-
         ValueTask<string> refresh = cache.RefreshAsync(1);
         refreshResult.SetResult("1:two");
         (await refresh).Should().Be("1:two");
@@ -178,7 +167,6 @@ public sealed class DictionaryViewTests
             .MaximumSize(8)
             .MaxConcurrentLoads(8)
             .BuildAsync();
-
         (await cache.AsDictionary().GetOrAddAsync(1, (_, _) => Task.FromResult("one")))
             .Should()
             .Be("one");
@@ -197,7 +185,6 @@ public sealed class DictionaryViewTests
             TaskCreationOptions.RunContinuationsAsynchronously
         );
         int calls = 0;
-
         ValueTask<string> first = dictionary.GetOrAddAsync(
             1,
             (_, _) =>
@@ -208,9 +195,8 @@ public sealed class DictionaryViewTests
         );
         ValueTask<string> second = dictionary.GetOrAddAsync(
             1,
-            (_, _) => throw new AssertionException("Factory was called twice.")
+            (_, _) => throw new AssertionFailedException("Factory was called twice.")
         );
-
         source.SetResult("one");
         (await first).Should().Be("one");
         (await second).Should().Be("one");
@@ -248,7 +234,6 @@ public sealed class DictionaryViewTests
             .Build();
         SyncCacheDictionary<int, Box> dictionary = cache.AsDictionary();
         dictionary[1] = original;
-
         Task<bool> update = Task.Run(() => dictionary.TryUpdate(1, updateValue, original));
         try
         {
@@ -277,14 +262,13 @@ public sealed class DictionaryViewTests
             Task replacementTask = Task.Run(() => cache.Put(1, current));
             if (!replacementTask.Wait(TimeSpan.FromSeconds(10)))
             {
-                throw new AssertionException("Cache mutation was blocked by value equality.");
+                throw new AssertionFailedException("Cache mutation was blocked by value equality.");
             }
         };
         using (cache)
         {
             cache.Put(1, current);
             SyncCacheDictionary<int, ReentrantValue> dictionary = cache.AsDictionary();
-
             dictionary.TryUpdate(1, replacement, new ReentrantValue("same")).Should().BeFalse();
             dictionary[1].Should().BeSameAs(current);
         }
@@ -300,14 +284,13 @@ public sealed class DictionaryViewTests
             Task replacementTask = Task.Run(() => cache.Put(1, current));
             if (!replacementTask.Wait(TimeSpan.FromSeconds(10)))
             {
-                throw new AssertionException("Cache mutation was blocked by value equality.");
+                throw new AssertionFailedException("Cache mutation was blocked by value equality.");
             }
         };
         using (cache)
         {
             cache.Put(1, current);
             SyncCacheDictionary<int, ReentrantValue> dictionary = cache.AsDictionary();
-
             dictionary.TryRemove(1, new ReentrantValue("same")).Should().BeFalse();
             dictionary[1].Should().BeSameAs(current);
         }
@@ -319,7 +302,6 @@ public sealed class DictionaryViewTests
         using ICache<int, string> cache = CreateCache<int, string>();
         SyncCacheDictionary<int, string> dictionary = cache.AsDictionary();
         int calls = 0;
-
         dictionary.GetOrAdd(
             1,
             _ =>
@@ -328,8 +310,10 @@ public sealed class DictionaryViewTests
                 return "one";
             }
         );
-        dictionary.GetOrAdd(1, _ => throw new AssertionException("Factory was called on a hit."));
-
+        dictionary.GetOrAdd(
+            1,
+            _ => throw new AssertionFailedException("Factory was called on a hit.")
+        );
         calls.Should().Be(1);
         dictionary[1].Should().Be("one");
     }
@@ -340,7 +324,6 @@ public sealed class DictionaryViewTests
         using ICache<int, int> cache = CreateCache<int, int>();
         SyncCacheDictionary<int, int> dictionary = cache.AsDictionary();
         dictionary[1] = 0;
-
         Task[] workers =
         [
             .. Enumerable
@@ -359,9 +342,7 @@ public sealed class DictionaryViewTests
                     })
                 ),
         ];
-
         await Task.WhenAll(workers);
-
         dictionary[1].Should().Be(2_000);
     }
 
@@ -377,7 +358,6 @@ public sealed class DictionaryViewTests
             TaskCreationOptions.RunContinuationsAsynchronously
         );
         int calls = 0;
-
         Task<CacheMutation<int>> compute = Task.Run(() =>
             dictionary.Compute(
                 1,
@@ -396,12 +376,10 @@ public sealed class DictionaryViewTests
                 }
             )
         );
-
         (await entered.Task.WaitAsync(TimeSpan.FromSeconds(10))).Should().BeTrue();
         dictionary[1] = 2;
         dictionary.Remove(1).Should().BeTrue();
         release.SetResult(true);
-
         (await compute.WaitAsync(TimeSpan.FromSeconds(10))).Kind.Should().Be(CacheMutationKind.Set);
         calls.Should().Be(2);
         dictionary[1].Should().Be(20);
@@ -420,7 +398,6 @@ public sealed class DictionaryViewTests
         WeakReference oldReference = CreateWeakValue(cache);
         ForceCollection(oldReference);
         oldReference.IsAlive.Should().BeFalse();
-
         SyncCacheDictionary<int, ReentrantValue> dictionary = cache.AsDictionary();
         var replacement = new ReentrantValue("replacement");
         dictionary.TryAdd(1, replacement).Should().BeTrue();
@@ -433,7 +410,6 @@ public sealed class DictionaryViewTests
     {
         using ICache<int, int> cache = CreateCache<int, int>();
         SyncCacheDictionary<int, int> dictionary = cache.AsDictionary();
-
         CacheMutation<int> added = dictionary.Compute(
             1,
             static (_, current) =>
@@ -442,10 +418,8 @@ public sealed class DictionaryViewTests
                 return CacheMutation.Set(0);
             }
         );
-
         added.Kind.Should().Be(CacheMutationKind.Set);
         dictionary[1].Should().Be(0);
-
         CacheMutation<int> removed = dictionary.ComputeIfPresent(
             1,
             static (_, current) =>
@@ -454,10 +428,8 @@ public sealed class DictionaryViewTests
                 return CacheMutation.Remove<int>();
             }
         );
-
         removed.Kind.Should().Be(CacheMutationKind.Remove);
         dictionary.ContainsKey(1).Should().BeFalse();
-
         bool called = false;
         dictionary
             .ComputeIfPresent(
@@ -478,10 +450,8 @@ public sealed class DictionaryViewTests
     {
         using ICache<int, int> cache = CreateCache<int, int>();
         SyncCacheDictionary<int, int> dictionary = cache.AsDictionary();
-
         dictionary.Merge(1, 2, static (current, added) => current + added).Should().Be(2);
         dictionary.Merge(1, 3, static (current, added) => current + added).Should().Be(5);
-
         bool reentered = false;
         FluentActions
             .Invoking(() =>
@@ -502,7 +472,6 @@ public sealed class DictionaryViewTests
             )
             .Should()
             .ThrowExactly<LoadingCacheReentrancyException>();
-
         dictionary[1].Should().Be(10);
     }
 
@@ -512,7 +481,6 @@ public sealed class DictionaryViewTests
         using ICache<int, int> cache = CreateCache<int, int>();
         SyncCacheDictionary<int, int> dictionary = cache.AsDictionary();
         dictionary[1] = 7;
-
         FluentActions
             .Invoking(() =>
                 dictionary.Compute(
@@ -523,7 +491,6 @@ public sealed class DictionaryViewTests
             .Should()
             .ThrowExactly<InvalidOperationException>()
             .WithMessage("callback failure");
-
         dictionary[1].Should().Be(7);
     }
 
@@ -540,7 +507,6 @@ public sealed class DictionaryViewTests
             TaskCreationOptions.RunContinuationsAsynchronously
         );
         ValueTask<int> pending = dictionary.GetOrAddAsync(1, (_, _) => source.Task);
-
         bool called = false;
         dictionary
             .ComputeIfPresent(
@@ -554,9 +520,7 @@ public sealed class DictionaryViewTests
             .Kind.Should()
             .Be(CacheMutationKind.Keep);
         called.Should().BeFalse();
-
         dictionary.AddOrUpdate(1, static _ => 5, static (_, value) => value + 1).Should().Be(5);
-
         source.SetResult(4);
         (await pending).Should().Be(4);
         dictionary[1].Should().Be(5);
@@ -568,7 +532,6 @@ public sealed class DictionaryViewTests
         using ICache<int, int> cache = CreateCache<int, int>();
         SyncCacheDictionary<int, int> dictionary = cache.AsDictionary();
         dictionary[1] = 1;
-
         FluentActions
             .Invoking(() =>
                 dictionary.Compute(
@@ -582,7 +545,6 @@ public sealed class DictionaryViewTests
             )
             .Should()
             .ThrowExactly<LoadingCacheReentrancyException>();
-
         dictionary.ContainsKey(1).Should().BeFalse();
         dictionary.Compute(1, static (_, _) => CacheMutation.Set(3));
         dictionary[1].Should().Be(3);
@@ -594,7 +556,6 @@ public sealed class DictionaryViewTests
         ICache<int, string> cache = CreateCache<int, string>();
         SyncCacheDictionary<int, string> dictionary = cache.AsDictionary();
         cache.Dispose();
-
         FluentActions
             .Invoking(() => dictionary.ContainsKey(1))
             .Should()
@@ -608,7 +569,6 @@ public sealed class DictionaryViewTests
         ICache<string, string> cache = CreateCache<string, string>();
         SyncCacheDictionary<string, string> dictionary = cache.AsDictionary();
         cache.Dispose();
-
         FluentActions
             .Invoking(() => dictionary.ContainsKey(null!))
             .Should()

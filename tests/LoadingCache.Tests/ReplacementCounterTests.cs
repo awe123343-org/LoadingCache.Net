@@ -2,19 +2,18 @@ using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 using System.Reflection;
 using FluentAssertions;
+using FluentAssertions.Execution;
 using LoadingCache.Diagnostics;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
-[Parallelizable(ParallelScope.All)]
 public sealed class ReplacementCounterTests
 {
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task ConcurrentResidentPutsCountEverySameReferenceReplacement(bool sameKey)
     {
         using ICache<int, string> cache = CacheBuilder
@@ -29,6 +28,7 @@ public sealed class ReplacementCounterTests
         {
             cache.Put(key, "same reference");
         }
+
         await RunTogether(
             workers,
             worker =>
@@ -45,10 +45,11 @@ public sealed class ReplacementCounterTests
         cache.Statistics.ClearedRemovals.Should().Be(sameKey ? 1 : workers);
     }
 
-    [TestCase(false, false)]
-    [TestCase(true, false)]
-    [TestCase(false, true)]
-    [TestCase(true, true)]
+    [Test]
+    [Arguments(false, false)]
+    [Arguments(true, false)]
+    [Arguments(false, true)]
+    [Arguments(true, true)]
     public void MixedResidentPhysicalMutationAndClearCountsRespectOptIn(
         bool statistics,
         bool metrics
@@ -124,10 +125,11 @@ public sealed class ReplacementCounterTests
         cache.Statistics.RefreshSuccesses.Should().Be(1);
     }
 
-    [TestCase(false, false)]
-    [TestCase(true, false)]
-    [TestCase(false, true)]
-    [TestCase(true, true)]
+    [Test]
+    [Arguments(false, false)]
+    [Arguments(true, false)]
+    [Arguments(false, true)]
+    [Arguments(true, true)]
     public async Task RefreshPublicationKeepsItsReplacementAccountingAcrossClearAndRollback(
         bool clear,
         bool fail
@@ -176,6 +178,7 @@ public sealed class ReplacementCounterTests
             {
                 cache.Clear();
             }
+
             publication.Release();
             if (fail)
             {
@@ -188,6 +191,7 @@ public sealed class ReplacementCounterTests
             {
                 (await refresh.WaitAsync(Watchdog)).Should().Be("refreshed");
             }
+
             cache.Statistics.ReplacedRemovals.Should().Be(fail ? 0 : 1);
             cache.Statistics.ClearedRemovals.Should().Be(clear ? 1 : 0);
             cache.TryGet(1, out string? value).Should().Be(!clear);
@@ -205,6 +209,7 @@ public sealed class ReplacementCounterTests
             }
             catch (InvalidOperationException) when (fail) { }
         }
+
         publication.TimedOut.Should().BeFalse();
     }
 
@@ -234,6 +239,7 @@ public sealed class ReplacementCounterTests
                     matches |= tag.Key == "cache.name" && Equals(tag.Value, cacheName);
                     replaced |= tag is { Key: "cause", Value: "replaced" };
                 }
+
                 if (matches && replaced)
                 {
                     replacements.Enqueue(value);
@@ -270,7 +276,7 @@ public sealed class ReplacementCounterTests
 
     private static FieldInfo PrivateField(Type type, string name) =>
         type.GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)
-        ?? throw new AssertionException($"Missing private field {name}.");
+        ?? throw new AssertionFailedException($"Missing private field {name}.");
 
     private static async Task RunTogether(int workerCount, Action<int> action)
     {
@@ -298,6 +304,7 @@ public sealed class ReplacementCounterTests
                 TaskScheduler.Default
             );
         }
+
         try
         {
             ready.Wait(Watchdog).Should().BeTrue();

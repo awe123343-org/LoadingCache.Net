@@ -1,5 +1,5 @@
 using FluentAssertions;
-using NUnit.Framework;
+using FluentAssertions.Execution;
 
 namespace LoadingCache.Tests;
 
@@ -20,7 +20,6 @@ public sealed class EngineIntegrationRegressionTests
             .Build();
         cache.Put(1, 42);
         comparer.Armed = true;
-
         Task writer = Task.Factory.StartNew(
             static state => ((ICache<int, int>)state!).Put(99, 99),
             cache,
@@ -37,7 +36,9 @@ public sealed class EngineIntegrationRegressionTests
                     ((ICache<int, int>)state!).GetOrAdd(
                         1,
                         static _ =>
-                            throw new AssertionException("A resident hit invoked its factory.")
+                            throw new AssertionFailedException(
+                                "A resident hit invoked its factory."
+                            )
                     ),
                 cache,
                 CancellationToken.None,
@@ -76,7 +77,7 @@ public sealed class EngineIntegrationRegressionTests
         (
             await cache.GetOrAddAsync(
                 1,
-                (_, _) => throw new AssertionException("The stored task must be joined.")
+                (_, _) => throw new AssertionFailedException("The stored task must be joined.")
             )
         )
             .Should()

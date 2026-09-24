@@ -1,7 +1,6 @@
 using System.Globalization;
 using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
@@ -17,9 +16,7 @@ public sealed class MemoryPressureTests
             .MaxConcurrentLoads(2)
             .MemoryPressureSource(source)
             .Build();
-
         cache.Put(1, "one");
-
         source.Calls.Should().Be(0);
         cache.EstimatedCount.Should().Be(1);
         cache.Policy.MemoryPressureStatistics.Should().BeNull();
@@ -43,16 +40,12 @@ public sealed class MemoryPressureTests
                 maximumTrimCount: 1
             )
             .Build();
-
         cache.Put(1, "one");
         clock.Advance(TimeSpan.FromMilliseconds(1));
         cache.Put(2, "two");
         cache.CleanUp();
-
         cache.Policy.Eviction!.Coldest(1).Select(pair => pair.Key).Should().Contain(1);
-
         clock.Advance(TimeSpan.FromSeconds(1));
-
         cache.EstimatedCount.Should().Be(1);
         cache.TryGet(1, out _).Should().BeFalse();
         cache.TryGet(2, out string? value).Should().BeTrue();
@@ -74,7 +67,6 @@ public sealed class MemoryPressureTests
             .MemoryPressureEviction(TimeSpan.FromSeconds(1), trimFraction: 1, maximumTrimCount: 2)
             .CreateEngine();
         using var cache = new Cache<int, string>(engine);
-
         for (int key = 0; key < 16; key++)
         {
             cache.Put(key, key.ToString(CultureInfo.InvariantCulture));
@@ -82,7 +74,6 @@ public sealed class MemoryPressureTests
 
         cache.CleanUp();
         engine.SampleMemoryPressureForTesting();
-
         cache.EstimatedCount.Should().Be(14);
         MemoryPressureStatistics? diagnostics = cache.Policy.MemoryPressureStatistics;
         diagnostics.Should().NotBeNull();
@@ -104,10 +95,8 @@ public sealed class MemoryPressureTests
             .MemoryPressureSource(source)
             .MemoryPressureEviction(TimeSpan.FromSeconds(1), pressureThreshold: 0.8)
             .Build();
-
         cache.Put(1, "one");
         clock.Advance(TimeSpan.FromSeconds(1));
-
         cache.EstimatedCount.Should().Be(1);
         cache.TryGet(1, out string? value).Should().BeTrue();
         value.Should().Be("one");
@@ -130,7 +119,6 @@ public sealed class MemoryPressureTests
             CacheBuilder
                 .Create<int, string>()
                 .MemoryPressureEviction(TimeSpan.FromSeconds(1), maximumTrimCount: 0);
-
         invalidInterval.Should().ThrowExactly<ArgumentOutOfRangeException>();
         invalidThreshold.Should().ThrowExactly<ArgumentOutOfRangeException>();
         invalidFraction.Should().ThrowExactly<ArgumentOutOfRangeException>();
@@ -141,7 +129,6 @@ public sealed class MemoryPressureTests
     public void FailedPressureTimerConstructionDisposesAnAlreadyCreatedExpirationTimer()
     {
         using var timeProvider = new ThrowingSecondTimerProvider();
-
         Action build = timeProvider.Invoking(static current =>
         {
             CacheBuilder
@@ -154,7 +141,6 @@ public sealed class MemoryPressureTests
                 .MemoryPressureEviction(TimeSpan.FromSeconds(1))
                 .Build();
         });
-
         build.Should().ThrowExactly<InvalidOperationException>();
         timeProvider.DisposedTimerCount.Should().Be(1);
     }
@@ -173,10 +159,8 @@ public sealed class MemoryPressureTests
             .MemoryPressureEviction(TimeSpan.FromSeconds(1))
             .CreateEngine();
         using var cache = new Cache<int, string>(engine);
-
         cache.Put(1, "one");
         engine.SampleMemoryPressureForTesting();
-
         MemoryPressureStatistics? diagnostics = cache.Policy.MemoryPressureStatistics;
         diagnostics.Should().NotBeNull();
         diagnostics.Value.SamplingErrors.Should().Be(1);
@@ -206,7 +190,6 @@ public sealed class MemoryPressureTests
             .MemoryPressureEviction(TimeSpan.FromSeconds(0.01), maximumTrimCount: 8)
             .CreateEngine();
         using var cache = new Cache<int, string>(engine);
-
         cache.Put(1, "old");
         Task sample = Task.Run(engine.SampleMemoryPressureForTesting);
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -214,7 +197,6 @@ public sealed class MemoryPressureTests
         cache.Put(2, "new");
         release.TrySetResult(true);
         await sample.WaitAsync(TimeSpan.FromSeconds(5));
-
         cache.TryGet(2, out string? value).Should().BeTrue();
         value.Should().Be("new");
         cache.Policy.MemoryPressureStatistics!.Value.EvictedEntries.Should().Be(0);
@@ -241,14 +223,12 @@ public sealed class MemoryPressureTests
             .MemoryPressureEviction(TimeSpan.FromSeconds(1), maximumTrimCount: 8)
             .CreateEngine();
         using var cache = new Cache<int, string>(engine);
-
         cache.Put(1, "old");
         Task sample = Task.Run(engine.SampleMemoryPressureForTesting);
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         cache.Put(1, "new");
         release.TrySetResult(true);
         await sample.WaitAsync(TimeSpan.FromSeconds(5));
-
         cache.TryGet(1, out string? value).Should().BeTrue();
         value.Should().Be("new");
         cache.Policy.MemoryPressureStatistics!.Value.EvictedEntries.Should().Be(0);
@@ -291,7 +271,6 @@ public sealed class MemoryPressureTests
                 return "v2";
             }
         );
-
         (await cache.GetAsync(1)).Should().Be("v1");
         Task<string> refresh = cache.RefreshAsync(1).AsTask();
         await refreshEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -301,7 +280,6 @@ public sealed class MemoryPressureTests
         (await refresh.WaitAsync(TimeSpan.FromSeconds(5))).Should().Be("v2");
         releaseSource.TrySetResult(true);
         await sample.WaitAsync(TimeSpan.FromSeconds(5));
-
         cache.TryGet(1, out string? value).Should().BeTrue();
         value.Should().Be("v2");
         cache.Policy.MemoryPressureStatistics!.Value.EvictedEntries.Should().Be(0);
@@ -349,12 +327,10 @@ public sealed class MemoryPressureTests
             .CreateEngine();
         using var cache = new Cache<int, string>(engine);
         cache.Put(1, "one");
-
         Task first = Task.Run(engine.SampleMemoryPressureForTesting);
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Task second = Task.Run(engine.SampleMemoryPressureForTesting);
         await second.WaitAsync(TimeSpan.FromSeconds(5));
-
         source.Calls.Should().Be(1);
         release.TrySetResult(true);
         await first.WaitAsync(TimeSpan.FromSeconds(5));
@@ -383,12 +359,10 @@ public sealed class MemoryPressureTests
             .MemoryPressureSource(source)
             .MemoryPressureEviction(TimeSpan.FromSeconds(1))
             .Build();
-
         cache.Put(1, "one");
         context.Value = "caller-context";
         await timeProvider.FireTimerAsync().WaitAsync(TimeSpan.FromSeconds(5));
         await observed.Task.WaitAsync(TimeSpan.FromSeconds(5));
-
         observedValue.Should().BeNull();
     }
 
@@ -416,11 +390,9 @@ public sealed class MemoryPressureTests
                 return "loaded";
             }
         );
-
         Task<string> load = cache.GetAsync(1).AsTask();
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         clock.Advance(TimeSpan.FromSeconds(1));
-
         cache.Statistics.InFlightLoads.Should().Be(1);
         cache.EstimatedCount.Should().Be(0);
         release.TrySetResult(true);
@@ -442,11 +414,9 @@ public sealed class MemoryPressureTests
             .MemoryPressureEviction(TimeSpan.FromSeconds(1), trimFraction: 0.5)
             .CreateEngine();
         using var cache = new Cache<int, string>(engine);
-
         cache.Put(1, "one");
         cache.Put(2, "two");
         engine.SampleMemoryPressureForTesting();
-
         cache.EstimatedCount.Should().Be(1);
         cache.Policy.Eviction!.WeightedSize.Should().Be(0);
     }
@@ -464,14 +434,11 @@ public sealed class MemoryPressureTests
             .MemoryPressureSource(source)
             .MemoryPressureEviction(TimeSpan.FromSeconds(1))
             .Build();
-
         cache.Put(1, "one");
         clock.Advance(TimeSpan.FromSeconds(1));
         source.Calls.Should().Be(1);
-
         cache.Dispose();
         clock.Advance(TimeSpan.FromSeconds(3));
-
         source.Calls.Should().Be(1);
     }
 
@@ -522,7 +489,6 @@ public sealed class MemoryPressureTests
         public override DateTimeOffset GetUtcNow() => _system.GetUtcNow();
 
         public override TimeZoneInfo LocalTimeZone => _system.LocalTimeZone;
-
         public override long TimestampFrequency => _system.TimestampFrequency;
 
         public override long GetTimestamp() => _system.GetTimestamp();
@@ -626,13 +592,11 @@ public sealed class MemoryPressureTests
         private readonly TimeProvider _system = System;
         private int _createCount;
         private int _disposedTimerCount;
-
         internal int DisposedTimerCount => Volatile.Read(ref _disposedTimerCount);
 
         public override DateTimeOffset GetUtcNow() => _system.GetUtcNow();
 
         public override TimeZoneInfo LocalTimeZone => _system.LocalTimeZone;
-
         public override long TimestampFrequency => _system.TimestampFrequency;
 
         public override long GetTimestamp() => _system.GetTimestamp();

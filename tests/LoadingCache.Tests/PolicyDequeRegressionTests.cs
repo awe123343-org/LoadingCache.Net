@@ -1,15 +1,13 @@
 using FluentAssertions;
 using LoadingCache.Policy;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class PolicyDequeRegressionTests
 {
-    [TestCase(0L)]
-    [TestCase(1L)]
-    [Parallelizable(ParallelScope.Self)]
+    [Test]
+    [Arguments(0L)]
+    [Arguments(1L)]
     public void WindowCountPressureUsesRecencyIncludingZeroWeight(long weight)
     {
         WindowTinyLfuPolicy<int> policy = new(1_000, seed: 7, adaptive: false);
@@ -19,11 +17,9 @@ public sealed class PolicyDequeRegressionTests
         policy.Add(first).Should().BeEmpty();
         policy.Add(second).Should().BeEmpty();
         policy.Add(third).Should().BeEmpty();
-
         policy.RecordAccess(first).Should().BeTrue();
         policy.Snapshot(hottest: false, limit: 4).Should().Equal(second, third, first);
         AssertRepresentation(policy);
-
         policy.SetMaximumCount(2).Should().Equal(second);
         policy.Snapshot(hottest: false, limit: 4).Should().Equal(third, first);
         policy.WeightedSize.Should().Be(weight * 2);
@@ -32,7 +28,6 @@ public sealed class PolicyDequeRegressionTests
     }
 
     [Test]
-    [Parallelizable(ParallelScope.Self)]
     public void ProtectedReorderDemotionAndShrinkKeepExactVictimOrder()
     {
         WindowTinyLfuPolicy<int> policy = new(5, seed: 7, adaptive: false);
@@ -47,19 +42,16 @@ public sealed class PolicyDequeRegressionTests
         policy.RecordAccess(nodes[2]).Should().BeTrue();
         policy.RecordAccess(nodes[0]).Should().BeTrue();
         policy.RecordAccess(nodes[3]).Should().BeTrue();
-
         nodes[1].Queue.Should().Be(PolicyQueue.Probation);
         policy
             .Snapshot(hottest: false, limit: 5)
             .Should()
             .Equal(nodes[1], nodes[4], nodes[2], nodes[0], nodes[3]);
         AssertRepresentation(policy);
-
         policy.SetMaximumCount(3).Should().Equal(nodes[1], nodes[2]);
         policy.SetMaximum(2).Should().Equal(nodes[0]);
         policy.Snapshot(hottest: false, limit: 5).Should().Equal(nodes[4], nodes[3]);
         AssertRepresentation(policy);
-
         foreach (PolicyNode<int> node in nodes)
         {
             policy.Remove(node);
@@ -73,7 +65,6 @@ public sealed class PolicyDequeRegressionTests
     }
 
     [Test]
-    [Parallelizable(ParallelScope.Self)]
     public void WeightPressureSkipsProtectedZeroAfterWeightChangesAndReorder()
     {
         WindowTinyLfuPolicy<int> policy = new(5, seed: 7, adaptive: false);
@@ -93,7 +84,6 @@ public sealed class PolicyDequeRegressionTests
         policy.Remove(window).Should().Equal(window);
         policy.Snapshot(hottest: false, limit: 3).Should().Equal(zero, positive);
         AssertRepresentation(policy);
-
         PolicyNode<int> incoming = Node(4, 5);
         for (int i = 0; i < 5; i++)
         {
@@ -110,9 +100,9 @@ public sealed class PolicyDequeRegressionTests
         AssertRepresentation(policy);
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    [Parallelizable(ParallelScope.Self)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public void OverflowSelectionExcludesPriorVictimsAndSkipsZeroWeight(bool protectedQueue)
     {
         const long quarter = long.MaxValue / 4;
@@ -157,7 +147,6 @@ public sealed class PolicyDequeRegressionTests
             );
         policy.Snapshot(hottest: false, limit: 5).Should().Equal(residents);
         AssertRepresentation(policy);
-
         PolicyNode<int> incoming = Node(5, long.MaxValue / 2 + 3);
         for (int i = 0; i < 15; i++)
         {
@@ -180,9 +169,9 @@ public sealed class PolicyDequeRegressionTests
         AssertRepresentation(policy);
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    [Parallelizable(ParallelScope.Self)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public void ClearedProbationCandidateKeepsEligibilityOrderIndependentOfPrimary(bool countBound)
     {
         WindowTinyLfuPolicy<int> policy = new(
@@ -203,13 +192,11 @@ public sealed class PolicyDequeRegressionTests
         policy.RecordAccess(first).Should().BeTrue();
         policy.Remove(removed).Should().Equal(removed);
         policy.Maintain(1).Should().BeEmpty();
-
         policy.Snapshot(hottest: false, limit: 3).Should().Equal(cleared, first);
         cleared.IsCandidate.Should().BeFalse();
         first.EligibleNext.Should().BeSameAs(cleared);
         first.EligiblePositiveNext.Should().BeSameAs(cleared);
         AssertRepresentation(policy);
-
         policy.AddDeferred(incoming).Should().BeEmpty();
         policy.Maintain().Should().Equal(first);
         policy.Snapshot(hottest: false, limit: 3).Should().Equal(cleared, incoming);
@@ -218,7 +205,6 @@ public sealed class PolicyDequeRegressionTests
     }
 
     [Test]
-    [Parallelizable(ParallelScope.Self)]
     public void BudgetedTransfersAndCandidateClearingDoNotConsumeExtraWork()
     {
         WindowTinyLfuPolicy<int> policy = new(3, seed: 7, adaptive: false, maximumCount: 3);
@@ -252,9 +238,9 @@ public sealed class PolicyDequeRegressionTests
         AssertRepresentation(policy);
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    [Parallelizable(ParallelScope.Self)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public void ClearRetiresEntriesAndRejectsOldGenerationReads(bool queueReadBeforeClear)
     {
         using WindowTinyLfuEnginePolicy policy = new(
@@ -332,7 +318,6 @@ public sealed class PolicyDequeRegressionTests
             node.EligibleNext?.EligiblePrevious.Should().BeSameAs(node);
             node.EligiblePositivePrevious?.EligiblePositiveNext.Should().BeSameAs(node);
             node.EligiblePositiveNext?.EligiblePositivePrevious.Should().BeSameAs(node);
-
             if (node.Queue == PolicyQueue.Probation)
             {
                 continue;

@@ -1,32 +1,28 @@
 using FluentAssertions;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class ReadRecordingStateTests
 {
-    [TestCase("flush")]
-    [TestCase("cleanup")]
-    [TestCase("snapshot")]
+    [Test]
+    [Arguments("flush")]
+    [Arguments("cleanup")]
+    [Arguments("snapshot")]
     public void WriteDrainActivatesReadRecordingAndClearRestoresColdStart(string drain)
     {
         using WindowTinyLfuEnginePolicy policy = CreatePolicy(maximum: 4);
         var first = CreateToken(1);
         var second = CreateToken(2);
-
         policy.OnPublish(first, 1);
         DrainWrites(policy, drain);
         policy.OnAccess(first);
         policy.IsSketchInitialized.Should().BeFalse();
         policy.GetReadBufferStatistics().Enqueued.Should().Be(0);
-
         policy.OnPublish(second, 1);
         DrainWrites(policy, drain);
         policy.OnAccess(second);
         policy.IsSketchInitialized.Should().BeTrue();
         policy.GetReadBufferStatistics().Enqueued.Should().Be(1);
-
         policy.Clear();
         var third = CreateToken(3);
         var fourth = CreateToken(4);
@@ -36,7 +32,6 @@ public sealed class ReadRecordingStateTests
         policy.OnAccess(third);
         policy.IsSketchInitialized.Should().BeFalse();
         policy.GetReadBufferStatistics().Enqueued.Should().Be(1);
-
         policy.OnPublish(fourth, 1);
         DrainWrites(policy, drain);
         policy.OnAccess(fourth);
@@ -50,9 +45,10 @@ public sealed class ReadRecordingStateTests
             .BeEquivalentTo([third.Entry, fourth.Entry]);
     }
 
-    [TestCase(6)]
-    [TestCase(8)]
-    [TestCase(16)]
+    [Test]
+    [Arguments(6)]
+    [Arguments(8)]
+    [Arguments(16)]
     public void ResizeActivatesReadsAndRemovalBelowThresholdDoesNotDisableThem(int maximum)
     {
         using WindowTinyLfuEnginePolicy policy = CreatePolicy(maximum: 8);
@@ -62,14 +58,12 @@ public sealed class ReadRecordingStateTests
         policy.OnAccess(first);
         policy.IsSketchInitialized.Should().BeFalse();
         policy.GetReadBufferStatistics().Enqueued.Should().Be(0);
-
         // Same-size, smaller, and larger maxima all explicitly initialize the sketch,
         // even though one resident is below every selected half-capacity threshold.
         policy.SetMaximum(maximum, weighted: false);
         policy.OnAccess(first);
         policy.IsSketchInitialized.Should().BeTrue();
         policy.GetReadBufferStatistics().Enqueued.Should().Be(1);
-
         policy.OnRemove(first);
         policy.FlushWrites();
         policy.ResidentCount.Should().Be(0);

@@ -1,26 +1,25 @@
 using FluentAssertions;
 using LoadingCache.Maintenance;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class ReadBufferReuseTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
 
-    [TestCase(false, 1, 0L)]
-    [TestCase(true, 1, 0L)]
-    [TestCase(false, 16, 0L)]
-    [TestCase(true, 16, 0L)]
-    [TestCase(false, 1, long.MaxValue - 2)]
-    [TestCase(true, 1, long.MaxValue - 2)]
-    [TestCase(false, 16, long.MaxValue - 2)]
-    [TestCase(true, 16, long.MaxValue - 2)]
-    [TestCase(false, 1, -2L)]
-    [TestCase(true, 1, -2L)]
-    [TestCase(false, 16, -2L)]
-    [TestCase(true, 16, -2L)]
+    [Test]
+    [Arguments(false, 1, 0L)]
+    [Arguments(true, 1, 0L)]
+    [Arguments(false, 16, 0L)]
+    [Arguments(true, 16, 0L)]
+    [Arguments(false, 1, long.MaxValue - 2)]
+    [Arguments(true, 1, long.MaxValue - 2)]
+    [Arguments(false, 16, long.MaxValue - 2)]
+    [Arguments(true, 16, long.MaxValue - 2)]
+    [Arguments(false, 1, -2L)]
+    [Arguments(true, 1, -2L)]
+    [Arguments(false, 16, -2L)]
+    [Arguments(true, 16, -2L)]
     public async Task ConcurrentProducersAndBatchConsumerReuseEverySlotWithoutLosingOrTearingEvents(
         bool recordStatistics,
         int capacity,
@@ -34,7 +33,6 @@ public sealed class ReadBufferReuseTests
         buffer.TryOffer(default).Should().Be(ReadBufferOfferResult.Success);
         buffer.TryRead(out _).Should().BeTrue();
         buffer.SetCounterForTesting(initialCounter);
-
         ReadPayload[] expected = new ReadPayload[eventCount];
         for (int id = 0; id < expected.Length; id++)
         {
@@ -100,6 +98,7 @@ public sealed class ReadBufferReuseTests
                                             "The live buffer shut down."
                                         );
                                 }
+
                                 Thread.Yield();
                             }
                         }
@@ -152,7 +151,6 @@ public sealed class ReadBufferReuseTests
             TaskCreationOptions.LongRunning,
             TaskScheduler.Default
         );
-
         try
         {
             await Task.WhenAll(workers).WaitAsync(TestTimeout, CancellationToken.None);

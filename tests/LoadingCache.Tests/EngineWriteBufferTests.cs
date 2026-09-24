@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using FluentAssertions;
 using LoadingCache.Maintenance;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
@@ -24,14 +23,12 @@ public sealed class EngineWriteBufferTests
             readStripeCapacity: 4,
             writeBufferCapacity: 4
         );
-
         var options = new CacheEngineOptions<int, string>
         {
             MaximumSize = 4,
             MaxConcurrentLoads = 1,
             Policy = policy,
         };
-
         options
             .Invoking(static o => _ = new CacheEngine<int, string>(o))
             .Should()
@@ -45,7 +42,6 @@ public sealed class EngineWriteBufferTests
         var scheduler = new ControlledScheduler();
         var engine = CreateEngine(scheduler, capacity: 8);
         using var cache = new Cache<int, string>(engine);
-
         for (int key = 0; key < 128; key++)
         {
             cache.Put(key, "value");
@@ -54,7 +50,6 @@ public sealed class EngineWriteBufferTests
         engine.GetMaintenanceStatistics().Requests.Should().Be(1);
         scheduler.Pending.Should().Be(1);
         engine.GetPolicyWriteBufferStatistics().Full.Should().BeGreaterThan(0);
-
         scheduler.RunAll();
         engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
         cache.Put(128, "next batch");
@@ -70,13 +65,11 @@ public sealed class EngineWriteBufferTests
         var scheduler = new ControlledScheduler();
         var engine = CreateEngine(scheduler);
         using var cache = new Cache<int, string>(engine);
-
         cache.Put(1, "first");
         cache.Policy.Eviction!.WeightedSize.Should().Be(1);
         engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
         cache.Put(2, "following write");
         scheduler.RunAll();
-
         engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
         cache.Policy.Eviction.WeightedSize.Should().Be(2);
         engine.AssertInvariants();
@@ -88,24 +81,22 @@ public sealed class EngineWriteBufferTests
         var scheduler = new ControlledScheduler();
         var engine = CreateEngine(scheduler);
         using var cache = new Cache<int, string>(engine);
-
         cache.Put(1, "ready");
-
         engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(1);
         cache.TryGet(1, out string? value).Should().BeTrue();
         value.Should().Be("ready");
         scheduler.Pending.Should().Be(1);
         cache.Statistics.WriteBufferBacklog.Should().Be(1);
         cache.Statistics.MaintenanceBacklog.Should().BeGreaterThanOrEqualTo(1);
-
         scheduler.RunAll();
         engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
         cache.Policy.Eviction!.WeightedSize.Should().Be(1);
         engine.AssertInvariants();
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public void FullBufferAssistsWithoutLosingWritesOrExceedingTheDerivedCountBound(bool statistics)
     {
         const int maximum = 2;
@@ -118,7 +109,6 @@ public sealed class EngineWriteBufferTests
             statistics: statistics
         );
         using var cache = new Cache<int, string>(engine);
-
         for (int key = 0; key < 64; key++)
         {
             cache.Put(key, "value");
@@ -149,9 +139,7 @@ public sealed class EngineWriteBufferTests
         var scheduler = new ControlledScheduler();
         var engine = CreateEngine(scheduler, maximum: 16, capacity: 2);
         using var cache = new Cache<int, string>(engine);
-
         await Task.WhenAll(StartPublishers(cache)).WaitAsync(Watchdog, CancellationToken.None);
-
         engine.GetPolicyWriteBufferStatistics().Queued.Should().BeLessThanOrEqualTo(2);
         cache.EstimatedCount.Should().BeLessThanOrEqualTo(19);
         cache.CleanUp();
@@ -166,13 +154,11 @@ public sealed class EngineWriteBufferTests
         var scheduler = new ControlledScheduler();
         var engine = CreateEngine(scheduler, capacity: 8);
         using var cache = new Cache<int, string>(engine);
-
         cache.Put(1, "old");
         cache.Invalidate(1).Should().BeTrue();
         cache.Put(1, "replacement");
         cache.Put(2, "other");
         scheduler.RunAll();
-
         cache.TryGet(1, out string? value).Should().BeTrue();
         value.Should().Be("replacement");
         cache.Policy.Eviction!.WeightedSize.Should().Be(2);
@@ -192,7 +178,6 @@ public sealed class EngineWriteBufferTests
         }
 
         cache.Clear();
-
         engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
         cache.Statistics.SizeRemovals.Should().Be(0);
         cache.Statistics.ClearedRemovals.Should().Be(4);
@@ -212,18 +197,17 @@ public sealed class EngineWriteBufferTests
         var engine = CreateEngine(scheduler);
         var cache = new Cache<int, string>(engine);
         cache.Put(1, "queued");
-
         cache.Dispose();
         scheduler.RunAll();
-
         var buffer = engine.GetPolicyWriteBufferStatistics();
         buffer.IsDisposed.Should().BeTrue();
         buffer.Queued.Should().Be(0);
         engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Disposed);
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public void RejectedOrInlineSchedulingRunsOutsideTheEngineLocks(bool inline)
     {
         var scheduler = new ControlledScheduler
@@ -234,7 +218,6 @@ public sealed class EngineWriteBufferTests
         var engine = CreateEngine(scheduler);
         scheduler.IsCacheLockHeld = () => engine.IsCoordinationLockHeldForTesting;
         using var cache = new Cache<int, string>(engine);
-
         for (int key = 0; key < 8; key++)
         {
             cache.Put(key, "value");
@@ -246,8 +229,9 @@ public sealed class EngineWriteBufferTests
         engine.AssertInvariants();
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task LastWriteDuringWorkerExitSurvivesAnAcceptedOrRejectedRearm(bool rejectRearm)
     {
         var scheduler = new ControlledScheduler { AcceptLimit = rejectRearm ? 1 : int.MaxValue };
@@ -280,6 +264,7 @@ public sealed class EngineWriteBufferTests
         {
             engine.GetMaintenanceStatistics().ScheduleRejections.Should().BeGreaterThan(0);
         }
+
         engine.AssertInvariants();
     }
 
@@ -295,9 +280,7 @@ public sealed class EngineWriteBufferTests
         var engine = CreateEngine(scheduler, hooks: hooks);
         using var cache = new Cache<int, string>(engine);
         cache.Put(1, "ready");
-
         scheduler.RunAll();
-
         engine.GetMaintenanceStatistics().DrainFaults.Should().BeGreaterThan(0);
         engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
         cache.Policy.Eviction!.WeightedSize.Should().Be(1);
@@ -323,21 +306,20 @@ public sealed class EngineWriteBufferTests
         using var cache = new Cache<int, string>(engine);
         cache.Put(1, "expired");
         time.Advance(TimeSpan.FromSeconds(1));
-
         cache.TryGet(1, out _).Should().BeFalse();
         cache.Put(1, "new");
         scheduler.RunAll();
-
         cache.TryGet(1, out string? value).Should().BeTrue();
         value.Should().Be("new");
         cache.Policy.Eviction!.WeightedSize.Should().Be(1);
         engine.AssertInvariants();
     }
 
-    [TestCase(0L)]
-    [TestCase(7L)]
-    [TestCase(11L)]
-    [TestCase(long.MaxValue)]
+    [Test]
+    [Arguments(0L)]
+    [Arguments(7L)]
+    [Arguments(11L)]
+    [Arguments(long.MaxValue)]
     public async Task RefreshWeightUpdatesRemainTrackedOrRemoveTheOversizedVersion(long weight)
     {
         var scheduler = new ControlledScheduler();
@@ -359,15 +341,14 @@ public sealed class EngineWriteBufferTests
         );
         (await cache.GetAsync(1)).Should().Be(1);
         cache.CleanUp();
-
         (await cache.RefreshAsync(1)).Should().Be(weight);
         if (weight > 10)
         {
             cache.TryGet(1, out _).Should().BeFalse();
         }
+
         scheduler.RunAll();
         cache.CleanUp();
-
         cache.Policy.Eviction!.WeightedSize.Should().Be(weight > 10 ? 0 : weight);
         cache.EstimatedCount.Should().Be(weight > 10 ? 0 : 1);
         cache.Policy.Eviction.Coldest(4).Count.Should().Be((int)cache.EstimatedCount);
@@ -401,9 +382,7 @@ public sealed class EngineWriteBufferTests
         (await cache.RefreshAsync(1)).Should().Be(5);
         (await cache.RefreshAsync(1)).Should().Be(7);
         engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(3);
-
         scheduler.RunAll();
-
         cache.TryGet(1, out long value).Should().BeTrue();
         value.Should().Be(7);
         cache.Policy.Eviction!.WeightedSize.Should().Be(7);
@@ -437,7 +416,6 @@ public sealed class EngineWriteBufferTests
 
         cache.Policy.Eviction!.SetMaximum(3);
         cache.CleanUp();
-
         cache.Policy.Eviction.WeightedSize.Should().BeLessThanOrEqualTo(3);
         cache.EstimatedCount.Should().BeLessThanOrEqualTo(residentMaximum);
         cache.Policy.Eviction.Coldest(residentMaximum).Count.Should().Be((int)cache.EstimatedCount);
@@ -500,6 +478,7 @@ public sealed class EngineWriteBufferTests
             {
                 return false;
             }
+
             if (Inline)
             {
                 callback();
@@ -508,6 +487,7 @@ public sealed class EngineWriteBufferTests
             {
                 _callbacks.Enqueue(callback);
             }
+
             return true;
         }
 
@@ -526,6 +506,7 @@ public sealed class EngineWriteBufferTests
                 {
                     throw new InvalidOperationException("Maintenance did not quiesce.");
                 }
+
                 callback();
             }
         }

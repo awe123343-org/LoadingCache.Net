@@ -1,11 +1,9 @@
 using FluentAssertions;
 using LoadingCache.Maintenance;
 using LoadingCache.Policy;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class ColdStartPolicyTests
 {
     [Test]
@@ -17,27 +15,22 @@ public sealed class ColdStartPolicyTests
             maximumCount: 4,
             lazySketch: true
         );
-
         policy.IsSketchInitialized.Should().BeFalse();
         policy.Add(new PolicyNode<int>(1, 1, Hash(1)));
-
         policy.MissesInSample.Should().Be(1);
         policy.IsSketchInitialized.Should().BeFalse();
-
         policy.Maintain();
-
         policy.MissesInSample.Should().Be(0);
         policy.IsSketchInitialized.Should().BeFalse();
-
         policy.Add(new PolicyNode<int>(2, 1, Hash(2)));
-
         policy.IsSketchInitialized.Should().BeTrue();
         policy.SketchSampleSize.Should().BeGreaterThan(0);
     }
 
-    [TestCase(1)]
-    [TestCase(2)]
-    [TestCase(3)]
+    [Test]
+    [Arguments(1)]
+    [Arguments(2)]
+    [Arguments(3)]
     public void LazySketchInitializesForTinyCapacities(int maximum)
     {
         WindowTinyLfuPolicy<int> policy = new(
@@ -46,9 +39,7 @@ public sealed class ColdStartPolicyTests
             maximumCount: maximum,
             lazySketch: true
         );
-
         policy.Add(new PolicyNode<int>(1, 1, Hash(1)));
-
         policy.IsSketchInitialized.Should().BeTrue();
     }
 
@@ -58,18 +49,14 @@ public sealed class ColdStartPolicyTests
         using WindowTinyLfuEnginePolicy policy = CreateEnginePolicy(maximum: 4);
         WindowTinyLfuEnginePolicy.EngineEntryToken first = CreateToken(1);
         WindowTinyLfuEnginePolicy.EngineEntryToken second = CreateToken(2);
-
         policy.IsSketchInitialized.Should().BeFalse();
         policy.SetMaximum(4, weighted: false);
         policy.IsSketchInitialized.Should().BeTrue();
-
         policy.OnPublish(first, 1);
         policy.OnPublish(second, 1);
         policy.FlushWrites();
         policy.ResidentCount.Should().Be(2);
-
         policy.Clear();
-
         policy.ResidentCount.Should().Be(0);
         policy.IsSketchInitialized.Should().BeFalse();
         policy.OnAccess(first);
@@ -92,10 +79,8 @@ public sealed class ColdStartPolicyTests
             }
         );
         using Cache<int, string> cache = new(engine);
-
         cache.Put(1, "value");
         scheduler.RunAll();
-
         cache.TryGet(1, out string? value).Should().BeTrue();
         value.Should().Be("value");
         engine.GetPolicyReadBufferStatistics().Enqueued.Should().Be(0);
@@ -111,11 +96,9 @@ public sealed class ColdStartPolicyTests
             recordStatistics: true
         );
         using Cache<int, string> cache = new(engine);
-
         cache.Put(1, "one");
         cache.Put(2, "two");
         scheduler.RunAll();
-
         cache.TryGet(1, out _).Should().BeTrue();
         engine.GetPolicyReadBufferStatistics().Enqueued.Should().Be(1);
     }
@@ -130,21 +113,20 @@ public sealed class ColdStartPolicyTests
             recordStatistics: true
         );
         using Cache<int, string> cache = new(engine);
-
         cache.Put(1, "value");
         scheduler.RunAll();
         cache.TryGet(1, out _).Should().BeTrue();
-
         cache.Statistics.Hits.Should().Be(1);
         engine.GetPolicyReadBufferStatistics().Enqueued.Should().Be(0);
     }
 
-    [TestCase(ColdStartExclusion.ExpireAfterWrite)]
-    [TestCase(ColdStartExclusion.ExpireAfterAccess)]
-    [TestCase(ColdStartExclusion.VariableExpiry)]
-    [TestCase(ColdStartExclusion.RefreshAfterWrite)]
-    [TestCase(ColdStartExclusion.WeakValues)]
-    [TestCase(ColdStartExclusion.MaximumWeight)]
+    [Test]
+    [Arguments(ColdStartExclusion.ExpireAfterWrite)]
+    [Arguments(ColdStartExclusion.ExpireAfterAccess)]
+    [Arguments(ColdStartExclusion.VariableExpiry)]
+    [Arguments(ColdStartExclusion.RefreshAfterWrite)]
+    [Arguments(ColdStartExclusion.WeakValues)]
+    [Arguments(ColdStartExclusion.MaximumWeight)]
     public void ColdStartIsDisabledForUnsupportedFeatureCombinations(ColdStartExclusion exclusion)
     {
         ManualScheduler scheduler = new();
@@ -170,10 +152,8 @@ public sealed class ColdStartPolicyTests
         };
         CacheEngine<int, string> engine = new(options);
         using Cache<int, string> cache = new(engine);
-
         cache.Put(1, "value");
         scheduler.RunAll();
-
         cache.TryGet(1, out _).Should().BeTrue();
         engine.GetPolicyReadBufferStatistics().Enqueued.Should().Be(1);
     }
@@ -194,7 +174,6 @@ public sealed class ColdStartPolicyTests
         WindowTinyLfuEnginePolicy.EngineEntryToken old = CreateToken(1);
         WindowTinyLfuEnginePolicy.EngineEntryToken first = CreateToken(2);
         WindowTinyLfuEnginePolicy.EngineEntryToken second = CreateToken(3);
-
         policy.OnPublish(old, 1);
         policy.FlushWrites();
         policy.Clear();
@@ -202,7 +181,6 @@ public sealed class ColdStartPolicyTests
         policy.OnPublish(first, 1);
         policy.OnPublish(second, 1);
         policy.CleanUp();
-
         policy
             .Snapshot(hottest: true, limit: 4)
             .Should()

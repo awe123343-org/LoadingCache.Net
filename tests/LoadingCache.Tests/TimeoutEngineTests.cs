@@ -1,7 +1,7 @@
 using FluentAssertions;
+using FluentAssertions.Execution;
 using LoadingCache.Maintenance;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
@@ -37,15 +37,12 @@ public sealed class TimeoutEngineTests
             .RecordStatistics()
             .TimeProvider(clock)
             .BuildAsyncLoading(loader);
-
         Task<string> first = cache.GetAsync(1).AsTask();
         await entered.Task.WaitAsync(Watchdog);
         clock.Advance(TimeSpan.FromSeconds(1));
-
         await FluentActions.Awaiting(() => first).Should().ThrowExactlyAsync<TimeoutException>();
         cache.GetStatistics().InFlightLoads.Should().Be(1);
         cache.GetStatistics().LoadTimeouts.Should().Be(1);
-
         Exception? rejection = null;
         try
         {
@@ -57,11 +54,9 @@ public sealed class TimeoutEngineTests
         }
 
         rejection.Should().BeOfType<CacheLoadRejectedException>();
-
         releaseLate.SetResult("late");
         await Eventually(() => cache.GetStatistics().InFlightLoads == 0);
         cache.TryGet(1, out _).Should().BeFalse();
-
         (await cache.GetAsync(1)).Should().Be("fresh");
         Volatile.Read(ref loads.Value).Should().Be(2);
     }
@@ -95,16 +90,13 @@ public sealed class TimeoutEngineTests
             .LoadTimeout(TimeSpan.FromSeconds(1))
             .TimeProvider(clock)
             .BuildAsyncLoading(loader);
-
         (await cache.GetAsync(1)).Should().Be("old");
         clock.Advance(TimeSpan.FromSeconds(1));
         (await cache.GetAsync(1)).Should().Be("old");
         await reloadEntered.Task.WaitAsync(Watchdog);
-
         clock.Advance(TimeSpan.FromSeconds(1));
         cache.TryGet(1, out string? oldValue).Should().BeTrue();
         oldValue.Should().Be("old");
-
         Exception? rejection = null;
         try
         {
@@ -116,7 +108,6 @@ public sealed class TimeoutEngineTests
         }
 
         rejection.Should().BeOfType<CacheLoadRejectedException>();
-
         releaseLate.SetResult("late");
         await Eventually(() => cache.GetStatistics().InFlightLoads == 0);
         (await cache.RefreshAsync(1).AsTask().WaitAsync(Watchdog)).Should().Be("new");
@@ -143,20 +134,19 @@ public sealed class TimeoutEngineTests
             .LoadTimeout(TimeSpan.FromSeconds(10))
             .TimeProvider(clock)
             .BuildAsyncLoading(loader);
-
         using var canceled = new CancellationTokenSource();
         Task<string> first = cache.GetAsync(1, canceled.Token).AsTask();
         await entered.Task.WaitAsync(Watchdog, CancellationToken.None);
         Task<string> second = cache.GetAsync(1, CancellationToken.None).AsTask();
         await canceled.CancelAsync();
-
         await FluentActions.Awaiting(() => first).Should().ThrowAsync<OperationCanceledException>();
         release.SetResult("shared");
         (await second.WaitAsync(Watchdog, CancellationToken.None)).Should().Be("shared");
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task ClaimedRefreshMaintenanceFailureRollsBackAndCanRetry(bool automaticRefresh)
     {
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
@@ -188,16 +178,13 @@ public sealed class TimeoutEngineTests
                 return releaseReload.Task;
             }
         );
-
         (await cache.GetAsync(1).AsTask().WaitAsync(Watchdog)).Should().Be("old");
         cache.TryGetTask(1, out Task<string>? oldTask).Should().BeTrue();
         clock.Advance(TimeSpan.FromSeconds(1));
-
         Task<string> failedRefresh = cache.RefreshAsync(1).AsTask();
         await reloadEntered.Task.WaitAsync(Watchdog);
         policy.ThrowNextPublish();
         releaseReload.SetResult("new");
-
         await FluentActions
             .Awaiting(() => failedRefresh)
             .Should()
@@ -207,7 +194,6 @@ public sealed class TimeoutEngineTests
         cache.TryGetTask(1, out Task<string>? rolledBackTask).Should().BeTrue();
         rolledBackTask.Should().BeSameAs(oldTask);
         (await rolledBackTask).Should().Be("old");
-
         Task<string> retry = cache.RefreshAsync(1).AsTask();
         (await retry.WaitAsync(Watchdog)).Should().Be("retry");
         cache.TryGet(1, out string? retriedValue).Should().BeTrue();
@@ -254,14 +240,12 @@ public sealed class TimeoutEngineTests
                     }
                 )
             );
-
         (await cache.GetAsync(1).AsTask().WaitAsync(Watchdog)).Should().Be("old");
         clock.Advance(TimeSpan.FromSeconds(1));
         Task<string> refresh = cache.RefreshAsync(1).AsTask();
         await reloadEntered.Task.WaitAsync(Watchdog);
         releaseReload.SetResult("new");
         (await refresh.WaitAsync(Watchdog)).Should().Be("new");
-
         clock.Advance(TimeSpan.FromSeconds(1));
         cache.EstimatedCount.Should().Be(0);
     }
@@ -291,6 +275,7 @@ public sealed class TimeoutEngineTests
                 {
                     throw new TimeoutException("The cold timer arm was not released.");
                 }
+
                 throw new ControlledRefreshFailureException();
             },
         };
@@ -330,7 +315,6 @@ public sealed class TimeoutEngineTests
             {
                 coldResult.SetResult("old");
                 await coldTimerArmEntered.Task.WaitAsync(Watchdog);
-
                 refresh = Task
                     .Factory.StartNew(
                         static state =>
@@ -342,7 +326,6 @@ public sealed class TimeoutEngineTests
                     )
                     .Unwrap();
                 await reloadEntered.Task.WaitAsync(Watchdog);
-
                 releaseColdTimerArm.Set();
                 await FluentActions
                     .Awaiting(() => cold)
@@ -352,7 +335,6 @@ public sealed class TimeoutEngineTests
                     .Awaiting(() => refresh)
                     .Should()
                     .ThrowExactlyAsync<ControlledRefreshFailureException>();
-
                 cache.TryGet(1, out string? value).Should().BeTrue();
                 value.Should().Be("old");
                 cache.TryGetTask(1, out Task<string>? currentTask).Should().BeTrue();
@@ -392,7 +374,9 @@ public sealed class TimeoutEngineTests
         {
             if (DateTimeOffset.UtcNow >= deadline)
             {
-                throw new AssertionException("The controlled timeout condition was not reached.");
+                throw new AssertionFailedException(
+                    "The controlled timeout condition was not reached."
+                );
             }
 
             await Task.Yield();
@@ -410,11 +394,8 @@ public sealed class TimeoutEngineTests
     private sealed class ThrowingPublishPolicy : ICacheEnginePolicy
     {
         private int _throwNext;
-
         public long Maximum { get; private set; } = 4;
-
         public long WeightedSize => 0;
-
         public int ResidentCount => 0;
 
         public void SetMaximum(long maximum, bool weighted) => Maximum = maximum;
@@ -447,7 +428,6 @@ public sealed class TimeoutEngineTests
     private sealed class FixedRefreshExpiry : IExpiry<int, string>
     {
         internal TimeSpan CreateDuration { get; init; }
-
         internal TimeSpan UpdateDuration { get; init; }
 
         public TimeSpan ExpireAfterCreate(int key, string value, TimeSpan currentDuration) =>

@@ -1,11 +1,9 @@
 using System.Globalization;
 using FluentAssertions;
 using LoadingCache.Expiration;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class TimerWheelTests
 {
     [Test]
@@ -40,9 +38,7 @@ public sealed class TimerWheelTests
                 }
             ),
         ];
-
         List<IdentityTimerNode<string>> due = Drain(wheel, 524_288, 64);
-
         due.Select(node => node.Value).Should().BeEquivalentTo(nodes.Select(node => node.Value));
         wheel.Count.Should().Be(0);
         wheel.AssertInvariants();
@@ -54,12 +50,10 @@ public sealed class TimerWheelTests
         TimerWheel<string> wheel = new();
         IdentityTimerNode<string> node = new("future");
         wheel.Schedule(node, 60);
-
         wheel.Advance(10, 32).DueNodes.Should().BeEmpty();
         node.IsScheduled.Should().BeTrue();
         wheel.Advance(59, 32).DueNodes.Should().BeEmpty();
         wheel.Advance(60, 32).DueNodes.Should().ContainSingle().Which.Should().BeSameAs(node);
-
         wheel.AssertInvariants();
     }
 
@@ -69,16 +63,13 @@ public sealed class TimerWheelTests
         TimerWheel<string> wheel = new();
         IdentityTimerNode<string> rescheduled = new("rescheduled");
         IdentityTimerNode<string> removed = new("removed");
-
         wheel.Schedule(rescheduled, 100);
         wheel.Reschedule(rescheduled, 5).Should().BeTrue();
         wheel.Advance(5, 8).DueNodes.Should().ContainSingle().Which.Should().BeSameAs(rescheduled);
-
         wheel.Schedule(removed, 200);
         wheel.Deschedule(removed).Should().BeTrue();
         wheel.Deschedule(removed).Should().BeFalse();
         wheel.Advance(200, 8).DueNodes.Should().BeEmpty();
-
         wheel.Retire(rescheduled).Should().BeTrue();
         wheel.Retire(rescheduled).Should().BeFalse();
         wheel.AssertInvariants();
@@ -92,7 +83,6 @@ public sealed class TimerWheelTests
         IdentityTimerNode<string> survivor = new("survivor");
         wheel.Schedule(retired, 64);
         wheel.Schedule(survivor, 65);
-
         wheel.Retire(retired).Should().BeTrue();
         wheel.Advance(65, 16).DueNodes.Should().ContainSingle().Which.Should().BeSameAs(survivor);
         wheel.Count.Should().Be(0);
@@ -152,7 +142,6 @@ public sealed class TimerWheelTests
         }
 
         List<IdentityTimerNode<string>> due = Drain(wheel, 1, 10);
-
         due.Should().BeEquivalentTo(nodes);
         wheel.Count.Should().Be(0);
         wheel.AssertInvariants();
@@ -166,7 +155,6 @@ public sealed class TimerWheelTests
         IdentityTimerNode<int> tail = new(2);
         wheel.Schedule(survivor, 100_000_000);
         wheel.Schedule(tail, 100_000_000);
-
         wheel.Advance(524_288, 1).HasPending.Should().BeTrue();
         wheel.Deschedule(tail).Should().BeTrue();
         for (int value = 3; value < 10_003; value++)
@@ -200,10 +188,8 @@ public sealed class TimerWheelTests
         IdentityTimerNode<int> tail = new(2);
         wheel.Schedule(survivor, 100_000_000);
         wheel.Schedule(tail, 100_000_000);
-
         wheel.Advance(524_288, 1).HasPending.Should().BeTrue();
         wheel.Retire(tail).Should().BeTrue();
-
         bool settled = false;
         for (int i = 0; i < 100; i++)
         {
@@ -230,10 +216,8 @@ public sealed class TimerWheelTests
         IdentityTimerNode<int> tail = new(2);
         wheel.Schedule(survivor, 100_000_000);
         wheel.Schedule(tail, 100_000_000);
-
         wheel.Advance(524_288, 1).HasPending.Should().BeTrue();
         wheel.Reschedule(tail, 600_000).Should().BeTrue();
-
         bool settled = false;
         for (int i = 0; i < 100; i++)
         {
@@ -259,7 +243,6 @@ public sealed class TimerWheelTests
         TimerWheel<string> other = new();
         IdentityTimerNode<string> node = new("owned");
         owner.Schedule(node, 100);
-
         other.Deschedule(node).Should().BeFalse();
         node.IsScheduled.Should().BeTrue();
         other.Retire(node).Should().BeFalse();
@@ -277,9 +260,7 @@ public sealed class TimerWheelTests
         IdentityTimerNode<string> afterWrap = new("after-wrap");
         wheel.Schedule(beforeWrap, unchecked(start + 1));
         wheel.Schedule(afterWrap, unchecked(start + 4));
-
         TimerAdvanceResult<string> result = wheel.Advance(1, 16);
-
         result.DueNodes.Should().BeEquivalentTo([beforeWrap, afterWrap]);
         wheel.Count.Should().Be(0);
         wheel.AssertInvariants();
@@ -291,9 +272,7 @@ public sealed class TimerWheelTests
         TimerWheel<string> wheel = new();
         IdentityTimerNode<string> node = new("large-jump");
         wheel.Schedule(node, 1000);
-
         TimerAdvanceResult<string> result = wheel.Advance(1_000_000, 128);
-
         result.DueNodes.Should().ContainSingle().Which.Should().BeSameAs(node);
         wheel.Count.Should().Be(0);
         wheel.AssertInvariants();
@@ -305,7 +284,6 @@ public sealed class TimerWheelTests
         TimerWheel<string> wheel = new(100);
         IdentityTimerNode<string> node = new("past");
         wheel.Schedule(node, 50);
-
         wheel.GetNextDelay().Should().Be(0);
         wheel.Advance(100, 16).DueNodes.Should().ContainSingle().Which.Should().BeSameAs(node);
         wheel.AssertInvariants();
@@ -316,9 +294,7 @@ public sealed class TimerWheelTests
     {
         TimerWheel<string> wheel = new();
         IdentityTimerNode<string> node = new("too-far");
-
         Action action = () => wheel.Schedule(node, (ulong)long.MaxValue + 1);
-
         action.Should().Throw<ArgumentOutOfRangeException>();
     }
 
@@ -328,7 +304,6 @@ public sealed class TimerWheelTests
         TimerWheel<string> wheel = new();
         IdentityTimerNode<string> node = new("maximum");
         wheel.Schedule(node, long.MaxValue);
-
         wheel
             .Advance(long.MaxValue, int.MaxValue)
             .DueNodes.Should()
@@ -345,7 +320,6 @@ public sealed class TimerWheelTests
         TimerWheel<string> wheel = new(100);
         IdentityTimerNode<string> node = new("future");
         wheel.Schedule(node, 200);
-
         wheel.Advance(90, 16).DueNodes.Should().BeEmpty();
         node.IsScheduled.Should().BeTrue();
         wheel.CurrentTime.Should().Be(100);
@@ -358,7 +332,6 @@ public sealed class TimerWheelTests
         TimerWheel<string> wheel = new();
         IdentityTimerNode<string> node = new("next");
         wheel.Schedule(node, 100);
-
         wheel.GetNextDelay().Should().Be(64);
         wheel.Advance(64, 16).DueNodes.Should().BeEmpty();
         wheel.GetNextDelay().Should().Be(36);

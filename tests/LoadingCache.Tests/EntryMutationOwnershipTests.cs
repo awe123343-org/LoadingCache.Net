@@ -1,16 +1,14 @@
 using System.Collections.Concurrent;
 using FluentAssertions;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class EntryMutationOwnershipTests
 {
-    [TestCase("update")]
-    [TestCase("remove-value")]
-    [TestCase("remove-comparison")]
-    [Parallelizable(ParallelScope.All)]
+    [Test]
+    [Arguments("update")]
+    [Arguments("remove-value")]
+    [Arguments("remove-comparison")]
     public void ConditionalMutationOwnsTheEntryThroughCommit(string operation)
     {
         var probe = new OwnershipProbe();
@@ -19,7 +17,6 @@ public sealed class EntryMutationOwnershipTests
         cache.Put(1, "old");
         cache.CleanUp();
         SyncCacheDictionary<int, string> dictionary = cache.AsDictionary();
-
         probe.Start();
         try
         {
@@ -55,10 +52,10 @@ public sealed class EntryMutationOwnershipTests
         probe.AssertExclusive(expectedCalls: 2);
     }
 
-    [TestCase(CacheMutationKind.Keep)]
-    [TestCase(CacheMutationKind.Set)]
-    [TestCase(CacheMutationKind.Remove)]
-    [Parallelizable(ParallelScope.All)]
+    [Test]
+    [Arguments(CacheMutationKind.Keep)]
+    [Arguments(CacheMutationKind.Set)]
+    [Arguments(CacheMutationKind.Remove)]
     public void PresentComputeOwnsItsFinalValidationThroughCommit(CacheMutationKind kind)
     {
         var probe = new OwnershipProbe();
@@ -66,7 +63,6 @@ public sealed class EntryMutationOwnershipTests
         using var cache = new Cache<int, string>(engine);
         cache.Put(1, "old");
         cache.CleanUp();
-
         probe.Start();
         try
         {
@@ -112,7 +108,6 @@ public sealed class EntryMutationOwnershipTests
     }
 
     [Test]
-    [Parallelizable]
     public void PressureTrimOwnsItsRevisionValidationThroughRetirement()
     {
         var probe = new OwnershipProbe();
@@ -122,7 +117,6 @@ public sealed class EntryMutationOwnershipTests
         cache.CleanUp();
         MemoryPressureSnapshot snapshot = engine.CaptureMemoryPressureSnapshot(1, 1)!;
         snapshot.Candidates.Should().ContainSingle();
-
         probe.Start();
         try
         {
@@ -140,11 +134,11 @@ public sealed class EntryMutationOwnershipTests
         probe.AssertExclusive(expectedCalls: 2);
     }
 
-    [TestCase("invalidate")]
-    [TestCase("clear")]
-    [TestCase("dispose")]
-    [TestCase("dispose-async")]
-    [Parallelizable(ParallelScope.All)]
+    [Test]
+    [Arguments("invalidate")]
+    [Arguments("clear")]
+    [Arguments("dispose")]
+    [Arguments("dispose-async")]
     public async Task CommonRetirementOwnsTheExactEntry(string operation)
     {
         var probe = new OwnershipProbe();
@@ -206,9 +200,9 @@ public sealed class EntryMutationOwnershipTests
         }
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    [Parallelizable(ParallelScope.All)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public void FailedComparisonDoesNotReachTheCommitSeam(bool remove)
     {
         var probe = new OwnershipProbe();
@@ -217,7 +211,6 @@ public sealed class EntryMutationOwnershipTests
         cache.Put(1, "old");
         cache.CleanUp();
         SyncCacheDictionary<int, string> dictionary = cache.AsDictionary();
-
         probe.Start();
         try
         {
@@ -273,6 +266,7 @@ public sealed class EntryMutationOwnershipTests
                     {
                         Monitor.Exit(entrySync);
                     }
+
                     return acquired;
                 },
                 sync,
@@ -280,7 +274,6 @@ public sealed class EntryMutationOwnershipTests
                 TaskCreationOptions.LongRunning,
                 TaskScheduler.Default
             );
-
             // The zero-wait acquisition result is the oracle; the five-second limit only
             // detects broken test infrastructure. Always join the nonblocking competitor.
             bool completedWithinWatchdog = competitor.Wait(Watchdog);

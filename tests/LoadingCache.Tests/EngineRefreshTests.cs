@@ -1,6 +1,5 @@
 using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
@@ -25,7 +24,6 @@ public sealed class EngineRefreshTests
                 .MaxConcurrentLoads(2)
                 .RefreshAfterWrite(TimeSpan.FromSeconds(1))
                 .BuildAsync();
-
         sync.Should().ThrowExactly<InvalidOperationException>();
         async.Should().ThrowExactly<InvalidOperationException>();
     }
@@ -51,7 +49,6 @@ public sealed class EngineRefreshTests
                 return releaseReload.Task;
             }
         );
-
         await using IAsyncLoadingCache<int, string> cache = CacheBuilder
             .Create<int, string>()
             .MaximumSize(4)
@@ -60,15 +57,12 @@ public sealed class EngineRefreshTests
             .RefreshAfterWrite(TimeSpan.FromSeconds(1))
             .TimeProvider(clock)
             .BuildAsyncLoading(loader);
-
         (await cache.GetAsync(1)).Should().Be("v1");
         clock.Advance(TimeSpan.FromSeconds(1));
-
         (await cache.GetAsync(1)).Should().Be("v1");
         (await cache.GetAsync(1)).Should().Be("v1");
         await reloadEntered.Task.WaitAsync(Watchdog);
         Volatile.Read(ref reloads.Value).Should().Be(1);
-
         Task<string> joinedRefresh = cache.RefreshAsync(1).AsTask();
         releaseReload.SetResult("v2");
         (await joinedRefresh.WaitAsync(Watchdog)).Should().Be("v2");
@@ -95,7 +89,6 @@ public sealed class EngineRefreshTests
             .RefreshAfterWrite(TimeSpan.FromSeconds(1))
             .TimeProvider(clock)
             .BuildAsyncLoading(loader);
-
         (await cache.GetAsync(1)).Should().Be("old");
         clock.Advance(TimeSpan.FromSeconds(1));
         cache.TryGet(1, out string? value).Should().BeTrue();
@@ -132,12 +125,10 @@ public sealed class EngineRefreshTests
             .RefreshAfterWrite(TimeSpan.FromSeconds(1))
             .TimeProvider(clock)
             .BuildAsyncLoading(loader);
-
         (await cache.GetAsync(1)).Should().Be("old");
         clock.Advance(TimeSpan.FromSeconds(1));
         (await cache.GetAsync(1)).Should().Be("old");
         await reloadEntered.Task.WaitAsync(Watchdog);
-
         clock.Advance(TimeSpan.FromSeconds(1));
         Task<string> joined = cache.GetAsync(1).AsTask();
         joined.IsCompleted.Should().BeFalse();
@@ -174,7 +165,6 @@ public sealed class EngineRefreshTests
             .RefreshFailureBackoff(TimeSpan.FromSeconds(5))
             .TimeProvider(clock)
             .BuildAsyncLoading(loader);
-
         (await cache.GetAsync(1)).Should().Be("old");
         clock.Advance(TimeSpan.FromSeconds(1));
         (await cache.GetAsync(1)).Should().Be("old");
@@ -186,10 +176,8 @@ public sealed class EngineRefreshTests
             .Awaiting(() => joinedRefresh)
             .Should()
             .ThrowExactlyAsync<InvalidOperationException>();
-
         (await cache.GetAsync(1)).Should().Be("old");
         Volatile.Read(ref reloads.Value).Should().Be(1);
-
         clock.Advance(TimeSpan.FromSeconds(5));
         (await cache.GetAsync(1)).Should().Be("old");
         await secondReloadEntered.Task.WaitAsync(Watchdog);
@@ -217,12 +205,10 @@ public sealed class EngineRefreshTests
             .RefreshAfterWrite(TimeSpan.FromSeconds(1))
             .TimeProvider(clock)
             .BuildAsyncLoading(loader);
-
         (await cache.GetAsync(1)).Should().Be("old");
         clock.Advance(TimeSpan.FromSeconds(1));
         (await cache.GetAsync(1)).Should().Be("old");
         await reloadEntered.Task.WaitAsync(Watchdog);
-
         Task<string> joinedRefresh = cache.RefreshAsync(1).AsTask();
         cache.Set(1, "set");
         releaseReload.SetResult("late");
@@ -324,7 +310,6 @@ public sealed class EngineRefreshTests
             .MaximumSize(4)
             .MaxConcurrentLoads(2)
             .BuildLoading(loader);
-
         cache.Get(1).Should().Be("old");
         Task<string> refresh = cache.RefreshAsync(1);
         await entered.Task.WaitAsync(Watchdog);

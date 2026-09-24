@@ -1,20 +1,18 @@
 using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
-[Parallelizable(ParallelScope.All)]
 public sealed class ExpiredReadPublicationTests
 {
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
 
     [Test]
+    [MatrixDataSource]
     public async Task DelayedExpiredReadCannotRemoveACompletedRefresh(
-        [Values("write", "access", "both")] string expiration,
-        [Values] bool recordStatistics,
-        [Values] bool materializeTask
+        [Matrix("write", "access", "both")] string expiration,
+        [Matrix(false, true)] bool recordStatistics,
+        [Matrix(false, true)] bool materializeTask
     )
     {
         await using var cleanup = new BlockingTestHook(Watchdog);
@@ -48,7 +46,6 @@ public sealed class ExpiredReadPublicationTests
         cache.CleanUp();
         cache.TryGetTask(1, out Task<string>? oldTask).Should().BeTrue();
         clock.Advance(duration);
-
         Task<(bool Found, string? Value)> staleRead = Task
             .Factory.StartNew(
                 static async state =>
@@ -80,7 +77,6 @@ public sealed class ExpiredReadPublicationTests
             // but has not acquired the engine gate for physical cleanup.
             await cleanup.Entered.WaitAsync(Watchdog);
             staleRead.IsCompleted.Should().BeFalse();
-
             // Explicit refresh of a physically resident value keeps its Entry.
             // The throwing cold loader ensures this exercises that path.
             (await cache.RefreshAsync(1).AsTask().WaitAsync(Watchdog))
@@ -119,10 +115,11 @@ public sealed class ExpiredReadPublicationTests
         engine.AssertInvariants();
     }
 
-    [TestCase(true, false)]
-    [TestCase(true, true)]
-    [TestCase(false, false)]
-    [TestCase(false, true)]
+    [Test]
+    [Arguments(true, false)]
+    [Arguments(true, true)]
+    [Arguments(false, false)]
+    [Arguments(false, true)]
     public async Task DelayedExpiredReadHonorsAnExtendedDuration(
         bool extendWriteDuration,
         bool enableOtherExpiration
@@ -155,7 +152,6 @@ public sealed class ExpiredReadPublicationTests
         cache.Put(1, "resident");
         cache.CleanUp();
         clock.Advance(originalDuration);
-
         Task staleRead = Task.Factory.StartNew(
             static state => ((Cache<int, string>)state!).TryGet(1, out _),
             cache,
@@ -170,7 +166,6 @@ public sealed class ExpiredReadPublicationTests
         {
             await cleanup.Entered.WaitAsync(Watchdog);
             staleRead.IsCompleted.Should().BeFalse();
-
             // Only the policy changes. The Entry, value publication, and original
             // timestamps remain the same, so a revision check alone is insufficient.
             policy.SetDuration(extendedDuration);
@@ -193,7 +188,6 @@ public sealed class ExpiredReadPublicationTests
         cache.Policy.Eviction!.WeightedSize.Should().Be(1);
         cache.Statistics.ExpiredRemovals.Should().Be(0);
         engine.AssertInvariants();
-
         // Quiet observations must not touch TTI, and the extension must not turn
         // expiration off. The unchanged publication expires at its new deadline.
         clock.Advance(extendedDuration - originalDuration);

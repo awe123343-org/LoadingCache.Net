@@ -16,6 +16,7 @@
     <!-- IDE-only annotations are omitted from emitted assemblies. -->
     <PackageReference Include="JetBrains.Annotations" PrivateAssets="all" IncludeAssets="compile" />
     <InternalsVisibleTo Include="LoadingCache.Tests" />
+    <InternalsVisibleTo Include="LoadingCache.AllocationProbe" />
     <InternalsVisibleTo Include="LoadingCache.StressTests" />
     <InternalsVisibleTo Include="LoadingCache.Simulator" />
     <InternalsVisibleTo Include="LoadingCache.ReadProbe" />

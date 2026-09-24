@@ -2,11 +2,9 @@ using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class MetricsTests
 {
     [Test]
@@ -53,18 +51,15 @@ public sealed class MetricsTests
             }
         );
         listener.Start();
-
         await using IAsyncLoadingCache<int, string> cache = CacheBuilder
             .Create<int, string>()
             .MaximumSize(4)
             .MaxConcurrentLoads(4)
             .EnableMetrics(cacheName)
             .BuildAsyncLoading((key, _) => Task.FromResult($"value-{key}"));
-
         (await cache.GetAsync(1)).Should().Be("value-1");
         cache.Statistics.LoadsStarted.Should().Be(0);
         listener.RecordObservableInstruments();
-
         measurements
             .Should()
             .Contain(item =>
@@ -114,7 +109,6 @@ public sealed class MetricsTests
             }
         };
         listener.Start();
-
         Action build = () =>
         {
             using ICache<int, string> cache = CacheBuilder
@@ -124,7 +118,6 @@ public sealed class MetricsTests
                 .EnableMetrics($"construction-{Guid.NewGuid():N}")
                 .Build();
         };
-
         build.Should().NotThrow();
         publicationError.Should().BeNull();
     }
@@ -148,7 +141,6 @@ public sealed class MetricsTests
             }
         };
         listener.Start();
-
         throwDuringBuild.Value = true;
         Action build = () =>
         {
@@ -161,7 +153,6 @@ public sealed class MetricsTests
         };
         build.Should().Throw<InvalidOperationException>();
         throwDuringBuild.Value = false;
-
         Action secondBuild = () =>
         {
             using ICache<int, string> cache = CacheBuilder
@@ -186,10 +177,8 @@ public sealed class MetricsTests
             }
         };
         listener.Start();
-
         WeakReference reference = CreateDisposedMetricsCache();
         ForceCollection(reference);
-
         reference.IsAlive.Should().BeFalse();
     }
 

@@ -1,16 +1,14 @@
 using FluentAssertions;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class ParallelResidentPutRaceTests
 {
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(5);
 
-    [TestCase(false)]
-    [TestCase(true)]
-    [Parallelizable(ParallelScope.All)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task FastPutSurvivesAnOlderCommittedRefreshRollback(bool statistics)
     {
         await using var published = new BlockingTestHook(Watchdog);
@@ -42,7 +40,6 @@ public sealed class ParallelResidentPutRaceTests
             ready.Should().Be("v2");
             cache.TryGetTask(1, out refreshed).Should().BeTrue();
             (await refreshed!).Should().Be("v2");
-
             cache.Set(1, "v3");
             probe.AssertSingleFastCommit();
             cache.TryGetTask(1, out replacement).Should().BeTrue();
@@ -64,9 +61,9 @@ public sealed class ParallelResidentPutRaceTests
         AssertResident(engine, "v3", statistics);
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    [Parallelizable(ParallelScope.All)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task FastPutTaskViewSurvivesACommittedColdPromiseFailure(bool statistics)
     {
         await using var completion = new BlockingTestHook(Watchdog);
@@ -95,7 +92,6 @@ public sealed class ParallelResidentPutRaceTests
             ready.Should().Be("v1");
             cache.TryGetTask(1, out original).Should().BeTrue();
             original!.IsCompleted.Should().BeFalse();
-
             cache.Set(1, "v2");
             probe.AssertSingleFastCommit();
             cache.TryGetTask(1, out replacement).Should().BeTrue();
@@ -117,9 +113,9 @@ public sealed class ParallelResidentPutRaceTests
         AssertResident(engine, "v2", statistics);
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    [Parallelizable(ParallelScope.All)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task ConditionalUpdateRejectsARevisionChangedDuringValueComparison(bool statistics)
     {
         await using var comparison = new BlockingTestHook(Watchdog);
@@ -134,7 +130,6 @@ public sealed class ParallelResidentPutRaceTests
         var replacement = new ComparedValue(3);
         cache.Put(1, original);
         cache.CleanUp();
-
         Task<bool> update = StartConditionalUpdate(cache.AsDictionary());
         try
         {

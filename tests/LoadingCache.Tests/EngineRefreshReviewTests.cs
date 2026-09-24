@@ -1,6 +1,5 @@
 using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
@@ -63,10 +62,11 @@ public sealed class EngineRefreshReviewTests
     }
 
     /// <summary>A retired refresh cannot publish or remove a replacement in a new slot or epoch.</summary>
-    [TestCase(false, false)]
-    [TestCase(false, true)]
-    [TestCase(true, false)]
-    [TestCase(true, true)]
+    [Test]
+    [Arguments(false, false)]
+    [Arguments(false, true)]
+    [Arguments(true, false)]
+    [Arguments(true, true)]
     public async Task InvalidationAndClearFenceLateRefreshOutcomes(bool clear, bool fail)
     {
         var release = new TaskCompletionSource<int>(
@@ -94,6 +94,7 @@ public sealed class EngineRefreshReviewTests
             {
                 cache.Invalidate(1).Should().BeTrue();
             }
+
             cache.Set(1, 99);
             if (fail)
             {
@@ -108,6 +109,7 @@ public sealed class EngineRefreshReviewTests
                 release.TrySetResult(2);
                 (await refresh.WaitAsync(TimeSpan.FromSeconds(5))).Should().Be(2);
             }
+
             cache.CleanUp();
             cache.TryGet(1, out int value).Should().BeTrue();
             value.Should().Be(99);
@@ -128,8 +130,9 @@ public sealed class EngineRefreshReviewTests
     }
 
     /// <summary>Expiry inspection and rejected extension must preserve an expired refresh owner.</summary>
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task ExpirationPolicyOperationsPreserveAnExpiredRefresh(bool variableExpiry)
     {
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
@@ -150,6 +153,7 @@ public sealed class EngineRefreshReviewTests
         {
             builder.ExpireAfterWrite(TimeSpan.FromSeconds(2));
         }
+
         await using IAsyncLoadingCache<int, int> cache = builder.BuildAsyncLoading(
             (_, _) => Interlocked.Increment(ref calls) == 1 ? Task.FromResult(1) : release.Task
         );
@@ -171,6 +175,7 @@ public sealed class EngineRefreshReviewTests
                 policy.AgeOf(1).Should().Be(TimeSpan.FromSeconds(2));
                 policy.GetExpiresAfter(1).Should().Be(TimeSpan.Zero);
             }
+
             cache.TryGet(1, out _).Should().BeFalse();
             Task<int> joined = cache.GetAsync(1).AsTask();
             joined.IsCompleted.Should().BeFalse();
@@ -186,9 +191,10 @@ public sealed class EngineRefreshReviewTests
     }
 
     /// <summary>Expiration cleanup must hide the old value while preserving the refresh flight.</summary>
-    [TestCase(false, false)]
-    [TestCase(true, false)]
-    [TestCase(false, true)]
+    [Test]
+    [Arguments(false, false)]
+    [Arguments(true, false)]
+    [Arguments(false, true)]
     public async Task ExpirationMaintenancePreservesAnOngoingRefresh(
         bool promptScheduler,
         bool variableExpiry
@@ -213,6 +219,7 @@ public sealed class EngineRefreshReviewTests
         {
             builder.ExpireAfterWrite(TimeSpan.FromSeconds(2));
         }
+
         if (promptScheduler)
         {
             builder.EnableExpirationScheduler();
@@ -241,6 +248,7 @@ public sealed class EngineRefreshReviewTests
             release.TrySetResult(2);
             await refresh.WaitAsync(TimeSpan.FromSeconds(5));
         }
+
         cache.TryGet(1, out int current).Should().BeTrue();
         current.Should().Be(2);
         cache.EstimatedCount.Should().Be(1);

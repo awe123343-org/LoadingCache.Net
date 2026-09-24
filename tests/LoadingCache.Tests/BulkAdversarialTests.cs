@@ -1,6 +1,5 @@
 using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
@@ -13,13 +12,10 @@ public sealed class BulkAdversarialTests
     {
         var loader = new GatedBulkLoader();
         await using IAsyncLoadingCache<int, int> cache = CreateBuilder().BuildAsyncLoading(loader);
-
         Task<IReadOnlyDictionary<int, int>> pending = cache.GetAllAsync([1, 2]).AsTask();
         await loader.Started.Task.WaitAsync(TestTimeout);
-
         cache.Set(1, 101);
         loader.Release.TrySetResult(new Dictionary<int, int> { [1] = 10, [2] = 20 });
-
         IReadOnlyDictionary<int, int> result = await pending.WaitAsync(TestTimeout);
         result[1].Should().Be(10, "the existing waiter may observe its original flight");
         cache.TryGet(1, out int current).Should().BeTrue();
@@ -33,13 +29,10 @@ public sealed class BulkAdversarialTests
     {
         var loader = new GatedBulkLoader();
         await using IAsyncLoadingCache<int, int> cache = CreateBuilder().BuildAsyncLoading(loader);
-
         Task<IReadOnlyDictionary<int, int>> pending = cache.GetAllAsync([1, 2]).AsTask();
         await loader.Started.Task.WaitAsync(TestTimeout);
-
         cache.Invalidate(1).Should().BeTrue();
         loader.Release.TrySetResult(new Dictionary<int, int> { [1] = 10, [2] = 20 });
-
         IReadOnlyDictionary<int, int> result = await pending.WaitAsync(TestTimeout);
         result[1].Should().Be(10, "the original waiter already joined the old flight");
         cache.TryGet(1, out _).Should().BeFalse();
@@ -52,14 +45,11 @@ public sealed class BulkAdversarialTests
     {
         var loader = new GatedBulkLoader();
         await using IAsyncLoadingCache<int, int> cache = CreateBuilder().BuildAsyncLoading(loader);
-
         Task<IReadOnlyDictionary<int, int>> pending = cache.GetAllAsync([1, 2]).AsTask();
         await loader.Started.Task.WaitAsync(TestTimeout);
-
         cache.Clear();
         cache.Set(1, 101);
         loader.Release.TrySetResult(new Dictionary<int, int> { [1] = 10, [2] = 20 });
-
         IReadOnlyDictionary<int, int> result = await pending.WaitAsync(TestTimeout);
         result[1].Should().Be(10, "the original waiter may observe its old epoch");
         cache.TryGet(1, out int current).Should().BeTrue();
@@ -72,10 +62,8 @@ public sealed class BulkAdversarialTests
     {
         var loader = new GatedBulkLoader();
         await using IAsyncLoadingCache<int, int> cache = CreateBuilder().BuildAsyncLoading(loader);
-
         Task<IReadOnlyDictionary<int, int>> pending = cache.GetAllAsync([1, 2]).AsTask();
         await loader.Started.Task.WaitAsync(TestTimeout);
-
         cache.Invalidate(99).Should().BeFalse();
         loader.Release.TrySetResult(
             new Dictionary<int, int>
@@ -85,7 +73,6 @@ public sealed class BulkAdversarialTests
                 [99] = 990,
             }
         );
-
         await pending.WaitAsync(TestTimeout);
         cache.TryGet(99, out _).Should().BeFalse();
     }
@@ -95,10 +82,8 @@ public sealed class BulkAdversarialTests
     {
         var loader = new GatedBulkLoader();
         await using IAsyncLoadingCache<int, int> cache = CreateBuilder().BuildAsyncLoading(loader);
-
         Task<IReadOnlyDictionary<int, int>> pending = cache.GetAllAsync([1, 2]).AsTask();
         await loader.Started.Task.WaitAsync(TestTimeout);
-
         cache.Set(77, 770);
         loader.Release.TrySetResult(
             new Dictionary<int, int>
@@ -108,7 +93,6 @@ public sealed class BulkAdversarialTests
                 [99] = 990,
             }
         );
-
         await pending.WaitAsync(TestTimeout);
         cache.TryGet(77, out int unrelated).Should().BeTrue();
         unrelated.Should().Be(770);
@@ -121,10 +105,8 @@ public sealed class BulkAdversarialTests
     {
         var loader = new GatedBulkLoader();
         await using IAsyncLoadingCache<int, int> cache = CreateBuilder().BuildAsyncLoading(loader);
-
         Task<IReadOnlyDictionary<int, int>> pending = cache.GetAllAsync([1, 2]).AsTask();
         await loader.Started.Task.WaitAsync(TestTimeout);
-
         cache.Invalidate(77).Should().BeFalse();
         loader.Release.TrySetResult(
             new Dictionary<int, int>
@@ -134,7 +116,6 @@ public sealed class BulkAdversarialTests
                 [99] = 990,
             }
         );
-
         await pending.WaitAsync(TestTimeout);
         cache.TryGet(99, out int prefetched).Should().BeTrue();
         prefetched.Should().Be(990);
@@ -145,10 +126,8 @@ public sealed class BulkAdversarialTests
     {
         var loader = new GatedBulkLoader();
         await using IAsyncLoadingCache<int, int> cache = CreateBuilder().BuildAsyncLoading(loader);
-
         Task<IReadOnlyDictionary<int, int>> pending = cache.GetAllAsync([1, 2]).AsTask();
         await loader.Started.Task.WaitAsync(TestTimeout);
-
         cache.Set(99, 991);
         cache.Invalidate(99).Should().BeTrue();
         loader.Release.TrySetResult(
@@ -159,7 +138,6 @@ public sealed class BulkAdversarialTests
                 [99] = 990,
             }
         );
-
         await pending.WaitAsync(TestTimeout);
         cache.TryGet(99, out _).Should().BeFalse();
     }
@@ -175,7 +153,6 @@ public sealed class BulkAdversarialTests
             .MaxPendingLoadKeys(4)
             .MaximumBulkKeys(4)
             .BuildAsyncLoading(loader);
-
         Task<IReadOnlyDictionary<int, int>> first = cache.GetAllAsync([1, 2]).AsTask();
         await loader.FirstStarted.Task.WaitAsync(TestTimeout);
         for (int index = 0; index <= 1024; index++)
@@ -199,7 +176,6 @@ public sealed class BulkAdversarialTests
             .Should()
             .BeTrue("a new bulk may use the rotated ledger while the old bulk remains active");
         newPrefetched.Should().Be(990);
-
         loader.FirstRelease.TrySetResult(
             new Dictionary<int, int>
             {
@@ -210,13 +186,11 @@ public sealed class BulkAdversarialTests
         );
         await first.WaitAsync(TestTimeout);
         cache.TryGet(98, out _).Should().BeFalse("the pre-rotation bulk must fail closed");
-
         Func<CacheStatistics> readStatistics = cache.GetStatistics;
         SpinWait
             .SpinUntil(() => readStatistics().InFlightLoads == 0, TestTimeout)
             .Should()
             .BeTrue("the final active bulk must retire before the ledger is reused");
-
         Task<IReadOnlyDictionary<int, int>> third = cache.GetAllAsync([5, 6]).AsTask();
         await loader.ThirdStarted.Task.WaitAsync(TestTimeout);
         loader.ThirdRelease.TrySetResult(
@@ -248,12 +222,10 @@ public sealed class BulkAdversarialTests
             loader.LoadAsync,
             bulkLoader: loader.LoadAllAsync
         );
-
         Task<IReadOnlyDictionary<int, int>> pending = cache.GetAllAsync([1, 2]).AsTask();
         await loader.FirstStarted.Task.WaitAsync(TestTimeout);
         engine.SetBulkMutationSequenceForTesting(long.MaxValue);
         cache.Set(77, 770);
-
         loader.FirstRelease.TrySetResult(
             new Dictionary<int, int>
             {
@@ -281,11 +253,9 @@ public sealed class BulkAdversarialTests
             .MaximumBulkKeys(4)
             .Comparer(StringComparer.OrdinalIgnoreCase)
             .BuildAsyncLoading(loader);
-
         Task<IReadOnlyDictionary<string, int>> pending = cache.GetAllAsync(["a", "b"]).AsTask();
         await loader.Started.Task.WaitAsync(TestTimeout);
         cache.Invalidate("C").Should().BeFalse();
-
         loader.Release.TrySetResult(
             new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
             {
@@ -295,7 +265,6 @@ public sealed class BulkAdversarialTests
             }
         );
         await pending.WaitAsync(TestTimeout);
-
         cache.TryGet("c", out _).Should().BeFalse();
     }
 
@@ -317,11 +286,9 @@ public sealed class BulkAdversarialTests
             WeakBulkKey second
         ) = StartWeakBulk(cache, loader);
         await loader.Started.Task.WaitAsync(TestTimeout);
-
         WeakReference mutationKey = CreateAndInvalidateAbsentWeakKey(cache);
         ForceCollection(mutationKey);
         mutationKey.IsAlive.Should().BeFalse("the active bulk ledger stores only a weak wrapper");
-
         loader.Release.TrySetResult(
             new Dictionary<WeakBulkKey, int> { [first] = 10, [second] = 20 }
         );
@@ -338,22 +305,18 @@ public sealed class BulkAdversarialTests
             .LoadTimeout(TimeSpan.FromSeconds(1))
             .TimeProvider(clock)
             .BuildAsyncLoading(loader);
-
         Task<IReadOnlyDictionary<int, int>> first = cache.GetAllAsync([1, 2]).AsTask();
         try
         {
             await loader.Started.Task.WaitAsync(TestTimeout);
-
             clock.Advance(TimeSpan.FromSeconds(1));
             Func<Task> waitFirst = async () => await first.WaitAsync(TestTimeout);
             await waitFirst.Should().ThrowExactlyAsync<TimeoutException>();
             cache.GetStatistics().InFlightLoads.Should().Be(1);
-
             Func<Task> rejected = cache.Awaiting(static current =>
                 current.GetAllAsync([3, 4]).AsTask()
             );
             await rejected.Should().ThrowExactlyAsync<CacheLoadRejectedException>();
-
             loader.Release.TrySetResult(
                 new Dictionary<int, int>
                 {
@@ -369,10 +332,8 @@ public sealed class BulkAdversarialTests
                 .SpinUntil(() => readStatistics().InFlightLoads == 0, TestTimeout)
                 .Should()
                 .BeTrue();
-
             cache.TryGet(1, out _).Should().BeFalse();
             cache.TryGet(2, out _).Should().BeFalse();
-
             IReadOnlyDictionary<int, int> second = await cache.GetAllAsync([3, 4]);
             second.Should().BeEquivalentTo(new Dictionary<int, int> { [3] = 30, [4] = 40 });
             loader.BulkCalls.Should().Be(2);
@@ -408,11 +369,9 @@ public sealed class BulkAdversarialTests
         Task<IReadOnlyDictionary<int, int>> bulk = cache.GetAllAsync([1, 2]).AsTask();
         await loader.Started.Task.WaitAsync(TestTimeout);
         Task<int> joined = cache.GetAsync(2).AsTask();
-
         try
         {
             await cache.DisposeAsync().AsTask().WaitAsync(TestTimeout);
-
             Func<Task> waitBulk = async () => await bulk.WaitAsync(TestTimeout);
             await waitBulk.Should().ThrowExactlyAsync<ObjectDisposedException>();
             Func<Task> waitJoined = async () => await joined.WaitAsync(TestTimeout);
@@ -432,7 +391,6 @@ public sealed class BulkAdversarialTests
         var loader = new SelfAwaitBulkLoader();
         IAsyncLoadingCache<int, int> cache = CreateBuilder().BuildAsyncLoading(loader);
         loader.Cache = cache;
-
         try
         {
             Task<IReadOnlyDictionary<int, int>> pending = cache.GetAllAsync([1, 2]).AsTask();
@@ -455,7 +413,6 @@ public sealed class BulkAdversarialTests
             .MaxPendingLoadKeys(4)
             .BuildAsyncLoading(loader);
         var input = new GuardedInfiniteDuplicateInput();
-
         Func<Task> operation = cache.Awaiting(current => current.GetAllAsync(input).AsTask());
         await operation.Should().ThrowExactlyAsync<ArgumentOutOfRangeException>();
         input.MoveNextCalls.Should().Be(5);
@@ -467,7 +424,6 @@ public sealed class BulkAdversarialTests
     {
         var loader = new ResultBulkLoader<int>(_ => new Dictionary<int, int> { [1] = 10 });
         await using IAsyncLoadingCache<int, int> cache = CreateBuilder().BuildAsyncLoading(loader);
-
         Func<Task> operation = cache.Awaiting(static current =>
             current.GetAllAsync([1, 2]).AsTask()
         );
@@ -491,7 +447,6 @@ public sealed class BulkAdversarialTests
             .MaxPendingLoadKeys(8)
             .MaximumBulkKeys(4)
             .BuildAsyncLoading(loader);
-
         Func<Task> operation = cache.Awaiting(static current =>
             current.GetAllAsync([1, 2]).AsTask()
         );
@@ -511,12 +466,10 @@ public sealed class BulkAdversarialTests
         };
         var loader = new ResultBulkLoader<int>(_ => source);
         await using IAsyncLoadingCache<int, int> cache = CreateBuilder().BuildAsyncLoading(loader);
-
         IReadOnlyDictionary<int, int> result = await cache.GetAllAsync([1, 2]);
         source[1] = 1001;
         source[99] = 9999;
         source[100] = 1000;
-
         result.Should().BeEquivalentTo(new Dictionary<int, int> { [1] = 10, [2] = 20 });
         cache.TryGet(1, out int first).Should().BeTrue();
         first.Should().Be(10);
@@ -540,6 +493,7 @@ public sealed class BulkAdversarialTests
             Signal<IReadOnlyDictionary<int, int>>();
         internal TaskCompletionSource<bool> Finished { get; } = Signal<bool>();
         internal bool IgnoreCancellation { get; init; }
+
         internal int BulkCalls;
 
         public Task<int> LoadAsync(int key, CancellationToken cancellationToken) =>
@@ -578,6 +532,7 @@ public sealed class BulkAdversarialTests
         internal TaskCompletionSource<bool> ThirdStarted { get; } = Signal<bool>();
         internal TaskCompletionSource<IReadOnlyDictionary<int, int>> ThirdRelease { get; } =
             Signal<IReadOnlyDictionary<int, int>>();
+
         private int _calls;
 
         public Task<int> LoadAsync(int key, CancellationToken cancellationToken) =>

@@ -1,17 +1,15 @@
 using FluentAssertions;
 using LoadingCache.Maintenance;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
-[Parallelizable(ParallelScope.All)]
 public sealed class ReadBufferForcedFailureTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public void BeforeReserveCanReplacePublicationHookForTheSameOffer(bool recordStatistics)
     {
         using ProducerHookState state = new(recordStatistics);
@@ -21,20 +19,19 @@ public sealed class ReadBufferForcedFailureTests
             beforeReserve: state.ReplacePublicationHook,
             beforePublish: state.RecordOriginalPublication
         );
-
         buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
         trace.Should().BeEmpty();
         buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Success);
         buffer.TryOffer(2).Should().Be(ReadBufferOfferResult.Success);
-
         trace.Should().Equal("reserve", "replacement", "replacement");
         List<int> observed = [];
         buffer.DrainTo(observed.Add, 4).Should().Be(3);
         observed.Should().Equal(0, 1, 2);
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public void ClearingHooksDoesNotDisablePendingForcedFailures(bool recordStatistics)
     {
         using ProducerHookState state = new(recordStatistics);
@@ -45,10 +42,8 @@ public sealed class ReadBufferForcedFailureTests
             beforeReserve: state.ClearHooks,
             beforePublish: state.RecordPublication
         );
-
         buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Failed);
         buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Success);
-
         state.Reservations.Should().Be(1);
         state.Publications.Should().Be(0);
         List<int> observed = [];
@@ -69,7 +64,6 @@ public sealed class ReadBufferForcedFailureTests
         buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
         buffer.SetForcedCasFailuresForTesting(3);
         buffer.SetHooksForTesting(beforeReserve: state.ClearForcedFailures, beforePublish: null);
-
         buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Success);
         state.Reservations.Should().Be(1);
         ReadBufferStatistics statistics = buffer.GetStatistics();
@@ -89,11 +83,9 @@ public sealed class ReadBufferForcedFailureTests
         using StripedReadBuffer<int> buffer = new(1, 4);
         buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
         buffer.SetForcedCasFailuresForTesting(3);
-
         buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Failed);
         buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Success);
         buffer.TryOffer(2).Should().Be(ReadBufferOfferResult.Success);
-
         List<int> observed = [];
         buffer.DrainTo(observed.Add, 4).Should().Be(3);
         observed.Should().Equal(0, 1, 2);
@@ -152,6 +144,7 @@ public sealed class ReadBufferForcedFailureTests
                                 break;
                         }
                     }
+
                     return new WorkerResult(accepted, failed, unexpected);
                 },
                 (buffer, start, worker),
@@ -172,7 +165,6 @@ public sealed class ReadBufferForcedFailureTests
             failed.Should().BeGreaterThan(0);
             accepted.Should().NotBeEmpty();
             (accepted.Count + failed).Should().Be(totalAttempts);
-
             // The finite failure budget is exhausted. No setter resets it before this offer.
             buffer.TryOffer(totalAttempts).Should().Be(ReadBufferOfferResult.Success);
             accepted.Add(-1);
@@ -183,7 +175,6 @@ public sealed class ReadBufferForcedFailureTests
             beforeDrain.DroppedShutdown.Should().Be(0);
             beforeDrain.Enqueued.Should().Be(accepted.Count);
             beforeDrain.Queued.Should().Be(accepted.Count);
-
             List<int> observed = [];
             buffer.DrainTo(observed.Add, capacity).Should().Be(accepted.Count);
             observed.Should().OnlyHaveUniqueItems();

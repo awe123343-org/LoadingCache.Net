@@ -1,10 +1,9 @@
 using FluentAssertions;
+using FluentAssertions.Execution;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class StatisticsIntegrationTests
 {
     [Test]
@@ -21,10 +20,8 @@ public sealed class StatisticsIntegrationTests
                 Interlocked.Increment(ref calls);
                 return $"value-{key}";
             });
-
         cache.Get(7).Should().Be("value-7");
         cache.Get(7).Should().Be("value-7");
-
         CacheStatistics statistics = cache.Statistics;
         calls.Should().Be(1);
         statistics.Misses.Should().Be(1);
@@ -44,12 +41,10 @@ public sealed class StatisticsIntegrationTests
             .MaxConcurrentLoads(4)
             .RecordStatistics()
             .Build();
-
         cache.Put(1, "one");
         cache.Put(2, "two");
         cache.CleanUp();
         cache.Clear();
-
         CacheStatistics statistics = cache.Statistics;
         statistics.Evictions.Should().BeGreaterThanOrEqualTo(1);
         statistics.SizeRemovals.Should().BeGreaterThanOrEqualTo(1);
@@ -76,11 +71,9 @@ public sealed class StatisticsIntegrationTests
                     return Task.FromResult($"value-{call}");
                 }
             );
-
         (await cache.GetAsync(1)).Should().Be("value-1");
         time.Advance(TimeSpan.FromSeconds(1));
         (await cache.GetAsync(1)).Should().Be("value-1");
-
         await Eventually(() => cache.Statistics.RefreshSuccesses >= 1);
         cache.Statistics.RefreshAttempts.Should().Be(1);
         cache.Statistics.LoadsStarted.Should().Be(2);
@@ -105,10 +98,8 @@ public sealed class StatisticsIntegrationTests
                     return Task.FromResult("never");
                 }
             );
-
         Task<string> load = cache.GetAsync(1).AsTask();
         await FluentActions.Awaiting(() => load).Should().ThrowExactlyAsync<TimeoutException>();
-
         calls.Should().Be(0);
         CacheStatistics statistics = cache.Statistics;
         statistics.LoadsStarted.Should().Be(0);
@@ -140,15 +131,12 @@ public sealed class StatisticsIntegrationTests
                     return release.Task;
                 }
             );
-
         Task<string> first = cache.GetAsync(1).AsTask();
         await loaderStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-
         cache.TryGetTask(1, out Task<string>? shared).Should().BeTrue();
         shared.Should().NotBeNull();
         cache.Statistics.Misses.Should().Be(2);
         cache.Statistics.LoadsStarted.Should().Be(1);
-
         release.TrySetResult("value");
         (await first).Should().Be("value");
         (await shared).Should().Be("value");
@@ -161,7 +149,7 @@ public sealed class StatisticsIntegrationTests
         {
             if (DateTimeOffset.UtcNow >= deadline)
             {
-                throw new AssertionException("The condition did not become true in time.");
+                throw new AssertionFailedException("The condition did not become true in time.");
             }
 
             await Task.Yield();
@@ -171,7 +159,6 @@ public sealed class StatisticsIntegrationTests
     private sealed class ImmediateTimeoutProvider : TimeProvider
     {
         private long _timestamp;
-
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;
 
         public override long GetTimestamp() => Volatile.Read(ref _timestamp);

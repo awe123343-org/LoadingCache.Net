@@ -2,11 +2,9 @@ using System.Collections.Concurrent;
 using FluentAssertions;
 using LoadingCache.Maintenance;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class OwnedCacheTests
 {
     [Test]
@@ -51,7 +49,6 @@ public sealed class OwnedCacheTests
         var disposer = new ReentrantDisposer(context, observed);
         var cache = OwnedCache.CreateAsync(CreateOptions(2, 4), disposer.DisposeAsync);
         disposer.Cache = cache;
-
         await using (cache)
         {
             context.Value = "request";
@@ -74,6 +71,7 @@ public sealed class OwnedCacheTests
             GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
             GC.WaitForPendingFinalizers();
         }
+
         values.Should().OnlyContain(static item => !item.IsAlive);
         GC.KeepAlive(cache);
     }
@@ -90,6 +88,7 @@ public sealed class OwnedCacheTests
             references[key] = new WeakReference(value);
             cache.Put(key, value);
         }
+
         return references;
     }
 
@@ -109,11 +108,9 @@ public sealed class OwnedCacheTests
             }
         );
         CacheLease<DisposableValue> lease = cache.PutAndLease(1, value);
-
         cache.Invalidate(1).Should().BeTrue();
         disposed.Task.IsCompleted.Should().BeFalse();
         lease.Value.Should().BeSameAs(value);
-
         // ReSharper disable once MethodHasAsyncOverload -- Verify synchronous lease release queues disposal without waiting.
         lease.Dispose();
         await disposed.Task.WaitAsync(TimeSpan.FromSeconds(2));
@@ -135,10 +132,8 @@ public sealed class OwnedCacheTests
                 disposed.TrySetResult(null);
             }
         );
-
         cache.Put(1, value);
         cache.Invalidate(1).Should().BeTrue();
-
         await disposed.Task.WaitAsync(TimeSpan.FromSeconds(2));
         value.DisposeCount.Should().Be(1);
     }
@@ -159,12 +154,10 @@ public sealed class OwnedCacheTests
             }
         );
         cache.Put(1, value);
-
         cache.TryGet(1, out CacheLease<DisposableValue>? lease).Should().BeTrue();
         lease.Should().NotBeNull();
         cache.Invalidate(1).Should().BeTrue();
         disposed.Task.IsCompleted.Should().BeFalse();
-
         // ReSharper disable once MethodHasAsyncOverload -- Verify synchronous lease release queues disposal without waiting.
         lease.Dispose();
         await disposed.Task.WaitAsync(TimeSpan.FromSeconds(2));
@@ -186,13 +179,11 @@ public sealed class OwnedCacheTests
                 disposed.TrySetResult(null);
             }
         );
-
         cache.Put(1, value);
         cache.Put(2, value);
         cache.Invalidate(1).Should().BeTrue();
         disposed.Task.IsCompleted.Should().BeFalse();
         cache.Invalidate(2).Should().BeTrue();
-
         await disposed.Task.WaitAsync(TimeSpan.FromSeconds(2));
         value.DisposeCount.Should().Be(1);
     }
@@ -215,7 +206,6 @@ public sealed class OwnedCacheTests
             },
             maintenanceScheduler: maintenance
         );
-
         try
         {
             cache.Put(1, first);
@@ -224,7 +214,6 @@ public sealed class OwnedCacheTests
             disposals.Should().BeEmpty();
             first.DisposeCount.Should().Be(0);
             second.DisposeCount.Should().Be(0);
-
             cache.CleanUp();
             maintenance.RunAll();
             cache.EstimatedCount.Should().Be(1);
@@ -232,20 +221,17 @@ public sealed class OwnedCacheTests
             cache.GetDisposalStatistics().PendingDisposals.Should().Be(1);
             first.DisposeCount.Should().Be(0);
             second.DisposeCount.Should().Be(0);
-
             disposals.TryDequeue(out Action? disposeEvicted).Should().BeTrue();
             disposeEvicted!();
             (first.DisposeCount + second.DisposeCount).Should().Be(1);
             cache.GetDisposalStatistics().PendingDisposals.Should().Be(0);
             cache.GetDisposalStatistics().ActiveValueCount.Should().Be(1);
             disposals.Should().BeEmpty();
-
             cache.Dispose();
             maintenance.RunAll();
             disposals.Should().ContainSingle();
             cache.GetDisposalStatistics().PendingDisposals.Should().Be(1);
             (first.DisposeCount + second.DisposeCount).Should().Be(1);
-
             disposals.TryDequeue(out Action? disposeRemaining).Should().BeTrue();
             disposeRemaining!();
             first.DisposeCount.Should().Be(1);
@@ -281,7 +267,6 @@ public sealed class OwnedCacheTests
             item => item.Dispose()
         );
         cache.Put(1, value);
-
         clock.Advance(TimeSpan.FromSeconds(1));
         cache.TryGet(1, out CacheLease<DisposableValue>? lease).Should().BeFalse();
         lease.Should().BeNull();
@@ -298,7 +283,6 @@ public sealed class OwnedCacheTests
         );
         cache.Put(1, value);
         cache.TryGet(1, out CacheLease<DisposableValue>? lease).Should().BeTrue();
-
         cache.Clear();
         cache.EstimatedCount.Should().Be(0);
         value.DisposeCount.Should().Be(0);
@@ -400,7 +384,6 @@ public sealed class OwnedCacheTests
                 return true;
             }
         );
-
         CacheLease<DisposableValue> lease = cache.PutAndLease(1, value);
         try
         {
@@ -412,10 +395,8 @@ public sealed class OwnedCacheTests
             disposals.Should().ContainSingle();
             cache.GetDisposalStatistics().PendingDisposals.Should().Be(1);
             value.DisposeCount.Should().Be(0);
-
             disposals.TryDequeue(out Action? dispose).Should().BeTrue();
             dispose!();
-
             value.DisposeCount.Should().Be(1);
             cache.GetDisposalStatistics().PendingDisposals.Should().Be(0);
             cache.GetDisposalStatistics().ActiveValueCount.Should().Be(0);
@@ -445,11 +426,9 @@ public sealed class OwnedCacheTests
         );
         CacheLease<DisposableValue> lease = cache.PutAndLease(1, first);
         cache.Invalidate(1).Should().BeTrue();
-
         Action putWhileLeased = cache.Invoking(current => current.Put(2, second));
         putWhileLeased.Should().Throw<InvalidOperationException>();
         second.DisposeCount.Should().Be(0);
-
         // ReSharper disable once MethodHasAsyncOverload -- Verify synchronous lease release queues disposal without waiting.
         lease.Dispose();
         await firstDisposed.Task.WaitAsync(TimeSpan.FromSeconds(2));
@@ -473,7 +452,6 @@ public sealed class OwnedCacheTests
         WaitForDisposal(value);
         Func<OwnedCacheDisposalStatistics> readDisposalStatistics = cache.GetDisposalStatistics;
         WaitUntil(() => readDisposalStatistics().ActiveValueCount == 0, TimeSpan.FromSeconds(2));
-
         Action republish = cache.Invoking(current => current.Put(2, value));
         republish.Should().Throw<InvalidOperationException>();
         value.DisposeCount.Should().Be(1);
@@ -505,7 +483,6 @@ public sealed class OwnedCacheTests
         cache.Put(1, value);
         cache.Invalidate(1).Should().BeTrue();
         await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
-
         await cache.DisposeAsync();
         completed.Task.IsCompleted.Should().BeFalse();
         release.SetResult(null);
@@ -544,7 +521,6 @@ public sealed class OwnedCacheTests
                 return true;
             }
         );
-
         try
         {
             cache.Put(1, first);
@@ -557,11 +533,9 @@ public sealed class OwnedCacheTests
             disposals.TryDequeue(out Action? startDisposal).Should().BeTrue();
             startDisposal!();
             await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
-
             Action putWhileDisposing = () => cache.Put(2, second);
             putWhileDisposing.Should().Throw<InvalidOperationException>();
             second.DisposeCount.Should().Be(0);
-
             release.SetResult(null);
             await completed.Task.WaitAsync(TimeSpan.FromSeconds(2));
             WaitUntil(
@@ -603,7 +577,6 @@ public sealed class OwnedCacheTests
         );
         cache.Put(1, value);
         cache.Invalidate(1).Should().BeTrue();
-
         Func<OwnedCacheDisposalStatistics> readDisposalStatistics = cache.GetDisposalStatistics;
         WaitUntil(() => readDisposalStatistics().PendingDisposals == 0, TimeSpan.FromSeconds(2));
         cache
@@ -631,7 +604,6 @@ public sealed class OwnedCacheTests
     private sealed class ManualMaintenanceScheduler : IMaintenanceScheduler
     {
         private readonly ConcurrentQueue<Action> _callbacks = new();
-
         internal int Pending => _callbacks.Count;
 
         public bool TrySchedule(Action callback)
@@ -649,6 +621,7 @@ public sealed class OwnedCacheTests
                 {
                     throw new InvalidOperationException("Maintenance did not quiesce.");
                 }
+
                 callback();
             }
         }
@@ -673,7 +646,6 @@ public sealed class OwnedCacheTests
     private sealed class DisposableValue
     {
         private int _disposeCount;
-
         internal int DisposeCount => Volatile.Read(ref _disposeCount);
 
         internal void Dispose() => Interlocked.Increment(ref _disposeCount);

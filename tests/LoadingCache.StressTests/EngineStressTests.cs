@@ -1,16 +1,15 @@
 using System.Runtime.InteropServices;
 using FluentAssertions;
-using NUnit.Framework;
 
 namespace LoadingCache.StressTests;
 
 /// <summary>Bounded mixed-operation stress; fixed seeds reproduce input, not OS schedules.</summary>
-[TestFixture]
 public sealed class EngineStressTests
 {
     /// <summary>Exercises mixed operations and checks the quiescent store/policy invariants.</summary>
-    [TestCase(419)]
-    [TestCase(20260912)]
+    [Test]
+    [Arguments(419)]
+    [Arguments(20260912)]
     public async Task MixedTrafficConvergesWithoutGhostNodes(int seed)
     {
         const int workers = 8;
@@ -44,7 +43,6 @@ public sealed class EngineStressTests
                             }
                         }
                     );
-
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         string[][] traces = [.. Enumerable.Range(0, workers).Select(_ => new string[128])];
         Task[] jobs = [];
@@ -84,6 +82,7 @@ public sealed class EngineStressTests
                                             value.Key.Should().Be(key);
                                             (value.Origin is "loader" or "set").Should().BeTrue();
                                         }
+
                                         break;
                                     case < 98:
                                         cache.CleanUp();
@@ -108,16 +107,19 @@ public sealed class EngineStressTests
         catch
         {
             await TestContext
-                .Error.WriteLineAsync(
+                .Current!.ErrorOutputWriter.WriteLineAsync(
                     $"seed={seed}; final 128 operations per worker, circular index:"
                 )
                 .ConfigureAwait(false);
             for (int worker = 0; worker < workers; worker++)
             {
                 await TestContext
-                    .Error.WriteLineAsync($"worker {worker}: {string.Join(',', traces[worker])}")
+                    .Current.ErrorOutputWriter.WriteLineAsync(
+                        $"worker {worker}: {string.Join(',', traces[worker])}"
+                    )
                     .ConfigureAwait(false);
             }
+
             throw;
         }
         finally
@@ -139,15 +141,16 @@ public sealed class EngineStressTests
         }
 
         await TestContext
-            .Progress.WriteLineAsync(
+            .Current!.OutputWriter.WriteLineAsync(
                 $"seed={seed}; operations={workers * operations}; loads={invocations}; peak={peak}; {RuntimeInformation.FrameworkDescription}; {RuntimeInformation.ProcessArchitecture}"
             )
             .ConfigureAwait(false);
     }
 
     /// <summary>Exercises concurrent weighted replacement, including zero-weight values.</summary>
-    [TestCase(419)]
-    [TestCase(20260912)]
+    [Test]
+    [Arguments(419)]
+    [Arguments(20260912)]
     public async Task ConcurrentWeightedReplacementConverges(int seed)
     {
         const int workers = 8;
@@ -175,7 +178,7 @@ public sealed class EngineStressTests
         }
 
         await TestContext
-            .Progress.WriteLineAsync(
+            .Current!.OutputWriter.WriteLineAsync(
                 $"weighted seed={seed}; operations=16000; {RuntimeInformation.FrameworkDescription}; {RuntimeInformation.ProcessArchitecture}"
             )
             .ConfigureAwait(false);
@@ -204,6 +207,7 @@ public sealed class EngineStressTests
                                 {
                                     cache.TryGet(key, out _);
                                 }
+
                                 if (index % 17 == 0)
                                 {
                                     cache.Invalidate(key);

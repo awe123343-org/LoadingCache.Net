@@ -1,15 +1,13 @@
 using System.Collections.Concurrent;
 using FluentAssertions;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class PublicationOwnershipTests
 {
-    [TestCase(false)]
-    [TestCase(true)]
-    [Parallelizable(ParallelScope.All)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public void FaultedReadyPublicationRequiresPhysicalRepair(bool dictionary)
     {
         var probe = new PublicationProbe(failFinalization: true);
@@ -43,9 +41,9 @@ public sealed class PublicationOwnershipTests
         AssertResidentShortcut(engine, probe, 1);
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    [Parallelizable(ParallelScope.All)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public void ReadyEntryRemainsOwnedThroughPolicyPublication(bool dictionary)
     {
         var probe = new PublicationProbe();
@@ -67,9 +65,9 @@ public sealed class PublicationOwnershipTests
         AssertResidentShortcut(engine, probe, 1);
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    [Parallelizable(ParallelScope.All)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task ColdPublicationKeepsOwnershipUntilPolicyFinalization(bool asynchronous)
     {
         var probe = new PublicationProbe();
@@ -101,11 +99,11 @@ public sealed class PublicationOwnershipTests
         }
     }
 
-    [TestCase(false, false)]
-    [TestCase(false, true)]
-    [TestCase(true, false)]
-    [TestCase(true, true)]
-    [Parallelizable(ParallelScope.All)]
+    [Test]
+    [Arguments(false, false)]
+    [Arguments(false, true)]
+    [Arguments(true, false)]
+    [Arguments(true, true)]
     public async Task ClaimedColdFailureOwnsItsRevisionCheckThroughRemoval(
         bool asynchronous,
         bool failBeforeReady
@@ -145,9 +143,9 @@ public sealed class PublicationOwnershipTests
         probe.AssertOwnership(expectedCalls: failBeforeReady ? 1 : 2, expectedOutsideCalls: 1);
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    [Parallelizable(ParallelScope.All)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task BulkOwnedAndPrefetchedPublicationsRemainOwned(bool asynchronous)
     {
         var probe = new PublicationProbe();
@@ -197,11 +195,11 @@ public sealed class PublicationOwnershipTests
         }
     }
 
-    [TestCase(false, false)]
-    [TestCase(false, true)]
-    [TestCase(true, false)]
-    [TestCase(true, true)]
-    [Parallelizable(ParallelScope.All)]
+    [Test]
+    [Arguments(false, false)]
+    [Arguments(false, true)]
+    [Arguments(true, false)]
+    [Arguments(true, true)]
     public async Task FailedBulkPublicationOwnsItsRevisionCheckThroughRemoval(
         bool asynchronous,
         bool failBeforeReady
@@ -249,11 +247,11 @@ public sealed class PublicationOwnershipTests
         probe.AssertOwnership(expectedCalls: failBeforeReady ? 1 : 2, expectedOutsideCalls: 1);
     }
 
-    [TestCase(false, false)]
-    [TestCase(false, true)]
-    [TestCase(true, false)]
-    [TestCase(true, true)]
-    [Parallelizable(ParallelScope.All)]
+    [Test]
+    [Arguments(false, false)]
+    [Arguments(false, true)]
+    [Arguments(true, false)]
+    [Arguments(true, true)]
     public async Task RefreshFinalizationAndRollbackRetainEntryOwnership(
         bool asynchronous,
         bool failAfterPublication
@@ -311,9 +309,9 @@ public sealed class PublicationOwnershipTests
         }
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    [Parallelizable(ParallelScope.All)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task RefreshReservationAlreadyOwnsTheEntry(bool asynchronous)
     {
         var probe = new PublicationProbe();
@@ -430,7 +428,6 @@ public sealed class PublicationOwnershipTests
         private int _failAfterRefresh = failAfterRefresh ? 1 : 0;
         private int _outsideCalls;
         private int _residentPublicationCalls;
-
         internal int ResidentPublicationCalls => Volatile.Read(ref _residentPublicationCalls);
 
         internal void ObserveResidentPublication() =>

@@ -1,10 +1,8 @@
 using System.Collections.Concurrent;
 using FluentAssertions;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class ResidentReplacementTests
 {
     [Test]
@@ -19,9 +17,7 @@ public sealed class ResidentReplacementTests
             .Build();
         cache.Put(1, "first");
         int timestampCalls = clock.TimestampCalls;
-
         cache.Put(1, "second");
-
         clock.TimestampCalls.Should().Be(timestampCalls);
         cache.TryGet(1, out string? value).Should().BeTrue();
         value.Should().Be("second");
@@ -49,12 +45,10 @@ public sealed class ResidentReplacementTests
             })
             .RecordStatistics()
             .Build();
-
         cache.Put(1, "first");
         cache.Put(1, "second");
         cache.CleanUp();
         await replaced.Task.WaitAsync(TimeSpan.FromSeconds(5));
-
         cache.TryGet(1, out string? value).Should().BeTrue();
         value.Should().Be("second");
         cache.EstimatedCount.Should().Be(1);
@@ -77,7 +71,6 @@ public sealed class ResidentReplacementTests
             .MaximumSize(2)
             .MaxConcurrentLoads(4)
             .Build();
-
         for (int value = 0; value < 32; value++)
         {
             cache.Put(1, value);
@@ -109,10 +102,8 @@ public sealed class ResidentReplacementTests
                 }
             })
             .Build();
-
         cache.Put("Canonical", "first");
         cache.Put("canonical", "second");
-
         RemovalNotification<string, string> replacement = await notification.Task.WaitAsync(
             TimeSpan.FromSeconds(5)
         );
@@ -121,48 +112,8 @@ public sealed class ResidentReplacementTests
     }
 
     [Test]
-    public async Task RepeatedResidentPutHasBoundedAllocation()
-    {
-        if (
-            await AllocationTestProcess
-                .RunIsolatedIfNeededAsync("resident-put")
-                .ConfigureAwait(false)
-        )
-            return;
-        const int iterations = 4096;
-        int[] values = new int[iterations];
-        for (int index = 0; index < values.Length; index++)
-        {
-            values[index] = index;
-        }
-
-        using ICache<int, int> cache = CacheBuilder
-            .Create<int, int>()
-            .MaximumSize(16_384)
-            .MaxConcurrentLoads(4)
-            .RecordStatistics()
-            .Build();
-
-        cache.Put(1, 0);
-        for (int index = 0; index < 256; index++)
-        {
-            cache.Put(1, values[index]);
-        }
-
-        cache.CleanUp();
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        foreach (int value in values)
-        {
-            cache.Put(1, value);
-        }
-
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-
-        cache.CleanUp();
-        cache.TryGet(1, out int current).Should().BeTrue();
-        current.Should().Be(iterations - 1);
-        allocated.Should().BeLessThan(iterations * 128L);
-    }
+    public Task RepeatedResidentPutHasBoundedAllocation() =>
+        AllocationTestProcess.VerifyAsync("resident-put");
 
     [Test]
     public async Task DictionaryComputeRetriesAfterResidentPutChangesRevision()
@@ -174,7 +125,6 @@ public sealed class ResidentReplacementTests
             .Build();
         SyncCacheDictionary<int, int> dictionary = cache.AsDictionary();
         dictionary[1] = 1;
-
         var callbackEntered = new TaskCompletionSource<object?>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
@@ -182,7 +132,6 @@ public sealed class ResidentReplacementTests
             TaskCreationOptions.RunContinuationsAsynchronously
         );
         int callbackCalls = 0;
-
         Task<CacheMutation<int>> compute = Task.Run(() =>
             dictionary.Compute(
                 1,
@@ -201,13 +150,11 @@ public sealed class ResidentReplacementTests
                 }
             )
         );
-
         try
         {
             await callbackEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
             cache.Put(1, 42);
             releaseCallback.TrySetResult(null);
-
             (await compute.WaitAsync(TimeSpan.FromSeconds(5)))
                 .Kind.Should()
                 .Be(CacheMutationKind.Keep);
@@ -231,14 +178,11 @@ public sealed class ResidentReplacementTests
             .MemoryPressureEviction(TimeSpan.FromSeconds(1), trimFraction: 1, maximumTrimCount: 1)
             .CreateEngine(supportsBulkLoading: false);
         using var cache = new Cache<int, string>(engine);
-
         cache.Put(1, "old");
         cache.CleanUp();
         MemoryPressureSnapshot? snapshot = engine.CaptureMemoryPressureSnapshot(1, 1);
         snapshot.Should().NotBeNull();
-
         cache.Put(1, "new");
-
         engine.TrimForMemoryPressure(snapshot).Should().Be(0);
         cache.TryGet(1, out string? current).Should().BeTrue();
         current.Should().Be("new");
@@ -252,12 +196,10 @@ public sealed class ResidentReplacementTests
             .MaximumSize(8)
             .MaxConcurrentLoads(2)
             .BuildAsyncLoading((_, _) => Task.FromResult("loader"));
-
         cache.Set(1, "first");
         cache.TryGetTask(1, out Task<string>? first).Should().BeTrue();
         cache.TryGetTask(1, out Task<string>? sameVersion).Should().BeTrue();
         sameVersion.Should().BeSameAs(first);
-
         cache.Set(1, "second");
         cache.TryGetTask(1, out Task<string>? second).Should().BeTrue();
         second.Should().NotBeSameAs(first);
@@ -290,9 +232,7 @@ public sealed class ResidentReplacementTests
             );
         cache.Set(1, value);
         cache.TryGetTask(1, out Task<object>? first).Should().BeTrue();
-
         cache.Set(1, value);
-
         cache.TryGetTask(1, out Task<object>? second).Should().BeTrue();
         second.Should().NotBeSameAs(first);
         cache.TryGetTask(1, out Task<object>? sameVersion).Should().BeTrue();
@@ -339,7 +279,6 @@ public sealed class ResidentReplacementTests
             TaskCreationOptions.RunContinuationsAsynchronously
         );
         await using var cache = new AsyncLoadingCache<int, string>(engine, (_, _) => loader.Task);
-
         Task<string> load = cache.GetAsync(1).AsTask();
         loader.SetResult("loaded");
         try
@@ -348,7 +287,6 @@ public sealed class ResidentReplacementTests
             cache.Set(1, "set");
             cache.TryGetTask(1, out Task<string>? current).Should().BeTrue();
             (await current!).Should().Be("set");
-
             releaseCompletion.TrySetResult(null);
             (await load.WaitAsync(TimeSpan.FromSeconds(5))).Should().Be("loaded");
             cache.TryGet(1, out string? value).Should().BeTrue();
@@ -382,11 +320,9 @@ public sealed class ResidentReplacementTests
                 disposed.TrySetResult(null);
             }
         );
-
         cache.Put(1, value);
         cache.Put(1, value);
         value.DisposeCount.Should().Be(0);
-
         cache.Invalidate(1).Should().BeTrue();
         await disposed.Task.WaitAsync(TimeSpan.FromSeconds(5));
         value.DisposeCount.Should().Be(1);
@@ -395,7 +331,6 @@ public sealed class ResidentReplacementTests
     private sealed class CountingTimestampProvider : TimeProvider
     {
         private int _timestampCalls;
-
         internal int TimestampCalls => Volatile.Read(ref _timestampCalls);
 
         public override long GetTimestamp() => Interlocked.Increment(ref _timestampCalls);
@@ -404,7 +339,6 @@ public sealed class ResidentReplacementTests
     private sealed class OwnedDisposableValue
     {
         private int _disposeCount;
-
         internal int DisposeCount => Volatile.Read(ref _disposeCount);
 
         internal void Dispose() => Interlocked.Increment(ref _disposeCount);

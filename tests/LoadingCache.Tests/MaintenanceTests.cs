@@ -2,11 +2,9 @@ using System.Collections.Concurrent;
 using FluentAssertions;
 using JetBrains.Annotations;
 using LoadingCache.Maintenance;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class MaintenanceTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
@@ -27,7 +25,6 @@ public sealed class MaintenanceTests
         {
             using StripedReadBuffer<int> _ = new(2, 0);
         };
-
         zeroStripes.Should().Throw<ArgumentOutOfRangeException>();
         nonPowerOfTwoStripes.Should().Throw<ArgumentException>();
         zeroCapacity.Should().Throw<ArgumentOutOfRangeException>();
@@ -40,16 +37,13 @@ public sealed class MaintenanceTests
         ReadEvent first = new(1, 1);
         ReadEvent second = new(1, 2);
         ReadEvent third = new(1, 3);
-
         buffer.TryEnqueue(first).Should().BeTrue();
         buffer.TryEnqueue(second).Should().BeTrue();
         buffer.TryEnqueue(third).Should().BeTrue();
-
         buffer.TryRead(out ReadEvent observedFirst).Should().BeTrue();
         buffer.TryRead(out ReadEvent observedSecond).Should().BeTrue();
         buffer.TryRead(out ReadEvent observedThird).Should().BeTrue();
         buffer.TryRead(out _).Should().BeFalse();
-
         observedFirst.Should().BeSameAs(first);
         observedSecond.Should().BeSameAs(second);
         observedThird.Should().BeSameAs(third);
@@ -65,17 +59,14 @@ public sealed class MaintenanceTests
     {
         using StripedReadBuffer<int> buffer = new(1, 4);
         buffer.HasPublished.Should().BeFalse();
-
         buffer.TryEnqueue(1).Should().BeTrue();
         buffer.TryEnqueue(2).Should().BeTrue();
         buffer.TryEnqueue(3).Should().BeTrue();
         buffer.HasPublished.Should().BeTrue();
-
         List<int> observed = [];
         buffer.DrainTo(observed.Add, budget: 2).Should().Be(2);
         observed.Should().Equal(1, 2);
         buffer.HasPublished.Should().BeTrue();
-
         buffer.DrainTo(observed.Add, budget: 2).Should().Be(1);
         observed.Should().Equal(1, 2, 3);
         buffer.HasPublished.Should().BeFalse();
@@ -85,7 +76,6 @@ public sealed class MaintenanceTests
     public void ReadBufferUsesPublicationSequenceForNullValues()
     {
         using StripedReadBuffer<string?> buffer = new(1, 2);
-
         buffer.TryEnqueue(null).Should().BeTrue();
         buffer.TryRead(out string? observed).Should().BeTrue();
         observed.Should().BeNull();
@@ -100,7 +90,6 @@ public sealed class MaintenanceTests
         PublishGate gate = new();
         buffer.TryEnqueue(0).Should().BeTrue();
         buffer.SetHooksForTesting(beforeReserve: null, beforePublish: gate.BeforePublish);
-
         Task<bool> producer = StartEnqueue(buffer, 1);
         Task<bool>? laterProducer = null;
         try
@@ -108,12 +97,10 @@ public sealed class MaintenanceTests
             gate.Entered.Wait(TestTimeout).Should().BeTrue();
             buffer.TryRead(out int first).Should().BeTrue();
             first.Should().Be(0);
-
             laterProducer = StartEnqueue(buffer, 2);
             (await laterProducer.WaitAsync(TestTimeout)).Should().BeTrue();
             buffer.TryRead(out _).Should().BeFalse();
             buffer.HasPublished.Should().BeFalse();
-
             gate.Release.Set();
             (await producer.WaitAsync(TestTimeout)).Should().BeTrue();
             buffer.TryRead(out int second).Should().BeTrue();
@@ -148,13 +135,11 @@ public sealed class MaintenanceTests
         ContendedReserveGate gate = new(2);
         buffer.TryEnqueue(0).Should().BeTrue();
         buffer.SetHooksForTesting(beforeReserve: gate.BeforeReserve, beforePublish: null);
-
         Task<bool> first = StartEnqueue(buffer, 1);
         Task<bool> second = StartEnqueue(buffer, 2);
         try
         {
             (await Task.WhenAll(first, second).WaitAsync(TestTimeout)).Should().Equal(true, true);
-
             ReadBufferStatistics statistics = buffer.GetStatistics();
             statistics.DroppedFailed.Should().Be(0);
             statistics.Dropped.Should().Be(0);
@@ -181,13 +166,10 @@ public sealed class MaintenanceTests
         using StripedReadBuffer<int> buffer = new(1, 4);
         buffer.TryEnqueue(0).Should().BeTrue();
         buffer.SetForcedCasFailuresForTesting(3);
-
         buffer.TryEnqueue(1).Should().BeFalse();
-
         ReadBufferStatistics statistics = buffer.GetStatistics();
         statistics.DroppedFailed.Should().Be(1);
         statistics.Dropped.Should().Be(1);
-
         buffer.SetForcedCasFailuresForTesting(0);
         buffer.TryEnqueue(1).Should().BeTrue();
     }
@@ -198,7 +180,6 @@ public sealed class MaintenanceTests
         using StripedReadBuffer<int> buffer = new(2, 4);
         buffer.TryEnqueue(0).Should().BeTrue();
         buffer.SetForcedCasFailuresForTesting(3);
-
         buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Failed);
         buffer.StripeCountForTesting.Should().Be(2);
         buffer.SetForcedCasFailuresForTesting(0);
@@ -217,14 +198,14 @@ public sealed class MaintenanceTests
         create.Should().Throw<ArgumentException>();
     }
 
-    [TestCase(long.MaxValue - 2)]
-    [TestCase(-2L)]
+    [Test]
+    [Arguments(long.MaxValue - 2)]
+    [Arguments(-2L)]
     public void ReadBufferHandlesCounterWrapWithPowerOfTwoCapacity(long counter)
     {
         using StripedReadBuffer<int> buffer = new(1, 4);
         buffer.TryEnqueue(0).Should().BeTrue();
         buffer.SetCounterForTesting(counter);
-
         for (int cycle = 0; cycle < 2; cycle++)
         {
             int firstValue = cycle * 4 + 1;
@@ -235,7 +216,6 @@ public sealed class MaintenanceTests
 
             buffer.TryEnqueue(firstValue + 4).Should().BeFalse();
             buffer.GetStatistics().Queued.Should().Be(4);
-
             for (int offset = 0; offset < 4; offset++)
             {
                 buffer.TryRead(out int observed).Should().BeTrue();
@@ -262,7 +242,6 @@ public sealed class MaintenanceTests
             )
             .Should()
             .Throw<InvalidOperationException>();
-
         buffer.TryRead(out int observed).Should().BeTrue();
         observed.Should().Be(2);
     }
@@ -276,11 +255,9 @@ public sealed class MaintenanceTests
         buffer.TryEnqueue(initial).Should().BeTrue();
         buffer.TryRead(out _).Should().BeTrue();
         buffer.SetHooksForTesting(beforeReserve: null, beforePublish: gate.BeforePublish);
-
         Task<(bool Accepted, WeakReference<TrackedValue> Weak)> producer = StartTrackedEnqueue(
             buffer
         );
-
         try
         {
             gate.Entered.Wait(TestTimeout).Should().BeTrue();
@@ -313,14 +290,11 @@ public sealed class MaintenanceTests
     public void ReadBufferFullTryWriteDropsNewestItemInsteadOfReportingFalseSuccess()
     {
         using StripedReadBuffer<int> buffer = new(1, 1);
-
         buffer.TryEnqueue(1).Should().BeTrue();
         buffer.TryEnqueue(2).Should().BeFalse();
-
         buffer.TryRead(out int observed).Should().BeTrue();
         observed.Should().Be(1);
         buffer.TryRead(out _).Should().BeFalse();
-
         ReadBufferStatistics statistics = buffer.GetStatistics();
         statistics.Enqueued.Should().Be(1);
         statistics.DroppedFull.Should().Be(1);
@@ -331,7 +305,6 @@ public sealed class MaintenanceTests
     public void ReadBufferDiagnosticCountersSaturateWithoutCorruptingQueuedCount()
     {
         using StripedReadBuffer<int> buffer = new(2, 1);
-
         buffer.AddStatisticsForTesting(
             0,
             enqueued: long.MaxValue - 1,
@@ -346,7 +319,6 @@ public sealed class MaintenanceTests
             droppedFull: 2,
             droppedShutdown: 2
         );
-
         ReadBufferStatistics statistics = buffer.GetStatistics();
         statistics.Queued.Should().Be(0);
         statistics.Enqueued.Should().Be(long.MaxValue);
@@ -397,7 +369,6 @@ public sealed class MaintenanceTests
             }
 
             await Task.WhenAll(producers).WaitAsync(TestTimeout, CancellationToken.None);
-
             List<ReadEvent> observed = [];
             while (buffer.TryRead(out ReadEvent value))
             {
@@ -469,7 +440,6 @@ public sealed class MaintenanceTests
                                 TimeSpan Timeout
                             ))
                                 state!;
-
                             if (!start.SignalAndWait(timeout))
                             {
                                 throw new TimeoutException("The producer did not meet its peers.");
@@ -498,7 +468,6 @@ public sealed class MaintenanceTests
                             TimeSpan Timeout
                         ))
                             state!;
-
                         if (!start.SignalAndWait(timeout))
                         {
                             throw new TimeoutException("The disposer did not meet its peers.");
@@ -512,9 +481,7 @@ public sealed class MaintenanceTests
                     TaskScheduler.Default
                 )
             );
-
             await Task.WhenAll(workers).WaitAsync(TestTimeout, CancellationToken.None);
-
             ReadBufferStatistics statistics = buffer.GetStatistics();
             statistics.IsDisposed.Should().BeTrue();
             statistics.Queued.Should().Be(0);
@@ -543,16 +510,13 @@ public sealed class MaintenanceTests
         StripedReadBuffer<int> buffer = new(2, 2);
         buffer.TryEnqueue(1).Should().BeTrue();
         buffer.TryEnqueue(2).Should().BeTrue();
-
         buffer.Dispose();
-
         buffer.TryEnqueue(3).Should().BeFalse();
         buffer.TryRead(out _).Should().BeFalse();
         ReadBufferStatistics statistics = buffer.GetStatistics();
         statistics.IsDisposed.Should().BeTrue();
         statistics.Queued.Should().Be(0);
         statistics.DroppedShutdown.Should().Be(3);
-
         buffer.Dispose();
         buffer.GetStatistics().DroppedShutdown.Should().Be(3);
     }
@@ -620,7 +584,6 @@ public sealed class MaintenanceTests
                     TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
                     TaskScheduler.Default
                 );
-
                 await Task.WhenAll(consumer, disposer)
                     .WaitAsync(TestTimeout, CancellationToken.None);
                 ReadBufferStatistics statistics = buffer.GetStatistics();
@@ -657,14 +620,11 @@ public sealed class MaintenanceTests
             () => Interlocked.Increment(ref passes) < 3,
             scheduler
         );
-
         coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
         coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
         scheduler.ScheduleCalls.Should().Be(1);
         coordinator.State.Should().Be(MaintenanceCoordinatorState.Scheduled);
-
         scheduler.RunNext();
-
         passes.Should().Be(3);
         coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
         MaintenanceStatistics statistics = coordinator.GetStatistics();
@@ -675,7 +635,9 @@ public sealed class MaintenanceTests
     }
 
     [Test]
-    public async Task RequestDuringRunningPassSetsRunningRequiredAndCannotLoseWakeup()
+    public async Task RequestDuringRunningPassSetsRunningRequiredAndCannotLoseWakeup(
+        CancellationToken cancellationToken
+    )
     {
         ManualMaintenanceScheduler scheduler = new();
         TaskCompletionSource<bool> entered = NewCompletionSource<bool>();
@@ -698,7 +660,6 @@ public sealed class MaintenanceTests
             },
             scheduler
         );
-
         coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
         Task worker = Task.Factory.StartNew(
             scheduler.RunNext,
@@ -708,7 +669,7 @@ public sealed class MaintenanceTests
         );
         try
         {
-            await entered.Task.WaitAsync(TestTimeout, TestContext.CurrentContext.CancellationToken);
+            await entered.Task.WaitAsync(TestTimeout, cancellationToken);
             coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
             coordinator.State.Should().Be(MaintenanceCoordinatorState.RunningRequired);
         }
@@ -736,7 +697,6 @@ public sealed class MaintenanceTests
             },
             scheduler
         );
-
         coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
         MaintenanceCleanupResult cleanup = coordinator.CleanUp();
         cleanup.Performed.Should().BeTrue();
@@ -744,14 +704,14 @@ public sealed class MaintenanceTests
         cleanup.FallbackRequired.Should().BeFalse();
         passes.Should().Be(1);
         coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
-
         scheduler.RunNext();
         passes.Should().Be(1);
         coordinator.GetStatistics().SynchronousCleanUps.Should().Be(1);
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public void RejectedOrThrowingSchedulerReportsSynchronousFallback(bool throws)
     {
         ManualMaintenanceScheduler scheduler = new() { Reject = !throws, Throw = throws };
@@ -764,11 +724,9 @@ public sealed class MaintenanceTests
             },
             scheduler
         );
-
         coordinator.Request().Should().Be(MaintenanceRequestResult.ScheduleRejected);
         coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
         coordinator.GetStatistics().ScheduleRejections.Should().Be(1);
-
         MaintenanceCleanupResult cleanup = coordinator.CleanUp();
         cleanup.Performed.Should().BeTrue();
         cleanup.MoreWork.Should().BeFalse();
@@ -791,10 +749,8 @@ public sealed class MaintenanceTests
             scheduler,
             maxPassesPerInvocation: 1
         );
-
         coordinator.Request().Should().Be(MaintenanceRequestResult.ScheduleRejected);
         MaintenanceCleanupResult cleanup = coordinator.CleanUp();
-
         cleanup.Performed.Should().BeTrue();
         cleanup.MoreWork.Should().BeTrue();
         cleanup.FallbackRequired.Should().BeTrue();
@@ -814,9 +770,7 @@ public sealed class MaintenanceTests
             scheduler,
             maxPassesPerInvocation: 8
         );
-
         coordinator.Request().Should().Be(MaintenanceRequestResult.ScheduleRejected);
-
         passes.Should().Be(8);
         scheduler.ScheduleCalls.Should().Be(2);
         coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
@@ -837,16 +791,13 @@ public sealed class MaintenanceTests
         using (coordinator)
         {
             MaintenanceCleanupResult first = coordinator.CleanUp();
-
             first.Performed.Should().BeTrue();
             first.MoreWork.Should().BeTrue();
             first.FallbackRequired.Should().BeFalse();
             drain.Passes.Should().Be(2);
             coordinator.State.Should().Be(MaintenanceCoordinatorState.Scheduled);
             scheduler.Pending.Should().Be(1);
-
             scheduler.RunNext();
-
             drain.Passes.Should().Be(4);
             coordinator.State.Should().Be(MaintenanceCoordinatorState.Scheduled);
             coordinator.GetStatistics().BudgetExhaustions.Should().Be(2);
@@ -866,12 +817,10 @@ public sealed class MaintenanceTests
             },
             scheduler
         );
-
         coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
         scheduler.RunNext();
         coordinator.State.Should().Be(MaintenanceCoordinatorState.Idle);
         coordinator.GetStatistics().DrainFaults.Should().Be(1);
-
         coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
         scheduler.RunNext();
         passes.Should().Be(2);
@@ -882,13 +831,11 @@ public sealed class MaintenanceTests
     public void CoordinatorDiagnosticCountersSaturateAtLongMaxValue()
     {
         using MaintenanceCoordinator coordinator = new(() => false);
-
         coordinator.AddStatisticsForTesting(
             scheduleRejections: long.MaxValue - 1,
             drainFaults: long.MaxValue - 1
         );
         coordinator.AddStatisticsForTesting(scheduleRejections: 2, drainFaults: 2);
-
         MaintenanceStatistics statistics = coordinator.GetStatistics();
         statistics.ScheduleRejections.Should().Be(long.MaxValue);
         statistics.DrainFaults.Should().Be(long.MaxValue);
@@ -907,19 +854,16 @@ public sealed class MaintenanceTests
             },
             scheduler
         );
-
         coordinator.Request().Should().Be(MaintenanceRequestResult.Accepted);
         coordinator.Dispose();
         coordinator.Request().Should().Be(MaintenanceRequestResult.Disposed);
         scheduler.RunNext();
-
         passes.Should().Be(0);
         coordinator.State.Should().Be(MaintenanceCoordinatorState.Disposed);
         coordinator.Dispose();
     }
 
     [Test]
-    [Parallelizable]
     public async Task DefaultSchedulerRearmsWithoutFlowingContextOrOverlappingDrains()
     {
         TaskCompletionSource<bool>[] entered =
@@ -1019,7 +963,6 @@ public sealed class MaintenanceTests
     }
 
     [Test]
-    [Parallelizable]
     public async Task DefaultSchedulerDoesNotRearmDisposedRunningDrain()
     {
         TaskCompletionSource<bool> entered = NewCompletionSource<bool>();
@@ -1209,13 +1152,9 @@ public sealed class MaintenanceTests
     private sealed class ManualMaintenanceScheduler : IMaintenanceScheduler
     {
         private readonly Queue<Action> _callbacks = new();
-
         internal bool Reject { get; init; }
-
         internal bool Throw { get; init; }
-
         internal int ScheduleCalls { get; private set; }
-
         internal int Pending => _callbacks.Count;
 
         public bool TrySchedule(Action callback)

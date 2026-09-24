@@ -1,10 +1,8 @@
 using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class ResidentReadTests
 {
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
@@ -97,7 +95,6 @@ public sealed class ResidentReadTests
             .BuildAsyncLoading((_, _) => Task.FromResult("unexpected load"));
         cache.Set("Canonical", "resident");
         clock.RejectTimestamps = true;
-
         cache.TryGet("canonical", out string? value).Should().BeTrue();
         value.Should().Be("resident");
         (await cache.GetAsync("CANONICAL")).Should().Be("resident");
@@ -245,7 +242,6 @@ public sealed class ResidentReadTests
         private long Complement { get; } = ~Version;
         private long Doubled { get; } = Version * 2;
         private long Tripled { get; } = Version * 3;
-
         internal bool IsConsistent =>
             Complement == ~Version && Doubled == Version * 2 && Tripled == Version * 3;
     }

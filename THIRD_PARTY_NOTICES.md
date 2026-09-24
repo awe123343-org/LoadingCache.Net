@@ -50,15 +50,13 @@ draining. The cold-start bypass in the policy adapter is also informed by
 ## Development dependencies
 
 Direct test dependencies and formatting tool, verified from their published NuGet package metadata
-on 2026-09-12, with FluentAssertions updated on 2026-09-19:
+on 2026-09-12, with TUnit updated on 2026-09-23:
 
-| Package                | Version | License                                     | Package metadata                                                      |
-| ---------------------- | ------- | ------------------------------------------- | --------------------------------------------------------------------- |
-| NUnit                  | 4.6.1   | MIT                                         | [NuGet](https://www.nuget.org/packages/NUnit/4.6.1)                   |
-| NUnit3TestAdapter      | 6.3.0   | MIT                                         | [NuGet](https://www.nuget.org/packages/NUnit3TestAdapter/6.3.0)       |
-| FluentAssertions       | 8.11.0  | Xceed Community (open-source test use only) | [NuGet](https://www.nuget.org/packages/FluentAssertions/8.11.0)       |
-| CSharpier              | 1.3.0   | MIT                                         | [NuGet](https://www.nuget.org/packages/CSharpier/1.3.0)               |
-| Microsoft.NET.Test.Sdk | 18.0.1  | MIT                                         | [NuGet](https://www.nuget.org/packages/Microsoft.NET.Test.Sdk/18.0.1) |
+| Package          | Version | License         | Package metadata                                                |
+| ---------------- | ------- | --------------- | --------------------------------------------------------------- |
+| TUnit            | 1.69.0  | MIT             | [NuGet](https://www.nuget.org/packages/TUnit/1.69.0)            |
+| FluentAssertions | 8.11.0  | Xceed Community | [NuGet](https://www.nuget.org/packages/FluentAssertions/8.11.0) |
+| CSharpier        | 1.3.0   | MIT             | [NuGet](https://www.nuget.org/packages/CSharpier/1.3.0)         |
 
 These are development dependencies, not production package dependencies. The
 exact metadata response is recorded in `docs/dependency-evidence.json`. A complete

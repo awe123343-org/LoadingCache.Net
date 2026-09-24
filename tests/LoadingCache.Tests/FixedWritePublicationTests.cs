@@ -1,10 +1,8 @@
 using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class FixedWritePublicationTests
 {
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
@@ -13,14 +11,16 @@ public sealed class FixedWritePublicationTests
 
     // These tests specify nonblocking fixed-write snapshots. The previous locked
     // reader can preserve correctness while failing this new progress requirement.
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public Task ReferenceReadsKeepOldSnapshotWhileRefreshPublicationIsPaused(
         bool recordStatistics
     ) => VerifyPausedPublication("old", "refreshed", recordStatistics);
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public Task LargeStructReadsKeepOldSnapshotWhileRefreshPublicationIsPaused(
         bool recordStatistics
     ) =>
@@ -30,13 +30,15 @@ public sealed class FixedWritePublicationTests
             recordStatistics
         );
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public Task ReferenceReadsKeepNewSnapshotWhileRefreshRollbackIsPaused(bool recordStatistics) =>
         VerifyPausedRollback("old", "refreshed", recordStatistics);
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public Task LargeStructReadsKeepNewSnapshotWhileRefreshRollbackIsPaused(
         bool recordStatistics
     ) =>
@@ -46,10 +48,11 @@ public sealed class FixedWritePublicationTests
             recordStatistics
         );
 
-    [TestCase(false, false)]
-    [TestCase(true, false)]
-    [TestCase(false, true)]
-    [TestCase(true, true)]
+    [Test]
+    [Arguments(false, false)]
+    [Arguments(true, false)]
+    [Arguments(false, true)]
+    [Arguments(true, true)]
     public async Task DurationExtensionCannotReviveAnExpiredCapturedPublication(
         bool recordStatistics,
         bool replaceWithSet
@@ -113,7 +116,6 @@ public sealed class FixedWritePublicationTests
                 TaskCreationOptions.LongRunning,
                 TaskScheduler.Default
             );
-
             // At t=11 the reader has captured old@t=0, already past its t=10
             // deadline, and pauses before returning the clock observation.
             await timestamp.Entered.WaitAsync(Watchdog);
@@ -124,11 +126,11 @@ public sealed class FixedWritePublicationTests
                 // old refresh's publication, but still serves its original waiter.
                 cache.Set(1, expectedValue);
             }
+
             reloadResult.TrySetResult("refreshed");
             (await refresh.WaitAsync(Watchdog)).Should().Be("refreshed");
             cache.Policy.ExpireAfterWrite!.SetDuration(TimeSpan.FromSeconds(20));
             timestamp.Returned.IsCompleted.Should().BeFalse();
-
             // The new duration must not make the captured, expired old value
             // eligible again after a different publication has replaced it.
             timestamp.Release();
@@ -147,8 +149,9 @@ public sealed class FixedWritePublicationTests
         engine.AssertInvariants();
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task ExpiredCapturedPublicationCannotRemoveANewerPendingLoad(bool recordStatistics)
     {
         await using var timestamp = new BlockingTestHook(Watchdog);
@@ -209,7 +212,6 @@ public sealed class FixedWritePublicationTests
             cache.TryGetTask(1, out Task<string>? pendingTask).Should().BeTrue();
             pendingTask!.IsCompleted.Should().BeFalse();
             timestamp.Returned.IsCompleted.Should().BeFalse();
-
             // Retrying the lookup must leave this newer Loading entry intact.
             timestamp.Release();
             (await reader.WaitAsync(Watchdog)).Should().BeFalse();
@@ -218,7 +220,6 @@ public sealed class FixedWritePublicationTests
             secondLoad = cache.GetAsync(1).AsTask();
             secondLoad.IsCompleted.Should().BeFalse();
             Volatile.Read(ref loadCount[0]).Should().Be(1);
-
             loadResult.TrySetResult("loaded");
             (await firstLoad.WaitAsync(Watchdog)).Should().Be("loaded");
             (await secondLoad.WaitAsync(Watchdog)).Should().Be("loaded");
@@ -261,7 +262,6 @@ public sealed class FixedWritePublicationTests
         cache.CleanUp();
         cache.TryGetTask(1, out Task<TValue>? oldTask).Should().BeTrue();
         clock.Advance(TimeSpan.FromSeconds(5));
-
         Task<TValue> refresh = StartRefresh(cache);
         Task<TValue>[] readers = [];
         try
@@ -292,7 +292,6 @@ public sealed class FixedWritePublicationTests
         currentTask.Should().NotBeSameAs(oldTask);
         AssertValue(await currentTask, refreshedValue);
         AssertValue(await oldTask!, oldValue);
-
         // A complete new publication expires at t=15, not the old t=10 deadline.
         clock.Advance(TimeSpan.FromSeconds(5));
         cache.TryGet(1, out currentValue).Should().BeTrue();
@@ -331,7 +330,6 @@ public sealed class FixedWritePublicationTests
         cache.CleanUp();
         cache.TryGetTask(1, out Task<TValue>? oldTask).Should().BeTrue();
         clock.Advance(TimeSpan.FromSeconds(5));
-
         Task<TValue> refresh = StartRefresh(cache);
         Task<TValue>[] readers = [];
         Task<TValue>? publishedTask;
@@ -345,7 +343,6 @@ public sealed class FixedWritePublicationTests
             AssertValue(await publishedTask, refreshedValue);
             published.Release();
             await restoration.Entered.WaitAsync(Watchdog);
-
             // SetValue(old) has run while entry.Sync is held; the still-published
             // new snapshot must remain the complete reader-visible version.
             refresh.IsCompleted.Should().BeFalse();
@@ -374,7 +371,6 @@ public sealed class FixedWritePublicationTests
         AssertValue(await restoredTask, oldValue);
         AssertValue(await oldTask!, oldValue);
         AssertValue(await publishedTask, refreshedValue);
-
         // Rollback restores the old t=0 write time, so t=10 is hard-expired.
         clock.Advance(TimeSpan.FromSeconds(5) - TimeSpan.FromTicks(1));
         cache.TryGet(1, out restoredValue).Should().BeTrue();
@@ -492,9 +488,7 @@ public sealed class FixedWritePublicationTests
     private sealed class FailingPublicationHook(TimeSpan timeout) : IAsyncDisposable
     {
         private readonly BlockingTestHook _publication = new(timeout);
-
         internal Task Entered => _publication.Entered;
-
         internal bool TimedOut => _publication.TimedOut;
 
         internal void InvokeThenThrow()
@@ -512,7 +506,6 @@ public sealed class FixedWritePublicationTests
     {
         private readonly FakeTimeProvider _clock = new(DateTimeOffset.UnixEpoch);
         private readonly AsyncLocal<bool> _pauseNextTimestamp = new();
-
         public override long TimestampFrequency => _clock.TimestampFrequency;
 
         public override DateTimeOffset GetUtcNow() => _clock.GetUtcNow();

@@ -2,11 +2,9 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
 using LoadingCache.ReferenceStorage;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class ReferenceStorageTests
 {
     [Test]
@@ -15,7 +13,6 @@ public sealed class ReferenceStorageTests
         Key first = new(7);
         Key equalByValue = new(7);
         ReferenceKey<Key> handle = ReferenceKey<Key>.CreateWeak(first);
-
         handle.IdentityHash.Should().Be(RuntimeHelpers.GetHashCode(first));
         handle.Matches(first).Should().BeTrue();
         handle.Matches(equalByValue).Should().BeFalse();
@@ -27,7 +24,6 @@ public sealed class ReferenceStorageTests
     public void WeakKeyRejectsValueTypes()
     {
         Action create = () => ReferenceKey<int>.CreateWeak(42);
-
         create.Should().Throw<InvalidOperationException>();
     }
 
@@ -39,7 +35,6 @@ public sealed class ReferenceStorageTests
         ReferenceKey<Key> firstHandle = ReferenceKey<Key>.CreateWeakForTesting(first, 123);
         ReferenceKey<Key> secondHandle = ReferenceKey<Key>.CreateWeakForTesting(second, 123);
         IEqualityComparer<ReferenceKey<Key>> comparer = ReferenceKeyComparer<Key>.Instance;
-
         comparer.GetHashCode(firstHandle).Should().Be(comparer.GetHashCode(secondHandle));
         comparer.Equals(firstHandle, secondHandle).Should().BeFalse();
         firstHandle.Matches(first).Should().BeTrue();
@@ -53,7 +48,6 @@ public sealed class ReferenceStorageTests
         ThrowingKey equalByValue = new();
         ReferenceKey<ThrowingKey> handle = ReferenceKey<ThrowingKey>.CreateWeak(key);
         IEqualityComparer<object> comparer = WeakKeyObjectComparer<ThrowingKey>.Instance;
-
         comparer.Equals(handle, key).Should().BeTrue();
         comparer.Equals(key, handle).Should().BeTrue();
         comparer.Equals(handle, equalByValue).Should().BeFalse();
@@ -62,61 +56,12 @@ public sealed class ReferenceStorageTests
     }
 
     [Test]
-    public async Task WeakKeyObjectComparerDoesNotAllocateDuringRawLookupComparison()
-    {
-        if (
-            await AllocationTestProcess
-                .RunIsolatedIfNeededAsync("weak-comparer")
-                .ConfigureAwait(false)
-        )
-            return;
-        Key key = new(1);
-        ReferenceKey<Key> handle = ReferenceKey<Key>.CreateWeak(key);
-        IEqualityComparer<object> comparer = WeakKeyObjectComparer<Key>.Instance;
-
-        (long allocated, bool allMatches) = MeasureComparison(comparer, handle, key);
-        allMatches.Should().BeTrue();
-        allocated.Should().Be(0);
-    }
+    public Task WeakKeyObjectComparerDoesNotAllocateDuringRawLookupComparison() =>
+        AllocationTestProcess.VerifyAsync("weak-comparer");
 
     [Test]
-    public void RawComparisonMeasurementDetectsAllocatingComparer()
-    {
-        Key key = new(1);
-        ReferenceKey<Key> handle = ReferenceKey<Key>.CreateWeak(key);
-        IEqualityComparer<object> allocating = EqualityComparer<object>.Create(
-            (_, _) =>
-            {
-                GC.KeepAlive(new byte[1_024]);
-                return true;
-            }
-        );
-
-        (long allocated, bool allMatches) = MeasureComparison(allocating, handle, key);
-        allMatches.Should().BeTrue();
-        allocated.Should().BeGreaterThan(0);
-    }
-
-    // NoInlining keeps this kernel out of the async test; AggressiveOptimization
-    // compiles it before the allocation baseline. Otherwise OSR can grow the CLR
-    // CastCache during JIT cast analysis (6,192 B observed on Windows .NET 10).
-    // Keep the zero-byte assertion; only this measurement kernel bypasses tiering.
-    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
-    private static (long Allocated, bool AllMatches) MeasureComparison(
-        IEqualityComparer<object> comparer,
-        ReferenceKey<Key> handle,
-        Key key
-    )
-    {
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        bool allMatches = true;
-        for (int index = 0; index < 10_000; index++)
-        {
-            allMatches &= comparer.Equals(handle, key);
-        }
-
-        return (GC.GetAllocatedBytesForCurrentThread() - before, allMatches);
-    }
+    public Task RawComparisonMeasurementDetectsAllocatingComparer() =>
+        AllocationTestProcess.VerifyAsync("allocating-comparer");
 
     [Test]
     public void WeakKeyObjectComparerPreservesCollisionAndExactRemovalSemantics()
@@ -133,9 +78,7 @@ public sealed class ReferenceStorageTests
             [deadHandle] = "dead",
             [liveHandle] = "live",
         };
-
         ForceCollection(deadKey);
-
         map.TryGetValue(liveKey, out string? value).Should().BeTrue();
         value.Should().Be("live");
         ((ICollection<KeyValuePair<object, string>>)map)
@@ -156,7 +99,6 @@ public sealed class ReferenceStorageTests
         object newGeneration = new();
         map[handle] = oldGeneration;
         map[handle] = newGeneration;
-
         ((ICollection<KeyValuePair<object, object>>)map)
             .Remove(new KeyValuePair<object, object>(handle, oldGeneration))
             .Should()
@@ -175,9 +117,7 @@ public sealed class ReferenceStorageTests
         {
             [handle] = "old",
         };
-
         ForceCollection(weakKey);
-
         handle.IsCollected.Should().BeTrue();
         map.TryRemove(handle, out string? removed).Should().BeTrue();
         removed.Should().Be("old");
@@ -197,9 +137,7 @@ public sealed class ReferenceStorageTests
             [deadHandle] = "dead",
             [liveHandle] = "live",
         };
-
         ForceCollection(deadKey);
-
         ReferenceKey<Key> probe = ReferenceKey<Key>.CreateProbeForTesting(liveKey, 456);
         map.TryGetValue(probe, out string? value).Should().BeTrue();
         value.Should().Be("live");
@@ -221,13 +159,11 @@ public sealed class ReferenceStorageTests
         object newGeneration = new();
         map[handle] = oldGeneration;
         map[handle] = newGeneration;
-
         ICollection<KeyValuePair<ReferenceKey<Key>, object>> entries = map;
         entries
             .Remove(new KeyValuePair<ReferenceKey<Key>, object>(handle, oldGeneration))
             .Should()
             .BeFalse();
-
         map[handle].Should().BeSameAs(newGeneration);
     }
 
@@ -235,9 +171,7 @@ public sealed class ReferenceStorageTests
     public void WeakValueReturnsLiveTargetAndDoesNotStronglyRootIt()
     {
         (ReferenceValue<Value> holder, WeakReference weakValue) = CreateWeakValue();
-
         ForceCollection(weakValue);
-
         holder.IsCollected.Should().BeTrue();
         holder.TryGetValue(out _).Should().BeFalse();
     }
@@ -246,7 +180,6 @@ public sealed class ReferenceStorageTests
     public void WeakValueRejectsValueTypes()
     {
         Action create = () => ReferenceValue<int>.Weak(42);
-
         create.Should().Throw<InvalidOperationException>();
     }
 
@@ -255,7 +188,6 @@ public sealed class ReferenceStorageTests
     {
         Value value = new();
         ReferenceValue<Value> holder = ReferenceValue<Value>.Weak(value);
-
         holder.IsCollected.Should().BeFalse();
         holder.TryGetValue(out Value? actual).Should().BeTrue();
         actual.Should().BeSameAs(value);
@@ -266,7 +198,6 @@ public sealed class ReferenceStorageTests
     public void WeakValueRejectsNull()
     {
         Action create = () => ReferenceValue<Value>.Weak(null!);
-
         create.Should().Throw<ArgumentNullException>();
     }
 

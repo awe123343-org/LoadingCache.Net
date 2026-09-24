@@ -1,9 +1,7 @@
 using FluentAssertions;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class BlockingTestHookTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
@@ -13,12 +11,10 @@ public sealed class BlockingTestHookTests
     {
         BlockingTestHook hook = new(TestTimeout);
         Task invocation = Task.Run(hook.Invoke);
-
         try
         {
             await hook.Entered.WaitAsync(TestTimeout, CancellationToken.None);
             await hook.DisposeAsync();
-
             await invocation.WaitAsync(TestTimeout, CancellationToken.None);
             hook.Returned.IsCompleted.Should().BeTrue();
             hook.TimedOut.Should().BeFalse();
@@ -34,11 +30,9 @@ public sealed class BlockingTestHookTests
     public async Task LateInvocationAfterDisposeIsSafe()
     {
         BlockingTestHook hook = new(TestTimeout);
-
         try
         {
             await hook.DisposeAsync();
-
             Action invoke = hook.Invoke;
             invoke.Should().NotThrow();
             hook.Entered.IsCompleted.Should().BeFalse();
@@ -54,12 +48,10 @@ public sealed class BlockingTestHookTests
     public async Task RepeatedCleanupAndReleaseAreSafe()
     {
         BlockingTestHook hook = new(TestTimeout);
-
         try
         {
             ValueTask firstDispose = hook.DisposeAsync();
             ValueTask secondDispose = hook.DisposeAsync();
-
             await firstDispose;
             await secondDispose;
             hook.Release();
@@ -76,7 +68,6 @@ public sealed class BlockingTestHookTests
     {
         BlockingTestHook hook = new(TestTimeout);
         Task invocation = Task.Run(hook.Invoke);
-
         try
         {
             await hook.Entered.WaitAsync(TestTimeout, CancellationToken.None);

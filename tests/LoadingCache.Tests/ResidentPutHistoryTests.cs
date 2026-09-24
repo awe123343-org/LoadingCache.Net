@@ -1,17 +1,15 @@
 using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
-using NUnit.Framework;
 
 namespace LoadingCache.Tests;
 
-[TestFixture]
 public sealed class ResidentPutHistoryTests
 {
-    [TestCase(false, false)]
-    [TestCase(false, true)]
-    [TestCase(true, false)]
-    [TestCase(true, true)]
-    [Parallelizable(ParallelScope.All)]
+    [Test]
+    [Arguments(false, false)]
+    [Arguments(false, true)]
+    [Arguments(true, false)]
+    [Arguments(true, true)]
     public async Task MissingComputeRetriesAfterPublicationAndAutomaticRemoval(
         bool replace,
         bool rollover
@@ -27,6 +25,7 @@ public sealed class ResidentPutHistoryTests
         {
             engine.SetDictionaryMutationSequenceForTesting(long.MaxValue);
         }
+
         var transform = new MissingTransform();
         Task<CacheMutation<string>> compute = StartCompute(cache, transform);
         try
@@ -37,6 +36,7 @@ public sealed class ResidentPutHistoryTests
             {
                 cache.Put(1, "replacement");
             }
+
             cache.CleanUp();
             MemoryPressureSnapshot snapshot = engine.CaptureMemoryPressureSnapshot(1, 1)!;
             snapshot.Candidates.Should().ContainSingle();
@@ -54,9 +54,9 @@ public sealed class ResidentPutHistoryTests
         cache.AssertInvariants();
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    [Parallelizable(ParallelScope.All)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task MissingSnapshotHonorsInvalidationWithoutDependingOnUnrelatedResidentWrites(
         bool invalidate
     )
@@ -83,6 +83,7 @@ public sealed class ResidentPutHistoryTests
             transform.Release.TrySetResult();
             await compute.WaitAsync(TimeSpan.FromSeconds(5));
         }
+
         transform.Calls.Should().Be(invalidate ? 2 : 1);
         cache.AsDictionary()[1].Should().Be(invalidate ? "retried" : "stale");
     }
@@ -108,7 +109,6 @@ public sealed class ResidentPutHistoryTests
         );
 
     [Test]
-    [Parallelizable]
     public void ComputeDoesNotRetryBecauseItsOwnSnapshotRemovedAnExpiredEntry()
     {
         var clock = new FakeTimeProvider();
@@ -122,7 +122,6 @@ public sealed class ResidentPutHistoryTests
         cache.Put(1, "expired");
         clock.Advance(TimeSpan.FromSeconds(1));
         int calls = 0;
-
         cache
             .AsDictionary()
             .Compute(
@@ -134,7 +133,6 @@ public sealed class ResidentPutHistoryTests
                     return CacheMutation.Set("new");
                 }
             );
-
         calls.Should().Be(1);
         cache.AsDictionary()[1].Should().Be("new");
     }

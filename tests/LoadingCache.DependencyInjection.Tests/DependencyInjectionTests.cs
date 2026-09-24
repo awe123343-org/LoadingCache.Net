@@ -2,11 +2,9 @@ using System.Globalization;
 using FluentAssertions;
 using LoadingCache.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
-using NUnit.Framework;
 
 namespace LoadingCache.DependencyInjection.Tests;
 
-[TestFixture]
 public sealed class DependencyInjectionTests
 {
     [Test]
@@ -15,15 +13,12 @@ public sealed class DependencyInjectionTests
         ServiceCollection services = new();
         services.AddCache<int, string>(Configure, "named");
         services.AddCache<int, string>(Configure);
-
         using ServiceProvider provider = services.BuildServiceProvider();
         ICache<int, string> unnamed = provider.GetRequiredService<ICache<int, string>>();
         ICache<int, string> named = provider.GetRequiredKeyedService<ICache<int, string>>("named");
-
         provider.GetRequiredService<ICache<int, string>>().Should().BeSameAs(unnamed);
         provider.GetRequiredKeyedService<ICache<int, string>>("named").Should().BeSameAs(named);
         named.Should().NotBeSameAs(unnamed);
-
         unnamed.Put(1, "unnamed");
         named.Put(1, "named");
         unnamed.TryGet(1, out string? unnamedValue).Should().BeTrue();
@@ -38,12 +33,15 @@ public sealed class DependencyInjectionTests
         ServiceCollection services = new();
         services.AddCache<int, string>(Configure);
         services.AddCache<string, string>(Configure);
-
         using ServiceProvider provider = services.BuildServiceProvider();
-        provider
-            .GetRequiredService<ICache<int, string>>()
-            .Should()
-            .NotBeSameAs(provider.GetRequiredService<ICache<string, string>>());
+        ICache<int, string> integers = provider.GetRequiredService<ICache<int, string>>();
+        ICache<string, string> strings = provider.GetRequiredService<ICache<string, string>>();
+        integers.Put(1, "integer");
+        strings.Put("1", "string");
+        integers.TryGet(1, out string? integerValue).Should().BeTrue();
+        strings.TryGet("1", out string? stringValue).Should().BeTrue();
+        integerValue.Should().Be("integer");
+        stringValue.Should().Be("string");
     }
 
     [Test]
@@ -55,12 +53,10 @@ public sealed class DependencyInjectionTests
             Configure,
             static (provider, key) => provider.GetRequiredService<LoaderPrefix>().Value + key
         );
-
         using ServiceProvider provider = services.BuildServiceProvider();
         ILoadingCache<int, string> cache = provider.GetRequiredService<
             ILoadingCache<int, string>
         >();
-
         cache.Get(7).Should().Be("prefix-7");
     }
 
@@ -79,13 +75,11 @@ public sealed class DependencyInjectionTests
             "async-loading"
         );
         services.AddSingleton(_ => new LoaderPrefix("prefix-"));
-
         await using ServiceProvider provider = services.BuildServiceProvider();
         IAsyncCache<int, string> manual = provider.GetRequiredService<IAsyncCache<int, string>>();
         IAsyncLoadingCache<int, string> loading = provider.GetRequiredKeyedService<
             IAsyncLoadingCache<int, string>
         >("async-loading");
-
         (await manual.GetOrAddAsync(1, static (key, _) => Task.FromResult($"manual-{key}")))
             .Should()
             .Be("manual-1");
@@ -106,14 +100,12 @@ public sealed class DependencyInjectionTests
                 return scope.ServiceProvider.GetRequiredService<ScopedLoaderValue>().Value + key;
             }
         );
-
         await using ServiceProvider provider = services.BuildServiceProvider(
             new ServiceProviderOptions { ValidateScopes = true }
         );
         IAsyncLoadingCache<int, string> cache = provider.GetRequiredService<
             IAsyncLoadingCache<int, string>
         >();
-
         (await cache.GetAsync(3)).Should().Be("scoped-3");
     }
 
@@ -122,13 +114,11 @@ public sealed class DependencyInjectionTests
     {
         ServiceCollection services = new();
         services.AddCache<int, string>(_ => { });
-
         Action resolve = () =>
         {
             using ServiceProvider provider = services.BuildServiceProvider();
             _ = provider.GetRequiredService<ICache<int, string>>();
         };
-
         resolve.Should().Throw<InvalidOperationException>().WithMessage("*MaximumSize*");
     }
 
@@ -138,7 +128,6 @@ public sealed class DependencyInjectionTests
         ServiceCollection services = new();
         Action blank = () => services.AddCache<int, string>(Configure, " ");
         blank.Should().Throw<ArgumentException>();
-
         services.AddCache<int, string>(Configure, "same");
         Action duplicate = () => services.AddCache<int, string>(Configure, "same");
         duplicate.Should().Throw<InvalidOperationException>().WithMessage("*already registered*");
@@ -151,7 +140,6 @@ public sealed class DependencyInjectionTests
         Action nullConfiguration = () => services.AddCache<int, string>(null!);
         Action nullSyncLoader = () => services.AddLoadingCache<int, string>(Configure, null!);
         Action nullAsyncLoader = () => services.AddAsyncLoadingCache<int, string>(Configure, null!);
-
         nullConfiguration.Should().Throw<ArgumentNullException>();
         nullSyncLoader.Should().Throw<ArgumentNullException>();
         nullAsyncLoader.Should().Throw<ArgumentNullException>();
@@ -162,13 +150,10 @@ public sealed class DependencyInjectionTests
     {
         ServiceCollection services = new();
         services.AddCache<int, string>(Configure);
-
         ServiceProvider provider = services.BuildServiceProvider();
         ICache<int, string> cache = provider.GetRequiredService<ICache<int, string>>();
         cache.Put(1, "one");
-
         provider.Dispose();
-
         Action useDisposed = () => cache.Put(2, "two");
         useDisposed.Should().Throw<ObjectDisposedException>();
     }
@@ -181,15 +166,12 @@ public sealed class DependencyInjectionTests
             Configure,
             static (_, key, _) => Task.FromResult(key.ToString(CultureInfo.InvariantCulture))
         );
-
         ServiceProvider provider = services.BuildServiceProvider();
         IAsyncLoadingCache<int, string> cache = provider.GetRequiredService<
             IAsyncLoadingCache<int, string>
         >();
         (await cache.GetAsync(4)).Should().Be("4");
-
         await provider.DisposeAsync();
-
         Func<Task> useDisposed = async () => await cache.GetAsync(5);
         await useDisposed.Should().ThrowAsync<ObjectDisposedException>();
     }
