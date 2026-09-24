@@ -1,3 +1,5 @@
+using FluentAssertions;
+
 namespace LoadingCache.Tests;
 
 public sealed class BlockingTestHookTests
@@ -14,8 +16,8 @@ public sealed class BlockingTestHookTests
             await hook.Entered.WaitAsync(TestTimeout, CancellationToken.None);
             await hook.DisposeAsync();
             await invocation.WaitAsync(TestTimeout, CancellationToken.None);
-            await Assert.That(hook.Returned.IsCompleted).IsTrue();
-            await Assert.That(hook.TimedOut).IsFalse();
+            hook.Returned.IsCompleted.Should().BeTrue();
+            hook.TimedOut.Should().BeFalse();
         }
         finally
         {
@@ -32,9 +34,9 @@ public sealed class BlockingTestHookTests
         {
             await hook.DisposeAsync();
             Action invoke = hook.Invoke;
-            await Assert.That(invoke).ThrowsNothing();
-            await Assert.That(hook.Entered.IsCompleted).IsFalse();
-            await Assert.That(hook.Returned.IsCompleted).IsFalse();
+            invoke.Should().NotThrow();
+            hook.Entered.IsCompleted.Should().BeFalse();
+            hook.Returned.IsCompleted.Should().BeFalse();
         }
         finally
         {
@@ -78,7 +80,7 @@ public sealed class BlockingTestHookTests
             await invocation.WaitAsync(TestTimeout, CancellationToken.None);
         }
 
-        await Assert.That(hook.Returned.IsCompleted).IsTrue();
-        await Assert.That(hook.TimedOut).IsFalse();
+        hook.Returned.IsCompleted.Should().BeTrue();
+        hook.TimedOut.Should().BeFalse();
     }
 }

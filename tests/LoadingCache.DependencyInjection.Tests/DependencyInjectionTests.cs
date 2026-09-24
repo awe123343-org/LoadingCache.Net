@@ -1,4 +1,5 @@
 using System.Globalization;
+using FluentAssertions;
 using LoadingCache.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -7,7 +8,7 @@ namespace LoadingCache.DependencyInjection.Tests;
 public sealed class DependencyInjectionTests
 {
     [Test]
-    public async Task RegistersUnnamedAndNamedCachesAsSeparateSingletons()
+    public void RegistersUnnamedAndNamedCachesAsSeparateSingletons()
     {
         ServiceCollection services = new();
         services.AddCache<int, string>(Configure, "named");
@@ -15,45 +16,36 @@ public sealed class DependencyInjectionTests
         using ServiceProvider provider = services.BuildServiceProvider();
         ICache<int, string> unnamed = provider.GetRequiredService<ICache<int, string>>();
         ICache<int, string> named = provider.GetRequiredKeyedService<ICache<int, string>>("named");
-        await Assert
-            .That(ReferenceEquals(provider.GetRequiredService<ICache<int, string>>(), unnamed))
-            .IsTrue();
-        await Assert
-            .That(
-                ReferenceEquals(
-                    provider.GetRequiredKeyedService<ICache<int, string>>("named"),
-                    named
-                )
-            )
-            .IsTrue();
-        await Assert.That(ReferenceEquals(named, unnamed)).IsFalse();
+        provider.GetRequiredService<ICache<int, string>>().Should().BeSameAs(unnamed);
+        provider.GetRequiredKeyedService<ICache<int, string>>("named").Should().BeSameAs(named);
+        named.Should().NotBeSameAs(unnamed);
         unnamed.Put(1, "unnamed");
         named.Put(1, "named");
-        await Assert.That(unnamed.TryGet(1, out string? unnamedValue)).IsTrue();
-        await Assert.That(named.TryGet(1, out string? namedValue)).IsTrue();
-        await Assert.That(unnamedValue).IsEqualTo("unnamed");
-        await Assert.That(namedValue).IsEqualTo("named");
+        unnamed.TryGet(1, out string? unnamedValue).Should().BeTrue();
+        named.TryGet(1, out string? namedValue).Should().BeTrue();
+        unnamedValue.Should().Be("unnamed");
+        namedValue.Should().Be("named");
     }
 
     [Test]
-    public async Task DifferentGenericServiceTypesAreIsolated()
+    public void DifferentGenericServiceTypesAreIsolated()
     {
         ServiceCollection services = new();
         services.AddCache<int, string>(Configure);
         services.AddCache<string, string>(Configure);
         using ServiceProvider provider = services.BuildServiceProvider();
-        await Assert
-            .That(
-                ReferenceEquals(
-                    provider.GetRequiredService<ICache<int, string>>(),
-                    provider.GetRequiredService<ICache<string, string>>()
-                )
-            )
-            .IsFalse();
+        ICache<int, string> integers = provider.GetRequiredService<ICache<int, string>>();
+        ICache<string, string> strings = provider.GetRequiredService<ICache<string, string>>();
+        integers.Put(1, "integer");
+        strings.Put("1", "string");
+        integers.TryGet(1, out string? integerValue).Should().BeTrue();
+        strings.TryGet("1", out string? stringValue).Should().BeTrue();
+        integerValue.Should().Be("integer");
+        stringValue.Should().Be("string");
     }
 
     [Test]
-    public async Task BuildsSynchronousLoadingCacheWithTheProviderCallback()
+    public void BuildsSynchronousLoadingCacheWithTheProviderCallback()
     {
         ServiceCollection services = new();
         services.AddSingleton(_ => new LoaderPrefix("prefix-"));
@@ -65,7 +57,7 @@ public sealed class DependencyInjectionTests
         ILoadingCache<int, string> cache = provider.GetRequiredService<
             ILoadingCache<int, string>
         >();
-        await Assert.That(cache.Get(7)).IsEqualTo("prefix-7");
+        cache.Get(7).Should().Be("prefix-7");
     }
 
     [Test]
@@ -75,7 +67,7 @@ public sealed class DependencyInjectionTests
         services.AddAsyncCache<int, string>(Configure);
         services.AddAsyncLoadingCache<int, string>(
             Configure,
-            (provider, key, cancellationToken) =>
+            static (provider, key, cancellationToken) =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 return Task.FromResult(provider.GetRequiredService<LoaderPrefix>().Value + key);
@@ -88,12 +80,10 @@ public sealed class DependencyInjectionTests
         IAsyncLoadingCache<int, string> loading = provider.GetRequiredKeyedService<
             IAsyncLoadingCache<int, string>
         >("async-loading");
-        await Assert
-            .That(
-                (await manual.GetOrAddAsync(1, static (key, _) => Task.FromResult($"manual-{key}")))
-            )
-            .IsEqualTo("manual-1");
-        await Assert.That((await loading.GetAsync(2))).IsEqualTo("prefix-2");
+        (await manual.GetOrAddAsync(1, static (key, _) => Task.FromResult($"manual-{key}")))
+            .Should()
+            .Be("manual-1");
+        (await loading.GetAsync(2)).Should().Be("prefix-2");
     }
 
     [Test]
@@ -103,7 +93,7 @@ public sealed class DependencyInjectionTests
         services.AddScoped(_ => new ScopedLoaderValue("scoped-"));
         services.AddAsyncLoadingCache<int, string>(
             Configure,
-            async (provider, key, cancellationToken) =>
+            static async (provider, key, cancellationToken) =>
             {
                 await using AsyncServiceScope scope = provider.CreateAsyncScope();
                 cancellationToken.ThrowIfCancellationRequested();
@@ -116,11 +106,11 @@ public sealed class DependencyInjectionTests
         IAsyncLoadingCache<int, string> cache = provider.GetRequiredService<
             IAsyncLoadingCache<int, string>
         >();
-        await Assert.That((await cache.GetAsync(3))).IsEqualTo("scoped-3");
+        (await cache.GetAsync(3)).Should().Be("scoped-3");
     }
 
     [Test]
-    public async Task DefersBuilderValidationUntilTheSingletonIsResolved()
+    public void DefersBuilderValidationUntilTheSingletonIsResolved()
     {
         ServiceCollection services = new();
         services.AddCache<int, string>(_ => { });
@@ -129,40 +119,34 @@ public sealed class DependencyInjectionTests
             using ServiceProvider provider = services.BuildServiceProvider();
             _ = provider.GetRequiredService<ICache<int, string>>();
         };
-        await Assert
-            .That(resolve)
-            .Throws<InvalidOperationException>()
-            .WithMessageMatching("*MaximumSize*");
+        resolve.Should().Throw<InvalidOperationException>().WithMessage("*MaximumSize*");
     }
 
     [Test]
-    public async Task RejectsInvalidNamesAndDuplicateRegistrationsImmediately()
+    public void RejectsInvalidNamesAndDuplicateRegistrationsImmediately()
     {
         ServiceCollection services = new();
         Action blank = () => services.AddCache<int, string>(Configure, " ");
-        await Assert.That(blank).Throws<ArgumentException>();
+        blank.Should().Throw<ArgumentException>();
         services.AddCache<int, string>(Configure, "same");
         Action duplicate = () => services.AddCache<int, string>(Configure, "same");
-        await Assert
-            .That(duplicate)
-            .Throws<InvalidOperationException>()
-            .WithMessageMatching("*already registered*");
+        duplicate.Should().Throw<InvalidOperationException>().WithMessage("*already registered*");
     }
 
     [Test]
-    public async Task RejectsNullConfigurationAndLoaderArguments()
+    public void RejectsNullConfigurationAndLoaderArguments()
     {
         ServiceCollection services = new();
         Action nullConfiguration = () => services.AddCache<int, string>(null!);
         Action nullSyncLoader = () => services.AddLoadingCache<int, string>(Configure, null!);
         Action nullAsyncLoader = () => services.AddAsyncLoadingCache<int, string>(Configure, null!);
-        await Assert.That(nullConfiguration).Throws<ArgumentNullException>();
-        await Assert.That(nullSyncLoader).Throws<ArgumentNullException>();
-        await Assert.That(nullAsyncLoader).Throws<ArgumentNullException>();
+        nullConfiguration.Should().Throw<ArgumentNullException>();
+        nullSyncLoader.Should().Throw<ArgumentNullException>();
+        nullAsyncLoader.Should().Throw<ArgumentNullException>();
     }
 
     [Test]
-    public async Task SyncProviderDisposalStopsTheResolvedCache()
+    public void SyncProviderDisposalStopsTheResolvedCache()
     {
         ServiceCollection services = new();
         services.AddCache<int, string>(Configure);
@@ -171,7 +155,7 @@ public sealed class DependencyInjectionTests
         cache.Put(1, "one");
         provider.Dispose();
         Action useDisposed = () => cache.Put(2, "two");
-        await Assert.That(useDisposed).Throws<ObjectDisposedException>();
+        useDisposed.Should().Throw<ObjectDisposedException>();
     }
 
     [Test]
@@ -186,10 +170,10 @@ public sealed class DependencyInjectionTests
         IAsyncLoadingCache<int, string> cache = provider.GetRequiredService<
             IAsyncLoadingCache<int, string>
         >();
-        await Assert.That((await cache.GetAsync(4))).IsEqualTo("4");
+        (await cache.GetAsync(4)).Should().Be("4");
         await provider.DisposeAsync();
         Func<Task> useDisposed = async () => await cache.GetAsync(5);
-        await Assert.That(useDisposed).Throws<ObjectDisposedException>();
+        await useDisposed.Should().ThrowAsync<ObjectDisposedException>();
     }
 
     private static void Configure<TKey, TValue>(CacheBuilder<TKey, TValue> builder)

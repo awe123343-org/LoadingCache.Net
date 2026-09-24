@@ -1,3 +1,4 @@
+using FluentAssertions;
 using LoadingCache.Maintenance;
 using LoadingCache.Policy;
 
@@ -6,7 +7,7 @@ namespace LoadingCache.Tests;
 public sealed class ColdStartPolicyTests
 {
     [Test]
-    public async Task LazySketchStaysColdUntilTheResidentHalfCapacityThreshold()
+    public void LazySketchStaysColdUntilTheResidentHalfCapacityThreshold()
     {
         WindowTinyLfuPolicy<int> policy = new(
             maximum: 4,
@@ -14,23 +15,23 @@ public sealed class ColdStartPolicyTests
             maximumCount: 4,
             lazySketch: true
         );
-        await Assert.That(policy.IsSketchInitialized).IsFalse();
+        policy.IsSketchInitialized.Should().BeFalse();
         policy.Add(new PolicyNode<int>(1, 1, Hash(1)));
-        await Assert.That(policy.MissesInSample).IsEqualTo(1);
-        await Assert.That(policy.IsSketchInitialized).IsFalse();
+        policy.MissesInSample.Should().Be(1);
+        policy.IsSketchInitialized.Should().BeFalse();
         policy.Maintain();
-        await Assert.That(policy.MissesInSample).IsEqualTo(0);
-        await Assert.That(policy.IsSketchInitialized).IsFalse();
+        policy.MissesInSample.Should().Be(0);
+        policy.IsSketchInitialized.Should().BeFalse();
         policy.Add(new PolicyNode<int>(2, 1, Hash(2)));
-        await Assert.That(policy.IsSketchInitialized).IsTrue();
-        await Assert.That(policy.SketchSampleSize).IsGreaterThan(0);
+        policy.IsSketchInitialized.Should().BeTrue();
+        policy.SketchSampleSize.Should().BeGreaterThan(0);
     }
 
     [Test]
     [Arguments(1)]
     [Arguments(2)]
     [Arguments(3)]
-    public async Task LazySketchInitializesForTinyCapacities(int maximum)
+    public void LazySketchInitializesForTinyCapacities(int maximum)
     {
         WindowTinyLfuPolicy<int> policy = new(
             maximum,
@@ -39,31 +40,31 @@ public sealed class ColdStartPolicyTests
             lazySketch: true
         );
         policy.Add(new PolicyNode<int>(1, 1, Hash(1)));
-        await Assert.That(policy.IsSketchInitialized).IsTrue();
+        policy.IsSketchInitialized.Should().BeTrue();
     }
 
     [Test]
-    public async Task SetMaximumInitializesTheSketchAndClearCreatesAColdPolicy()
+    public void SetMaximumInitializesTheSketchAndClearCreatesAColdPolicy()
     {
         using WindowTinyLfuEnginePolicy policy = CreateEnginePolicy(maximum: 4);
         WindowTinyLfuEnginePolicy.EngineEntryToken first = CreateToken(1);
         WindowTinyLfuEnginePolicy.EngineEntryToken second = CreateToken(2);
-        await Assert.That(policy.IsSketchInitialized).IsFalse();
+        policy.IsSketchInitialized.Should().BeFalse();
         policy.SetMaximum(4, weighted: false);
-        await Assert.That(policy.IsSketchInitialized).IsTrue();
+        policy.IsSketchInitialized.Should().BeTrue();
         policy.OnPublish(first, 1);
         policy.OnPublish(second, 1);
         policy.FlushWrites();
-        await Assert.That(policy.ResidentCount).IsEqualTo(2);
+        policy.ResidentCount.Should().Be(2);
         policy.Clear();
-        await Assert.That(policy.ResidentCount).IsEqualTo(0);
-        await Assert.That(policy.IsSketchInitialized).IsFalse();
+        policy.ResidentCount.Should().Be(0);
+        policy.IsSketchInitialized.Should().BeFalse();
         policy.OnAccess(first);
-        await Assert.That(policy.GetReadBufferStatistics().Enqueued).IsEqualTo(0);
+        policy.GetReadBufferStatistics().Enqueued.Should().Be(0);
     }
 
     [Test]
-    public async Task EligibleSizeCacheBypassesReadTransportDuringColdStart()
+    public void EligibleSizeCacheBypassesReadTransportDuringColdStart()
     {
         ManualScheduler scheduler = new();
         CacheEngine<int, string> engine = new(
@@ -80,13 +81,13 @@ public sealed class ColdStartPolicyTests
         using Cache<int, string> cache = new(engine);
         cache.Put(1, "value");
         scheduler.RunAll();
-        await Assert.That(cache.TryGet(1, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("value");
-        await Assert.That(engine.GetPolicyReadBufferStatistics().Enqueued).IsEqualTo(0);
+        cache.TryGet(1, out string? value).Should().BeTrue();
+        value.Should().Be("value");
+        engine.GetPolicyReadBufferStatistics().Enqueued.Should().Be(0);
     }
 
     [Test]
-    public async Task EligibleSizeCacheStartsRecordingReadsAfterTheThreshold()
+    public void EligibleSizeCacheStartsRecordingReadsAfterTheThreshold()
     {
         ManualScheduler scheduler = new();
         CacheEngine<int, string> engine = CreateSizeEngine(
@@ -98,12 +99,12 @@ public sealed class ColdStartPolicyTests
         cache.Put(1, "one");
         cache.Put(2, "two");
         scheduler.RunAll();
-        await Assert.That(cache.TryGet(1, out _)).IsTrue();
-        await Assert.That(engine.GetPolicyReadBufferStatistics().Enqueued).IsEqualTo(1);
+        cache.TryGet(1, out _).Should().BeTrue();
+        engine.GetPolicyReadBufferStatistics().Enqueued.Should().Be(1);
     }
 
     [Test]
-    public async Task ColdStartBypassDoesNotSuppressEnabledHitStatistics()
+    public void ColdStartBypassDoesNotSuppressEnabledHitStatistics()
     {
         ManualScheduler scheduler = new();
         CacheEngine<int, string> engine = CreateSizeEngine(
@@ -114,9 +115,9 @@ public sealed class ColdStartPolicyTests
         using Cache<int, string> cache = new(engine);
         cache.Put(1, "value");
         scheduler.RunAll();
-        await Assert.That(cache.TryGet(1, out _)).IsTrue();
-        await Assert.That(cache.Statistics.Hits).IsEqualTo(1);
-        await Assert.That(engine.GetPolicyReadBufferStatistics().Enqueued).IsEqualTo(0);
+        cache.TryGet(1, out _).Should().BeTrue();
+        cache.Statistics.Hits.Should().Be(1);
+        engine.GetPolicyReadBufferStatistics().Enqueued.Should().Be(0);
     }
 
     [Test]
@@ -126,9 +127,7 @@ public sealed class ColdStartPolicyTests
     [Arguments(ColdStartExclusion.RefreshAfterWrite)]
     [Arguments(ColdStartExclusion.WeakValues)]
     [Arguments(ColdStartExclusion.MaximumWeight)]
-    public async Task ColdStartIsDisabledForUnsupportedFeatureCombinations(
-        ColdStartExclusion exclusion
-    )
+    public void ColdStartIsDisabledForUnsupportedFeatureCombinations(ColdStartExclusion exclusion)
     {
         ManualScheduler scheduler = new();
         CacheEngineOptions<int, string> options = new()
@@ -155,12 +154,12 @@ public sealed class ColdStartPolicyTests
         using Cache<int, string> cache = new(engine);
         cache.Put(1, "value");
         scheduler.RunAll();
-        await Assert.That(cache.TryGet(1, out _)).IsTrue();
-        await Assert.That(engine.GetPolicyReadBufferStatistics().Enqueued).IsEqualTo(1);
+        cache.TryGet(1, out _).Should().BeTrue();
+        engine.GetPolicyReadBufferStatistics().Enqueued.Should().Be(1);
     }
 
     [Test]
-    public async Task QueuedReadFromAnOldGenerationCannotTouchEntriesAfterClear()
+    public void QueuedReadFromAnOldGenerationCannotTouchEntriesAfterClear()
     {
         using WindowTinyLfuEnginePolicy policy = new(
             maximum: 2,
@@ -182,10 +181,11 @@ public sealed class ColdStartPolicyTests
         policy.OnPublish(first, 1);
         policy.OnPublish(second, 1);
         policy.CleanUp();
-        await Assert
-            .That(policy.Snapshot(hottest: true, limit: 4))
-            .IsEquivalentTo([first.Entry, second.Entry]);
-        await Assert.That(policy.GetReadBufferStatistics().Queued).IsEqualTo(0);
+        policy
+            .Snapshot(hottest: true, limit: 4)
+            .Should()
+            .BeEquivalentTo([first.Entry, second.Entry]);
+        policy.GetReadBufferStatistics().Queued.Should().Be(0);
     }
 
     private static CacheEngine<int, string> CreateSizeEngine(

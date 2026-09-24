@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
 
 namespace LoadingCache.Tests;
@@ -46,13 +47,13 @@ public sealed class SynchronousEvictionRaceTests
                 TaskScheduler.Default
             );
             await second.Entered.WaitAsync(Timeout);
-            await Assert.That(firstPut.IsCompleted).IsFalse();
-            await Assert.That(secondPut.IsCompleted).IsFalse();
+            firstPut.IsCompleted.Should().BeFalse();
+            secondPut.IsCompleted.Should().BeFalse();
             first.Release();
             await firstPut.WaitAsync(Timeout);
-            await Assert.That(secondPut.IsCompleted).IsFalse();
+            secondPut.IsCompleted.Should().BeFalse();
             await Task.Run(cache.Dispose).WaitAsync(Timeout);
-            await Assert.That(secondPut.IsCompleted).IsFalse();
+            secondPut.IsCompleted.Should().BeFalse();
         }
         finally
         {
@@ -61,9 +62,9 @@ public sealed class SynchronousEvictionRaceTests
             await Task.WhenAll(firstPut, secondPut).WaitAsync(Timeout);
         }
 
-        await Assert.That(notifications).IsEquivalentTo([1, 2]);
-        await Assert.That(first.TimedOut).IsFalse();
-        await Assert.That(second.TimedOut).IsFalse();
+        notifications.Should().BeEquivalentTo([1, 2]);
+        first.TimedOut.Should().BeFalse();
+        second.TimedOut.Should().BeFalse();
     }
 
     [Test]
@@ -91,11 +92,10 @@ public sealed class SynchronousEvictionRaceTests
         mutation.Cache = cache;
         cache.Put(1, 1);
         await mutation.Pending.WaitAsync(Timeout);
-        await Assert
-            .That(mutation.Finished)
-            .IsTrue()
-            .Because("no engine, entry, policy, or timer lock may surround the callback");
-        await Assert.That(notifications).IsEquivalentTo([1, 2]);
+        mutation
+            .Finished.Should()
+            .BeTrue("no engine, entry, policy, or timer lock may surround the callback");
+        notifications.Should().BeEquivalentTo([1, 2]);
     }
 
     [Test]
@@ -124,16 +124,16 @@ public sealed class SynchronousEvictionRaceTests
         try
         {
             await callback.Entered.WaitAsync(Timeout);
-            await Assert.That(waiting.IsCompleted).IsFalse();
+            waiting.IsCompleted.Should().BeFalse();
         }
         finally
         {
             callback.Release();
-            await Assert.That((await waiting.WaitAsync(Timeout))).IsEqualTo(1);
+            (await waiting.WaitAsync(Timeout)).Should().Be(1);
         }
 
-        await Assert.That(calls).IsEqualTo(1);
-        await Assert.That(callback.TimedOut).IsFalse();
+        calls.Should().Be(1);
+        callback.TimedOut.Should().BeFalse();
     }
 
     [Test]
@@ -170,16 +170,16 @@ public sealed class SynchronousEvictionRaceTests
         try
         {
             await callback.Entered.WaitAsync(Timeout);
-            await Assert.That(waiting.IsCompleted).IsFalse();
+            waiting.IsCompleted.Should().BeFalse();
         }
         finally
         {
             callback.Release();
-            await Assert.That((await waiting.WaitAsync(Timeout)).Count).IsEqualTo(2);
+            (await waiting.WaitAsync(Timeout)).Count.Should().Be(2);
         }
 
-        await Assert.That(notifications).IsEquivalentTo([1, 2, 3]);
-        await Assert.That(callback.TimedOut).IsFalse();
+        notifications.Should().BeEquivalentTo([1, 2, 3]);
+        callback.TimedOut.Should().BeFalse();
     }
 
     [Test]
@@ -211,26 +211,26 @@ public sealed class SynchronousEvictionRaceTests
         try
         {
             await callback.Entered.WaitAsync(Timeout);
-            await Assert.That(leader.IsCompleted).IsFalse();
-            await Assert.That(joined.IsCompleted).IsFalse();
+            leader.IsCompleted.Should().BeFalse();
+            joined.IsCompleted.Should().BeFalse();
             await cache.DisposeAsync().AsTask().WaitAsync(Timeout);
-            await Assert
-                .That(leader.IsCompleted)
-                .IsTrue()
-                .Because("shutdown must end pending shared promises");
-            await Assert
-                .That(joined.IsCompleted)
-                .IsTrue()
-                .Because("a nonleader shares the same bulk outcome");
-            await Assert.That(() => leader).ThrowsExactly<ObjectDisposedException>();
-            await Assert.That(() => joined).ThrowsExactly<ObjectDisposedException>();
-            await Assert
-                .That((Func<Task>)(() => bulk.WaitAsync(Timeout)))
-                .ThrowsExactly<ObjectDisposedException>();
-            await Assert
-                .That(callback.Returned.IsCompleted)
-                .IsFalse()
-                .Because("shutdown cannot wait for user callbacks");
+            leader.IsCompleted.Should().BeTrue("shutdown must end pending shared promises");
+            joined.IsCompleted.Should().BeTrue("a nonleader shares the same bulk outcome");
+            await FluentActions
+                .Awaiting(() => leader)
+                .Should()
+                .ThrowExactlyAsync<ObjectDisposedException>();
+            await FluentActions
+                .Awaiting(() => joined)
+                .Should()
+                .ThrowExactlyAsync<ObjectDisposedException>();
+            await FluentActions
+                .Awaiting(() => bulk.WaitAsync(Timeout))
+                .Should()
+                .ThrowExactlyAsync<ObjectDisposedException>();
+            callback
+                .Returned.IsCompleted.Should()
+                .BeFalse("shutdown cannot wait for user callbacks");
         }
         finally
         {
@@ -249,7 +249,7 @@ public sealed class SynchronousEvictionRaceTests
             }
         }
 
-        await Assert.That(callback.TimedOut).IsFalse();
+        callback.TimedOut.Should().BeFalse();
     }
 
     [Test]
@@ -290,14 +290,12 @@ public sealed class SynchronousEvictionRaceTests
             backend.Release();
             await callback.Entered.WaitAsync(Timeout);
             await Task.Run(cache.Dispose).WaitAsync(Timeout);
-            await Assert
-                .That(() => joined.WaitAsync(Timeout))
-                .ThrowsExactly<ObjectDisposedException>();
-            await Assert.That(callback.Returned.IsCompleted).IsFalse();
-            await Assert
-                .That(bulk.IsCompleted)
-                .IsFalse()
-                .Because("the owner is still executing user callback code");
+            await FluentActions
+                .Awaiting(() => joined.WaitAsync(Timeout))
+                .Should()
+                .ThrowExactlyAsync<ObjectDisposedException>();
+            callback.Returned.IsCompleted.Should().BeFalse();
+            bulk.IsCompleted.Should().BeFalse("the owner is still executing user callback code");
         }
         finally
         {
@@ -316,12 +314,12 @@ public sealed class SynchronousEvictionRaceTests
             }
         }
 
-        await Assert.That(backend.TimedOut).IsFalse();
-        await Assert.That(callback.TimedOut).IsFalse();
+        backend.TimedOut.Should().BeFalse();
+        callback.TimedOut.Should().BeFalse();
     }
 
     [Test]
-    public async Task RuntimeShrinkDoesNotDropEvictionsAtNotificationCapacity()
+    public void RuntimeShrinkDoesNotDropEvictionsAtNotificationCapacity()
     {
         var notifications = new ConcurrentQueue<int>();
         using var cache = CacheBuilder
@@ -337,8 +335,8 @@ public sealed class SynchronousEvictionRaceTests
         }
 
         cache.Policy.Eviction!.SetMaximum(1);
-        await Assert.That(notifications.Count).IsEqualTo(99);
-        await Assert.That(notifications.Distinct().Count()).IsEqualTo(99);
+        notifications.Count.Should().Be(99);
+        notifications.Distinct().Count().Should().Be(99);
     }
 
     [Test]
@@ -364,10 +362,10 @@ public sealed class SynchronousEvictionRaceTests
         cache.Put(1, 1);
         time.Advance(TimeSpan.FromSeconds(1));
         await mutation.Pending.WaitAsync(Timeout);
-        await Assert.That(mutation.Finished).IsTrue();
-        await Assert.That(calls).IsEqualTo(1);
-        await Assert.That(cache.TryGet(2, out int value)).IsTrue();
-        await Assert.That(value).IsEqualTo(2);
+        mutation.Finished.Should().BeTrue();
+        calls.Should().Be(1);
+        cache.TryGet(2, out int value).Should().BeTrue();
+        value.Should().Be(2);
     }
 
     private sealed class ReentrantMutation
@@ -385,11 +383,8 @@ public sealed class SynchronousEvictionRaceTests
         private void Put() => Cache.Put(2, 2);
     }
 
-    private static void WaitForSyncJoin(ILoadingCache<int, int> cache)
-    {
-        if (!(SpinWait.SpinUntil(() => cache.Statistics.CoalescedWaiters == 1, Timeout)))
-            Assert.Fail("Timed out waiting for the controlled condition.");
-    }
+    private static void WaitForSyncJoin(ILoadingCache<int, int> cache) =>
+        SpinWait.SpinUntil(() => cache.Statistics.CoalescedWaiters == 1, Timeout).Should().BeTrue();
 
     private static async Task ObserveShutdownAsync(Task pending)
     {

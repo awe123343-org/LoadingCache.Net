@@ -1,3 +1,5 @@
+using FluentAssertions;
+
 namespace LoadingCache.Tests;
 
 public sealed class ParallelResidentPutRaceTests
@@ -27,23 +29,21 @@ public sealed class ParallelResidentPutRaceTests
         );
         cache.Set(1, "v1");
         cache.CleanUp();
-        await Assert.That(cache.TryGetTask(1, out Task<string>? original)).IsTrue();
-        Assert.NotNull(original);
+        cache.TryGetTask(1, out Task<string>? original).Should().BeTrue();
         Task<string> refresh = StartRefresh(cache);
         Task<string>? refreshed;
         Task<string>? replacement;
         try
         {
             await published.Entered.WaitAsync(Watchdog);
-            await Assert.That(cache.TryGet(1, out string? ready)).IsTrue();
-            await Assert.That(ready).IsEqualTo("v2");
-            await Assert.That(cache.TryGetTask(1, out refreshed)).IsTrue();
-            await Assert.That((await refreshed!)).IsEqualTo("v2");
+            cache.TryGet(1, out string? ready).Should().BeTrue();
+            ready.Should().Be("v2");
+            cache.TryGetTask(1, out refreshed).Should().BeTrue();
+            (await refreshed!).Should().Be("v2");
             cache.Set(1, "v3");
             probe.AssertSingleFastCommit();
-            await Assert.That(cache.TryGetTask(1, out replacement)).IsTrue();
-            Assert.NotNull(replacement);
-            await Assert.That((await replacement!)).IsEqualTo("v3");
+            cache.TryGetTask(1, out replacement).Should().BeTrue();
+            (await replacement!).Should().Be("v3");
         }
         finally
         {
@@ -51,14 +51,13 @@ public sealed class ParallelResidentPutRaceTests
             await ExpectPublicationFailure(refresh);
         }
 
-        await Assert.That(published.TimedOut).IsFalse();
-        await Assert.That(failure.Calls).IsEqualTo(1);
-        await Assert.That((await original!)).IsEqualTo("v1");
-        await Assert.That((await refreshed)).IsEqualTo("v2");
-        await Assert.That(cache.TryGetTask(1, out Task<string>? current)).IsTrue();
-        Assert.NotNull(current);
-        await Assert.That(ReferenceEquals(current, replacement)).IsTrue();
-        await Assert.That((await current)).IsEqualTo("v3");
+        published.TimedOut.Should().BeFalse();
+        failure.Calls.Should().Be(1);
+        (await original!).Should().Be("v1");
+        (await refreshed).Should().Be("v2");
+        cache.TryGetTask(1, out Task<string>? current).Should().BeTrue();
+        current.Should().BeSameAs(replacement);
+        (await current).Should().Be("v3");
         AssertResident(engine, "v3", statistics);
     }
 
@@ -89,16 +88,15 @@ public sealed class ParallelResidentPutRaceTests
         try
         {
             await completion.Entered.WaitAsync(Watchdog);
-            await Assert.That(cache.TryGet(1, out string? ready)).IsTrue();
-            await Assert.That(ready).IsEqualTo("v1");
-            await Assert.That(cache.TryGetTask(1, out original)).IsTrue();
-            await Assert.That(original!.IsCompleted).IsFalse();
+            cache.TryGet(1, out string? ready).Should().BeTrue();
+            ready.Should().Be("v1");
+            cache.TryGetTask(1, out original).Should().BeTrue();
+            original!.IsCompleted.Should().BeFalse();
             cache.Set(1, "v2");
             probe.AssertSingleFastCommit();
-            await Assert.That(cache.TryGetTask(1, out replacement)).IsTrue();
-            Assert.NotNull(replacement);
-            await Assert.That(ReferenceEquals(replacement, original)).IsFalse();
-            await Assert.That((await replacement)).IsEqualTo("v2");
+            cache.TryGetTask(1, out replacement).Should().BeTrue();
+            replacement.Should().NotBeSameAs(original);
+            (await replacement).Should().Be("v2");
         }
         finally
         {
@@ -106,13 +104,12 @@ public sealed class ParallelResidentPutRaceTests
             await ExpectPublicationFailure(load);
         }
 
-        await Assert.That(completion.TimedOut).IsFalse();
-        await Assert.That(failure.Calls).IsEqualTo(1);
+        completion.TimedOut.Should().BeFalse();
+        failure.Calls.Should().Be(1);
         await ExpectPublicationFailure(original);
-        await Assert.That(cache.TryGetTask(1, out Task<string>? current)).IsTrue();
-        Assert.NotNull(current);
-        await Assert.That(ReferenceEquals(current, replacement)).IsTrue();
-        await Assert.That((await current)).IsEqualTo("v2");
+        cache.TryGetTask(1, out Task<string>? current).Should().BeTrue();
+        current.Should().BeSameAs(replacement);
+        (await current).Should().Be("v2");
         AssertResident(engine, "v2", statistics);
     }
 
@@ -146,15 +143,15 @@ public sealed class ParallelResidentPutRaceTests
             await update.WaitAsync(Watchdog);
         }
 
-        await Assert.That(comparison.TimedOut).IsFalse();
-        await Assert.That(original.ComparisonCalls).IsEqualTo(1);
-        await Assert.That((await update)).IsFalse();
-        await Assert.That(cache.TryGet(1, out ComparedValue? current)).IsTrue();
-        await Assert.That(ReferenceEquals(current, replacement)).IsTrue();
+        comparison.TimedOut.Should().BeFalse();
+        original.ComparisonCalls.Should().Be(1);
+        (await update).Should().BeFalse();
+        cache.TryGet(1, out ComparedValue? current).Should().BeTrue();
+        current.Should().BeSameAs(replacement);
         cache.CleanUp();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
-        await Assert.That(cache.Policy.Eviction!.WeightedSize).IsEqualTo(1);
-        await Assert.That(cache.Statistics.ReplacedRemovals).IsEqualTo(statistics ? 1 : 0);
+        cache.EstimatedCount.Should().Be(1);
+        cache.Policy.Eviction!.WeightedSize.Should().Be(1);
+        cache.Statistics.ReplacedRemovals.Should().Be(statistics ? 1 : 0);
         engine.AssertInvariants();
     }
 
@@ -210,9 +207,10 @@ public sealed class ParallelResidentPutRaceTests
         );
 
     private static async Task ExpectPublicationFailure(Task<string> task) =>
-        await Assert
-            .That((Func<Task>)(() => task.WaitAsync(Watchdog)))
-            .ThrowsExactly<ControlledPublicationFailure>();
+        await FluentActions
+            .Awaiting(() => task.WaitAsync(Watchdog))
+            .Should()
+            .ThrowExactlyAsync<ControlledPublicationFailure>();
 
     private static void AssertResident(
         CacheEngine<int, string> engine,
@@ -220,21 +218,13 @@ public sealed class ParallelResidentPutRaceTests
         bool statistics
     )
     {
-        if (!(engine.TryGet(1, out string? current)))
-            Assert.Fail("Expected engine.TryGet(1, out string? current) to be true ().");
-        if ((current) != (value))
-            Assert.Fail("Expected current to equal (value).");
+        engine.TryGet(1, out string? current).Should().BeTrue();
+        current.Should().Be(value);
         engine.CleanUp();
-        if ((engine.EstimatedCount) != (1))
-            Assert.Fail("Expected engine.EstimatedCount to equal (1).");
-        if ((engine.Policy.Eviction!.WeightedSize) != (1))
-            Assert.Fail("Expected engine.Policy.Eviction!.WeightedSize to equal (1).");
-        if ((engine.GetStatistics().InFlightLoads) != (0))
-            Assert.Fail("Expected engine.GetStatistics().InFlightLoads to equal (0).");
-        if ((engine.GetStatistics().ReplacedRemovals) != (statistics ? 1 : 0))
-            Assert.Fail(
-                "Expected engine.GetStatistics().ReplacedRemovals to equal (statistics ? 1 : 0)."
-            );
+        engine.EstimatedCount.Should().Be(1);
+        engine.Policy.Eviction!.WeightedSize.Should().Be(1);
+        engine.GetStatistics().InFlightLoads.Should().Be(0);
+        engine.GetStatistics().ReplacedRemovals.Should().Be(statistics ? 1 : 0);
         engine.AssertInvariants();
     }
 
@@ -254,10 +244,8 @@ public sealed class ParallelResidentPutRaceTests
 
         internal void AssertSingleFastCommit()
         {
-            if ((Volatile.Read(ref _calls)) != (1))
-                Assert.Fail("Expected Volatile.Read(ref _calls) to equal (1).");
-            if ((Volatile.Read(ref _coordinatedCalls)) != (0))
-                Assert.Fail("Expected Volatile.Read(ref _coordinatedCalls) to equal (0).");
+            Volatile.Read(ref _calls).Should().Be(1);
+            Volatile.Read(ref _coordinatedCalls).Should().Be(0);
         }
     }
 

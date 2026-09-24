@@ -1,3 +1,4 @@
+using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
 
 namespace LoadingCache.Tests;
@@ -28,7 +29,7 @@ public sealed class EngineRefreshReviewTests
                 (_, _) =>
                     Interlocked.Increment(ref calls) == 1 ? Task.FromResult(1) : resumeReload.Task
             );
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo(1);
+        (await cache.GetAsync(1)).Should().Be(1);
         Task<int> refresh = cache.RefreshAsync(1).AsTask();
         Task<bool> oldRead = Task.Factory.StartNew(
             static state => ((IAsyncLoadingCache<int, int>)state!).TryGet(1, out _),
@@ -42,16 +43,15 @@ public sealed class EngineRefreshReviewTests
             await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
             clock.Advance(TimeSpan.FromSeconds(2));
             resumeRead.TrySetResult();
-            await Assert
-                .That((await oldRead.WaitAsync(TimeSpan.FromSeconds(5))))
-                .IsTrue()
-                .Because("this overlapping reader checked freshness before the clock advanced");
-            await Assert.That(cache.TryGet(1, out _)).IsFalse();
+            (await oldRead.WaitAsync(TimeSpan.FromSeconds(5)))
+                .Should()
+                .BeTrue("this overlapping reader checked freshness before the clock advanced");
+            cache.TryGet(1, out _).Should().BeFalse();
             Task<int> joined = cache.GetAsync(1).AsTask();
-            await Assert.That(joined.IsCompleted).IsFalse();
-            await Assert.That(calls).IsEqualTo(2);
+            joined.IsCompleted.Should().BeFalse();
+            calls.Should().Be(2);
             resumeReload.TrySetResult(2);
-            await Assert.That((await joined.WaitAsync(TimeSpan.FromSeconds(5)))).IsEqualTo(2);
+            (await joined.WaitAsync(TimeSpan.FromSeconds(5))).Should().Be(2);
         }
         finally
         {
@@ -80,39 +80,40 @@ public sealed class EngineRefreshReviewTests
             .BuildAsyncLoading(
                 (_, _) => Interlocked.Increment(ref calls) == 1 ? Task.FromResult(1) : release.Task
             );
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo(1);
+        (await cache.GetAsync(1)).Should().Be(1);
         Task<int> refresh = cache.RefreshAsync(1).AsTask();
         try
         {
-            await Assert.That(calls).IsEqualTo(2);
-            await Assert.That(refresh.IsCompleted).IsFalse();
+            calls.Should().Be(2);
+            refresh.IsCompleted.Should().BeFalse();
             if (clear)
             {
                 cache.Clear();
             }
             else
             {
-                await Assert.That(cache.Invalidate(1)).IsTrue();
+                cache.Invalidate(1).Should().BeTrue();
             }
 
             cache.Set(1, 99);
             if (fail)
             {
                 release.TrySetException(new InvalidOperationException("retired refresh"));
-                await Assert
-                    .That(() => refresh.WaitAsync(TimeSpan.FromSeconds(5)))
-                    .ThrowsExactly<InvalidOperationException>();
+                await FluentActions
+                    .Awaiting(() => refresh.WaitAsync(TimeSpan.FromSeconds(5)))
+                    .Should()
+                    .ThrowExactlyAsync<InvalidOperationException>();
             }
             else
             {
                 release.TrySetResult(2);
-                await Assert.That((await refresh.WaitAsync(TimeSpan.FromSeconds(5)))).IsEqualTo(2);
+                (await refresh.WaitAsync(TimeSpan.FromSeconds(5))).Should().Be(2);
             }
 
             cache.CleanUp();
-            await Assert.That(cache.TryGet(1, out int value)).IsTrue();
-            await Assert.That(value).IsEqualTo(99);
-            await Assert.That(cache.EstimatedCount).IsEqualTo(1);
+            cache.TryGet(1, out int value).Should().BeTrue();
+            value.Should().Be(99);
+            cache.EstimatedCount.Should().Be(1);
         }
         finally
         {
@@ -156,7 +157,7 @@ public sealed class EngineRefreshReviewTests
         await using IAsyncLoadingCache<int, int> cache = builder.BuildAsyncLoading(
             (_, _) => Interlocked.Increment(ref calls) == 1 ? Task.FromResult(1) : release.Task
         );
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo(1);
+        (await cache.GetAsync(1)).Should().Be(1);
         Task<int> refresh = cache.RefreshAsync(1).AsTask();
         try
         {
@@ -164,23 +165,23 @@ public sealed class EngineRefreshReviewTests
             if (variableExpiry)
             {
                 IVariableExpirationPolicy<int, int> policy = cache.Policy.VariableExpiration!;
-                await Assert.That(policy.AgeOf(1)).IsEqualTo(TimeSpan.FromSeconds(2));
-                await Assert.That(policy.GetExpiresAfter(1)).IsEqualTo(TimeSpan.Zero);
-                await Assert.That(policy.SetExpiresAfter(1, TimeSpan.FromDays(1))).IsFalse();
+                policy.AgeOf(1).Should().Be(TimeSpan.FromSeconds(2));
+                policy.GetExpiresAfter(1).Should().Be(TimeSpan.Zero);
+                policy.SetExpiresAfter(1, TimeSpan.FromDays(1)).Should().BeFalse();
             }
             else
             {
                 IFixedExpirationPolicy<int, int> policy = cache.Policy.ExpireAfterWrite!;
-                await Assert.That(policy.AgeOf(1)).IsEqualTo(TimeSpan.FromSeconds(2));
-                await Assert.That(policy.GetExpiresAfter(1)).IsEqualTo(TimeSpan.Zero);
+                policy.AgeOf(1).Should().Be(TimeSpan.FromSeconds(2));
+                policy.GetExpiresAfter(1).Should().Be(TimeSpan.Zero);
             }
 
-            await Assert.That(cache.TryGet(1, out _)).IsFalse();
+            cache.TryGet(1, out _).Should().BeFalse();
             Task<int> joined = cache.GetAsync(1).AsTask();
-            await Assert.That(joined.IsCompleted).IsFalse();
-            await Assert.That(calls).IsEqualTo(2);
+            joined.IsCompleted.Should().BeFalse();
+            calls.Should().Be(2);
             release.TrySetResult(2);
-            await Assert.That((await joined.WaitAsync(TimeSpan.FromSeconds(5)))).IsEqualTo(2);
+            (await joined.WaitAsync(TimeSpan.FromSeconds(5))).Should().Be(2);
         }
         finally
         {
@@ -227,23 +228,20 @@ public sealed class EngineRefreshReviewTests
         await using IAsyncLoadingCache<int, int> cache = builder.BuildAsyncLoading(
             (_, _) => Interlocked.Increment(ref calls) == 1 ? Task.FromResult(1) : release.Task
         );
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo(1);
+        (await cache.GetAsync(1)).Should().Be(1);
         Task<int> refresh = cache.RefreshAsync(1).AsTask();
         try
         {
-            await Assert.That(calls).IsEqualTo(2);
-            await Assert.That(refresh.IsCompleted).IsFalse();
+            calls.Should().Be(2);
+            refresh.IsCompleted.Should().BeFalse();
             clock.Advance(TimeSpan.FromSeconds(2));
             cache.CleanUp();
-            await Assert.That(cache.TryGet(1, out _)).IsFalse();
+            cache.TryGet(1, out _).Should().BeFalse();
             Task<int> joined = cache.GetAsync(1).AsTask();
-            await Assert.That(joined.IsCompleted).IsFalse();
-            await Assert
-                .That(calls)
-                .IsEqualTo(2)
-                .Because("cleanup must preserve the one existing refresh");
+            joined.IsCompleted.Should().BeFalse();
+            calls.Should().Be(2, "cleanup must preserve the one existing refresh");
             release.TrySetResult(2);
-            await Assert.That((await joined.WaitAsync(TimeSpan.FromSeconds(5)))).IsEqualTo(2);
+            (await joined.WaitAsync(TimeSpan.FromSeconds(5))).Should().Be(2);
         }
         finally
         {
@@ -251,9 +249,9 @@ public sealed class EngineRefreshReviewTests
             await refresh.WaitAsync(TimeSpan.FromSeconds(5));
         }
 
-        await Assert.That(cache.TryGet(1, out int current)).IsTrue();
-        await Assert.That(current).IsEqualTo(2);
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
+        cache.TryGet(1, out int current).Should().BeTrue();
+        current.Should().Be(2);
+        cache.EstimatedCount.Should().Be(1);
     }
 
     private sealed class TwoSecondExpiry : IExpiry<int, int>

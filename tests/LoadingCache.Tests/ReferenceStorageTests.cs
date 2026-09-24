@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using FluentAssertions;
 using LoadingCache.ReferenceStorage;
 
 namespace LoadingCache.Tests;
@@ -7,53 +8,51 @@ namespace LoadingCache.Tests;
 public sealed class ReferenceStorageTests
 {
     [Test]
-    public async Task WeakKeyCapturesStableRuntimeIdentityHashAndUsesReferenceIdentity()
+    public void WeakKeyCapturesStableRuntimeIdentityHashAndUsesReferenceIdentity()
     {
         Key first = new(7);
         Key equalByValue = new(7);
         ReferenceKey<Key> handle = ReferenceKey<Key>.CreateWeak(first);
-        await Assert.That(handle.IdentityHash).IsEqualTo(RuntimeHelpers.GetHashCode(first));
-        await Assert.That(handle.Matches(first)).IsTrue();
-        await Assert.That(handle.Matches(equalByValue)).IsFalse();
-        await Assert.That(handle.TryGetTarget(out Key? target)).IsTrue();
-        await Assert.That(ReferenceEquals(target, first)).IsTrue();
+        handle.IdentityHash.Should().Be(RuntimeHelpers.GetHashCode(first));
+        handle.Matches(first).Should().BeTrue();
+        handle.Matches(equalByValue).Should().BeFalse();
+        handle.TryGetTarget(out Key? target).Should().BeTrue();
+        target.Should().BeSameAs(first);
     }
 
     [Test]
-    public async Task WeakKeyRejectsValueTypes()
+    public void WeakKeyRejectsValueTypes()
     {
         Action create = () => ReferenceKey<int>.CreateWeak(42);
-        await Assert.That(create).Throws<InvalidOperationException>();
+        create.Should().Throw<InvalidOperationException>();
     }
 
     [Test]
-    public async Task WeakKeyCollisionDoesNotMergeDistinctTargets()
+    public void WeakKeyCollisionDoesNotMergeDistinctTargets()
     {
         Key first = new(1);
         Key second = new(1);
         ReferenceKey<Key> firstHandle = ReferenceKey<Key>.CreateWeakForTesting(first, 123);
         ReferenceKey<Key> secondHandle = ReferenceKey<Key>.CreateWeakForTesting(second, 123);
         IEqualityComparer<ReferenceKey<Key>> comparer = ReferenceKeyComparer<Key>.Instance;
-        await Assert
-            .That(comparer.GetHashCode(firstHandle))
-            .IsEqualTo(comparer.GetHashCode(secondHandle));
-        await Assert.That(comparer.Equals(firstHandle, secondHandle)).IsFalse();
-        await Assert.That(firstHandle.Matches(first)).IsTrue();
-        await Assert.That(secondHandle.Matches(second)).IsTrue();
+        comparer.GetHashCode(firstHandle).Should().Be(comparer.GetHashCode(secondHandle));
+        comparer.Equals(firstHandle, secondHandle).Should().BeFalse();
+        firstHandle.Matches(first).Should().BeTrue();
+        secondHandle.Matches(second).Should().BeTrue();
     }
 
     [Test]
-    public async Task WeakKeyObjectComparerMatchesRawKeysByReferenceWithoutCallingOverrides()
+    public void WeakKeyObjectComparerMatchesRawKeysByReferenceWithoutCallingOverrides()
     {
         ThrowingKey key = new();
         ThrowingKey equalByValue = new();
         ReferenceKey<ThrowingKey> handle = ReferenceKey<ThrowingKey>.CreateWeak(key);
         IEqualityComparer<object> comparer = WeakKeyObjectComparer<ThrowingKey>.Instance;
-        await Assert.That(comparer.Equals(handle, key)).IsTrue();
-        await Assert.That(comparer.Equals(key, handle)).IsTrue();
-        await Assert.That(comparer.Equals(handle, equalByValue)).IsFalse();
-        await Assert.That(comparer.GetHashCode(handle)).IsEqualTo(RuntimeHelpers.GetHashCode(key));
-        await Assert.That(comparer.GetHashCode(key)).IsEqualTo(RuntimeHelpers.GetHashCode(key));
+        comparer.Equals(handle, key).Should().BeTrue();
+        comparer.Equals(key, handle).Should().BeTrue();
+        comparer.Equals(handle, equalByValue).Should().BeFalse();
+        comparer.GetHashCode(handle).Should().Be(RuntimeHelpers.GetHashCode(key));
+        comparer.GetHashCode(key).Should().Be(RuntimeHelpers.GetHashCode(key));
     }
 
     [Test]
@@ -65,7 +64,7 @@ public sealed class ReferenceStorageTests
         AllocationTestProcess.VerifyAsync("allocating-comparer");
 
     [Test]
-    public async Task WeakKeyObjectComparerPreservesCollisionAndExactRemovalSemantics()
+    public void WeakKeyObjectComparerPreservesCollisionAndExactRemovalSemantics()
     {
         Key liveKey = new(2);
         int collisionHash = RuntimeHelpers.GetHashCode(liveKey);
@@ -80,21 +79,18 @@ public sealed class ReferenceStorageTests
             [liveHandle] = "live",
         };
         ForceCollection(deadKey);
-        await Assert.That(map.TryGetValue(liveKey, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("live");
-        await Assert
-            .That(
-                ((ICollection<KeyValuePair<object, string>>)map).Remove(
-                    new KeyValuePair<object, string>(deadHandle, "dead")
-                )
-            )
-            .IsTrue();
-        await Assert.That(map.TryGetValue(liveKey, out value)).IsTrue();
-        await Assert.That(value).IsEqualTo("live");
+        map.TryGetValue(liveKey, out string? value).Should().BeTrue();
+        value.Should().Be("live");
+        ((ICollection<KeyValuePair<object, string>>)map)
+            .Remove(new KeyValuePair<object, string>(deadHandle, "dead"))
+            .Should()
+            .BeTrue();
+        map.TryGetValue(liveKey, out value).Should().BeTrue();
+        value.Should().Be("live");
     }
 
     [Test]
-    public async Task WeakKeyObjectComparerExactRemovalDoesNotRemoveReplacedEntry()
+    public void WeakKeyObjectComparerExactRemovalDoesNotRemoveReplacedEntry()
     {
         Key key = new(3);
         ReferenceKey<Key> handle = ReferenceKey<Key>.CreateWeak(key);
@@ -103,19 +99,16 @@ public sealed class ReferenceStorageTests
         object newGeneration = new();
         map[handle] = oldGeneration;
         map[handle] = newGeneration;
-        await Assert
-            .That(
-                ((ICollection<KeyValuePair<object, object>>)map).Remove(
-                    new KeyValuePair<object, object>(handle, oldGeneration)
-                )
-            )
-            .IsFalse();
-        await Assert.That(map.TryGetValue(key, out object? current)).IsTrue();
-        await Assert.That(ReferenceEquals(current, newGeneration)).IsTrue();
+        ((ICollection<KeyValuePair<object, object>>)map)
+            .Remove(new KeyValuePair<object, object>(handle, oldGeneration))
+            .Should()
+            .BeFalse();
+        map.TryGetValue(key, out object? current).Should().BeTrue();
+        current.Should().BeSameAs(newGeneration);
     }
 
     [Test]
-    public async Task DeadWeakKeyCanBeRemovedByItsExactWrapper()
+    public void DeadWeakKeyCanBeRemovedByItsExactWrapper()
     {
         (ReferenceKey<Key> handle, WeakReference weakKey) = CreateWeakKey();
         ConcurrentDictionary<ReferenceKey<Key>, string> map = new(
@@ -125,14 +118,14 @@ public sealed class ReferenceStorageTests
             [handle] = "old",
         };
         ForceCollection(weakKey);
-        await Assert.That(handle.IsCollected).IsTrue();
-        await Assert.That(map.TryRemove(handle, out string? removed)).IsTrue();
-        await Assert.That(removed).IsEqualTo("old");
-        await Assert.That(map).IsEmpty();
+        handle.IsCollected.Should().BeTrue();
+        map.TryRemove(handle, out string? removed).Should().BeTrue();
+        removed.Should().Be("old");
+        map.Should().BeEmpty();
     }
 
     [Test]
-    public async Task DeadWrapperDoesNotMatchAReplacementTargetWithTheSameForcedHash()
+    public void DeadWrapperDoesNotMatchAReplacementTargetWithTheSameForcedHash()
     {
         (ReferenceKey<Key> deadHandle, WeakReference deadKey) = CreateWeakKey(456);
         Key liveKey = new(2);
@@ -146,16 +139,16 @@ public sealed class ReferenceStorageTests
         };
         ForceCollection(deadKey);
         ReferenceKey<Key> probe = ReferenceKey<Key>.CreateProbeForTesting(liveKey, 456);
-        await Assert.That(map.TryGetValue(probe, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("live");
-        await Assert.That(map.TryRemove(deadHandle, out string? removed)).IsTrue();
-        await Assert.That(removed).IsEqualTo("dead");
-        await Assert.That(map.TryGetValue(probe, out value)).IsTrue();
-        await Assert.That(value).IsEqualTo("live");
+        map.TryGetValue(probe, out string? value).Should().BeTrue();
+        value.Should().Be("live");
+        map.TryRemove(deadHandle, out string? removed).Should().BeTrue();
+        removed.Should().Be("dead");
+        map.TryGetValue(probe, out value).Should().BeTrue();
+        value.Should().Be("live");
     }
 
     [Test]
-    public async Task ExactValueRemovalDoesNotRemoveAReplacedGeneration()
+    public void ExactValueRemovalDoesNotRemoveAReplacedGeneration()
     {
         Key key = new(3);
         ReferenceKey<Key> handle = ReferenceKey<Key>.CreateWeak(key);
@@ -167,46 +160,45 @@ public sealed class ReferenceStorageTests
         map[handle] = oldGeneration;
         map[handle] = newGeneration;
         ICollection<KeyValuePair<ReferenceKey<Key>, object>> entries = map;
-        await Assert
-            .That(
-                entries.Remove(new KeyValuePair<ReferenceKey<Key>, object>(handle, oldGeneration))
-            )
-            .IsFalse();
-        await Assert.That(ReferenceEquals(map[handle], newGeneration)).IsTrue();
+        entries
+            .Remove(new KeyValuePair<ReferenceKey<Key>, object>(handle, oldGeneration))
+            .Should()
+            .BeFalse();
+        map[handle].Should().BeSameAs(newGeneration);
     }
 
     [Test]
-    public async Task WeakValueReturnsLiveTargetAndDoesNotStronglyRootIt()
+    public void WeakValueReturnsLiveTargetAndDoesNotStronglyRootIt()
     {
         (ReferenceValue<Value> holder, WeakReference weakValue) = CreateWeakValue();
         ForceCollection(weakValue);
-        await Assert.That(holder.IsCollected).IsTrue();
-        await Assert.That(holder.TryGetValue(out _)).IsFalse();
+        holder.IsCollected.Should().BeTrue();
+        holder.TryGetValue(out _).Should().BeFalse();
     }
 
     [Test]
-    public async Task WeakValueRejectsValueTypes()
+    public void WeakValueRejectsValueTypes()
     {
         Action create = () => ReferenceValue<int>.Weak(42);
-        await Assert.That(create).Throws<InvalidOperationException>();
+        create.Should().Throw<InvalidOperationException>();
     }
 
     [Test]
-    public async Task WeakValueReturnsItsLiveValue()
+    public void WeakValueReturnsItsLiveValue()
     {
         Value value = new();
         ReferenceValue<Value> holder = ReferenceValue<Value>.Weak(value);
-        await Assert.That(holder.IsCollected).IsFalse();
-        await Assert.That(holder.TryGetValue(out Value? actual)).IsTrue();
-        await Assert.That(ReferenceEquals(actual, value)).IsTrue();
+        holder.IsCollected.Should().BeFalse();
+        holder.TryGetValue(out Value? actual).Should().BeTrue();
+        actual.Should().BeSameAs(value);
         GC.KeepAlive(value);
     }
 
     [Test]
-    public async Task WeakValueRejectsNull()
+    public void WeakValueRejectsNull()
     {
         Action create = () => ReferenceValue<Value>.Weak(null!);
-        await Assert.That(create).Throws<ArgumentNullException>();
+        create.Should().Throw<ArgumentNullException>();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -249,10 +241,8 @@ public sealed class ReferenceStorageTests
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void AssertLiveValue(ReferenceValue<Value> holder)
     {
-        if (!(holder.TryGetValue(out Value? liveValue)))
-            Assert.Fail("Expected holder.TryGetValue(out Value? liveValue) to be true ().");
-        if (!((liveValue) is not null))
-            Assert.Fail("Expected liveValue to be non-null ().");
+        holder.TryGetValue(out Value? liveValue).Should().BeTrue();
+        liveValue.Should().NotBeNull();
     }
 
     private sealed class Key

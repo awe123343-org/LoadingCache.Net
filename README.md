@@ -136,7 +136,7 @@ limitations and the remaining 1.0 requirements.
 ## Development
 
 Use the SDK pinned in `global.json` and install both .NET 8 and .NET 10 runtimes.
-Tests use TUnit with its native assertions with test-case-level parallelism; CSharpier is
+Tests use TUnit with FluentAssertions and test-case-level parallelism; CSharpier is
 a repository-local tool. Nullable analysis and warnings-as-errors are enabled.
 
 ```sh

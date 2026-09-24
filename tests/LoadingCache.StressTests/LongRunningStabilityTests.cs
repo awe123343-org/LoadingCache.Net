@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using FluentAssertions;
 
 namespace LoadingCache.StressTests;
 
@@ -35,7 +36,7 @@ public sealed class LongRunningStabilityTests
         string scenario = accessOnly ? "access-only" : "mixed";
         string? configured = Environment.GetEnvironmentVariable("LOADINGCACHE_SOAK_SECONDS");
         int seconds = configured is null ? 5 : int.Parse(configured, CultureInfo.InvariantCulture);
-        await Assert.That(seconds).IsBetween(1, 86_400);
+        seconds.Should().BeInRange(1, 86_400);
         string directory =
             Environment.GetEnvironmentVariable("LOADINGCACHE_SOAK_OUTPUT")
             ?? Path.Combine(Environment.CurrentDirectory, "artifacts", "soak");
@@ -143,7 +144,7 @@ public sealed class LongRunningStabilityTests
                     {
                         cache.Cache.Clear();
                         await cache.AssertQuiescentAsync().ConfigureAwait(false);
-                        await Assert.That(cache.Cache.EstimatedCount).IsEqualTo(0);
+                        cache.Cache.EstimatedCount.Should().Be(0);
                     }
                 }
 
@@ -341,17 +342,14 @@ public sealed class LongRunningStabilityTests
                 break;
         }
 
-        await Assert.That(state.Peak).IsLessThanOrEqualTo(LoadLimit);
+        state.Peak.Should().BeLessThanOrEqualTo(LoadLimit);
     }
 
     private static void Validate(Payload value, int key, int instance)
     {
-        if ((value.Key) != (key))
-            Assert.Fail("Expected value.Key to equal (key).");
-        if ((value.Instance) != (instance))
-            Assert.Fail("Expected value.Instance to equal (instance).");
-        if ((value.Complement) != (~value.Version))
-            Assert.Fail("Expected value.Complement to equal (~value.Version).");
+        value.Key.Should().Be(key);
+        value.Instance.Should().Be(instance);
+        value.Complement.Should().Be(~value.Version);
     }
 
     private static void WriteProgress(
@@ -482,7 +480,7 @@ public sealed class LongRunningStabilityTests
             );
             try
             {
-                await Assert.That(active).IsLessThanOrEqualTo(LoadLimit);
+                active.Should().BeLessThanOrEqualTo(LoadLimit);
                 await Task.Yield();
                 cancellationToken.ThrowIfCancellationRequested();
                 return version % 37 == 0
@@ -530,27 +528,25 @@ public sealed class LongRunningStabilityTests
             }
 
             _engine.AssertInvariants();
-            await Assert.That(Cache.EstimatedCount).IsLessThanOrEqualTo(MaximumResidents);
+            Cache.EstimatedCount.Should().BeLessThanOrEqualTo(MaximumResidents);
             long maximum = Cache.Policy.Eviction!.Maximum;
             long weight = Cache.Policy.Eviction.WeightedSize;
-            await Assert.That(weight).IsLessThanOrEqualTo(maximum);
+            weight.Should().BeLessThanOrEqualTo(maximum);
             KeyValuePair<int, Payload>[] residents = _engine.DictionarySnapshot();
-            await Assert.That(residents.LongLength).IsEqualTo(Cache.EstimatedCount);
-            await Assert
-                .That(weight)
-                .IsEqualTo(
-                    Mode == 0 ? residents.Length : residents.Sum(pair => (long)pair.Value.Weight)
-                );
+            residents.LongLength.Should().Be(Cache.EstimatedCount);
+            weight
+                .Should()
+                .Be(Mode == 0 ? residents.Length : residents.Sum(pair => (long)pair.Value.Weight));
             foreach (var resident in residents)
             {
                 Validate(resident.Value, resident.Key, Instance);
             }
 
-            await Assert.That(Peak).IsLessThanOrEqualTo(LoadLimit);
+            Peak.Should().BeLessThanOrEqualTo(LoadLimit);
             if (!_statistics)
             {
-                await Assert.That(Cache.GetStatistics().Hits).IsEqualTo(0);
-                await Assert.That(Cache.GetStatistics().LoadsStarted).IsEqualTo(0);
+                Cache.GetStatistics().Hits.Should().Be(0);
+                Cache.GetStatistics().LoadsStarted.Should().Be(0);
             }
         }
     }

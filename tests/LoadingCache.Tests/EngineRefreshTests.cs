@@ -1,3 +1,4 @@
+using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
 
 namespace LoadingCache.Tests;
@@ -7,7 +8,7 @@ public sealed class EngineRefreshTests
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(5);
 
     [Test]
-    public async Task RefreshRequiresAFixedLoaderPersonality()
+    public void RefreshRequiresAFixedLoaderPersonality()
     {
         Action sync = () =>
             CacheBuilder
@@ -23,8 +24,8 @@ public sealed class EngineRefreshTests
                 .MaxConcurrentLoads(2)
                 .RefreshAfterWrite(TimeSpan.FromSeconds(1))
                 .BuildAsync();
-        await Assert.That(sync).ThrowsExactly<InvalidOperationException>();
-        await Assert.That(async).ThrowsExactly<InvalidOperationException>();
+        sync.Should().ThrowExactly<InvalidOperationException>();
+        async.Should().ThrowExactly<InvalidOperationException>();
     }
 
     [Test]
@@ -56,16 +57,16 @@ public sealed class EngineRefreshTests
             .RefreshAfterWrite(TimeSpan.FromSeconds(1))
             .TimeProvider(clock)
             .BuildAsyncLoading(loader);
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("v1");
+        (await cache.GetAsync(1)).Should().Be("v1");
         clock.Advance(TimeSpan.FromSeconds(1));
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("v1");
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("v1");
+        (await cache.GetAsync(1)).Should().Be("v1");
+        (await cache.GetAsync(1)).Should().Be("v1");
         await reloadEntered.Task.WaitAsync(Watchdog);
-        await Assert.That(Volatile.Read(ref reloads.Value)).IsEqualTo(1);
+        Volatile.Read(ref reloads.Value).Should().Be(1);
         Task<string> joinedRefresh = cache.RefreshAsync(1).AsTask();
         releaseReload.SetResult("v2");
-        await Assert.That((await joinedRefresh.WaitAsync(Watchdog))).IsEqualTo("v2");
-        await Assert.That(Volatile.Read(ref loads.Value)).IsEqualTo(1);
+        (await joinedRefresh.WaitAsync(Watchdog)).Should().Be("v2");
+        Volatile.Read(ref loads.Value).Should().Be(1);
     }
 
     [Test]
@@ -88,11 +89,11 @@ public sealed class EngineRefreshTests
             .RefreshAfterWrite(TimeSpan.FromSeconds(1))
             .TimeProvider(clock)
             .BuildAsyncLoading(loader);
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("old");
+        (await cache.GetAsync(1)).Should().Be("old");
         clock.Advance(TimeSpan.FromSeconds(1));
-        await Assert.That(cache.TryGet(1, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("old");
-        await Assert.That(Volatile.Read(ref reloads.Value)).IsEqualTo(0);
+        cache.TryGet(1, out string? value).Should().BeTrue();
+        value.Should().Be("old");
+        Volatile.Read(ref reloads.Value).Should().Be(0);
     }
 
     [Test]
@@ -124,17 +125,17 @@ public sealed class EngineRefreshTests
             .RefreshAfterWrite(TimeSpan.FromSeconds(1))
             .TimeProvider(clock)
             .BuildAsyncLoading(loader);
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("old");
+        (await cache.GetAsync(1)).Should().Be("old");
         clock.Advance(TimeSpan.FromSeconds(1));
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("old");
+        (await cache.GetAsync(1)).Should().Be("old");
         await reloadEntered.Task.WaitAsync(Watchdog);
         clock.Advance(TimeSpan.FromSeconds(1));
         Task<string> joined = cache.GetAsync(1).AsTask();
-        await Assert.That(joined.IsCompleted).IsFalse();
+        joined.IsCompleted.Should().BeFalse();
         releaseReload.SetResult("new");
-        await Assert.That((await joined.WaitAsync(Watchdog))).IsEqualTo("new");
-        await Assert.That(Volatile.Read(ref loads.Value)).IsEqualTo(1);
-        await Assert.That(Volatile.Read(ref reloads.Value)).IsEqualTo(1);
+        (await joined.WaitAsync(Watchdog)).Should().Be("new");
+        Volatile.Read(ref loads.Value).Should().Be(1);
+        Volatile.Read(ref reloads.Value).Should().Be(1);
     }
 
     [Test]
@@ -164,20 +165,21 @@ public sealed class EngineRefreshTests
             .RefreshFailureBackoff(TimeSpan.FromSeconds(5))
             .TimeProvider(clock)
             .BuildAsyncLoading(loader);
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("old");
+        (await cache.GetAsync(1)).Should().Be("old");
         clock.Advance(TimeSpan.FromSeconds(1));
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("old");
+        (await cache.GetAsync(1)).Should().Be("old");
         await firstReloadEntered.Task.WaitAsync(Watchdog);
         Task<string> joinedRefresh = cache.RefreshAsync(1).AsTask();
-        await Assert.That(Volatile.Read(ref reloads.Value)).IsEqualTo(1);
+        Volatile.Read(ref reloads.Value).Should().Be(1);
         firstFailure.SetException(new InvalidOperationException("reload"));
-        await Assert
-            .That((Func<Task>)(() => joinedRefresh))
-            .ThrowsExactly<InvalidOperationException>();
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("old");
-        await Assert.That(Volatile.Read(ref reloads.Value)).IsEqualTo(1);
+        await FluentActions
+            .Awaiting(() => joinedRefresh)
+            .Should()
+            .ThrowExactlyAsync<InvalidOperationException>();
+        (await cache.GetAsync(1)).Should().Be("old");
+        Volatile.Read(ref reloads.Value).Should().Be(1);
         clock.Advance(TimeSpan.FromSeconds(5));
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("old");
+        (await cache.GetAsync(1)).Should().Be("old");
         await secondReloadEntered.Task.WaitAsync(Watchdog);
     }
 
@@ -203,17 +205,17 @@ public sealed class EngineRefreshTests
             .RefreshAfterWrite(TimeSpan.FromSeconds(1))
             .TimeProvider(clock)
             .BuildAsyncLoading(loader);
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("old");
+        (await cache.GetAsync(1)).Should().Be("old");
         clock.Advance(TimeSpan.FromSeconds(1));
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("old");
+        (await cache.GetAsync(1)).Should().Be("old");
         await reloadEntered.Task.WaitAsync(Watchdog);
         Task<string> joinedRefresh = cache.RefreshAsync(1).AsTask();
         cache.Set(1, "set");
         releaseReload.SetResult("late");
         await reloadCompleted.Task.WaitAsync(Watchdog);
         await joinedRefresh.WaitAsync(Watchdog);
-        await Assert.That(cache.TryGet(1, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("set");
+        cache.TryGet(1, out string? value).Should().BeTrue();
+        value.Should().Be("set");
     }
 
     [Test]
@@ -226,9 +228,10 @@ public sealed class EngineRefreshTests
             .MaxConcurrentLoads(2)
             .BuildAsyncLoading(loader.LoadAsync);
         loader.Cache = cache;
-        await Assert
-            .That((Func<Task>)(() => cache.GetAsync(1).AsTask()))
-            .ThrowsExactly<LoadingCacheReentrancyException>();
+        await cache
+            .Awaiting(static current => current.GetAsync(1).AsTask())
+            .Should()
+            .ThrowExactlyAsync<LoadingCacheReentrancyException>();
     }
 
     [Test]
@@ -241,13 +244,14 @@ public sealed class EngineRefreshTests
             .MaxConcurrentLoads(4)
             .BuildAsyncLoading(loader.LoadAsync);
         loader.Cache = cache;
-        await Assert
-            .That(() => cache.GetAsync("K").AsTask())
-            .ThrowsExactly<LoadingCacheReentrancyException>();
+        await cache
+            .Awaiting(static current => current.GetAsync("K").AsTask())
+            .Should()
+            .ThrowExactlyAsync<LoadingCacheReentrancyException>();
     }
 
     [Test]
-    public async Task SynchronousRefreshSameKeyFailsFastInsideItsLoadChain()
+    public void SynchronousRefreshSameKeyFailsFastInsideItsLoadChain()
     {
         var loader = new SyncReentrantRefreshLoader();
         using var cache = CacheBuilder
@@ -256,7 +260,10 @@ public sealed class EngineRefreshTests
             .MaxConcurrentLoads(2)
             .BuildLoading(loader.Load);
         loader.Cache = cache;
-        await Assert.That(() => cache.Get(1)).ThrowsExactly<LoadingCacheReentrancyException>();
+        cache
+            .Invoking(static current => current.Get(1))
+            .Should()
+            .ThrowExactly<LoadingCacheReentrancyException>();
     }
 
     private sealed class SameKeyRefreshLoader
@@ -303,12 +310,12 @@ public sealed class EngineRefreshTests
             .MaximumSize(4)
             .MaxConcurrentLoads(2)
             .BuildLoading(loader);
-        await Assert.That(cache.Get(1)).IsEqualTo("old");
+        cache.Get(1).Should().Be("old");
         Task<string> refresh = cache.RefreshAsync(1);
         await entered.Task.WaitAsync(Watchdog);
-        await Assert.That(refresh.IsCompleted).IsFalse();
+        refresh.IsCompleted.Should().BeFalse();
         release.TrySetResult(true);
-        await Assert.That((await refresh.WaitAsync(Watchdog))).IsEqualTo("new");
+        (await refresh.WaitAsync(Watchdog)).Should().Be("new");
     }
 
     private static async Task<string> CompleteAndSignal(

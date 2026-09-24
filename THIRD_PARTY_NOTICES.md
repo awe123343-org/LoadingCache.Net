@@ -50,13 +50,13 @@ draining. The cold-start bypass in the policy adapter is also informed by
 ## Development dependencies
 
 Direct test dependencies and formatting tool, verified from their published NuGet package metadata
-on 2026-09-12, with TUnit and TUnit.Assertions updated on 2026-09-23:
+on 2026-09-12, with TUnit updated on 2026-09-23:
 
-| Package          | Version | License | Package metadata                                                |
-| ---------------- | ------- | ------- | --------------------------------------------------------------- |
-| TUnit            | 1.69.0  | MIT     | [NuGet](https://www.nuget.org/packages/TUnit/1.69.0)            |
-| TUnit.Assertions | 1.69.0  | MIT     | [NuGet](https://www.nuget.org/packages/TUnit.Assertions/1.69.0) |
-| CSharpier        | 1.3.0   | MIT     | [NuGet](https://www.nuget.org/packages/CSharpier/1.3.0)         |
+| Package          | Version | License         | Package metadata                                                |
+| ---------------- | ------- | --------------- | --------------------------------------------------------------- |
+| TUnit            | 1.69.0  | MIT             | [NuGet](https://www.nuget.org/packages/TUnit/1.69.0)            |
+| FluentAssertions | 8.11.0  | Xceed Community | [NuGet](https://www.nuget.org/packages/FluentAssertions/8.11.0) |
+| CSharpier        | 1.3.0   | MIT             | [NuGet](https://www.nuget.org/packages/CSharpier/1.3.0)         |
 
 These are development dependencies, not production package dependencies. The
 exact metadata response is recorded in `docs/dependency-evidence.json`. A complete

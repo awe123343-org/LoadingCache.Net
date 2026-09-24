@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using FluentAssertions;
 
 namespace LoadingCache.Tests;
 
@@ -15,23 +16,15 @@ internal static class AllocationTestProcess
     internal static async Task VerifyAsync(string scenario)
     {
         Result result = await RunAsync(scenario).ConfigureAwait(false);
-        await Assert
-            .That(result.ExitCode)
-            .IsEqualTo(0)
-            .Because(
-                string.Format(
-                    System.Globalization.CultureInfo.InvariantCulture,
-                    "allocation child output: {0} {1}",
-                    result.Output,
-                    result.Error
-                )
-            );
+        result
+            .ExitCode.Should()
+            .Be(0, "allocation child output: {0} {1}", result.Output, result.Error);
         Report report =
             JsonSerializer.Deserialize<Report>(result.Output.Trim())
             ?? throw new InvalidOperationException("Allocation child did not produce a report.");
-        await Assert.That(report.Scenario).IsEqualTo(scenario);
-        await Assert.That(report.Runtime).IsEqualTo(Environment.Version.ToString());
-        await Assert.That(report.Success).IsTrue();
+        report.Scenario.Should().Be(scenario);
+        report.Runtime.Should().Be(Environment.Version.ToString());
+        report.Success.Should().BeTrue();
     }
 
     internal static async Task<Result> RunAsync(string scenario)
@@ -109,9 +102,9 @@ public sealed class AllocationMeasurementTests
         AllocationTestProcess.Result result = await AllocationTestProcess
             .RunAsync(scenario)
             .ConfigureAwait(false);
-        await Assert.That(result.ExitCode).IsEqualTo(1);
-        await Assert.That(result.Error).Contains(error);
+        result.ExitCode.Should().Be(1);
+        result.Error.Should().Contain(error);
         using JsonDocument report = JsonDocument.Parse(result.Output);
-        await Assert.That(report.RootElement.GetProperty("Success").GetBoolean()).IsFalse();
+        report.RootElement.GetProperty("Success").GetBoolean().Should().BeFalse();
     }
 }

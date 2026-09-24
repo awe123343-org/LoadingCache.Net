@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
 
 namespace LoadingCache.Tests;
@@ -6,7 +7,7 @@ namespace LoadingCache.Tests;
 public sealed class WeakCacheTests
 {
     [Test]
-    public async Task WeakKeysUseReferenceIdentityInsteadOfKeyEquality()
+    public void WeakKeysUseReferenceIdentityInsteadOfKeyEquality()
     {
         using ICache<Key, Value> cache = CacheBuilder
             .Create<Key, Value>()
@@ -17,10 +18,10 @@ public sealed class WeakCacheTests
         Key first = new(7);
         Key equalByValue = new(7);
         cache.Put(first, new Value());
-        await Assert.That(cache.TryGet(first, out Value? firstValue)).IsTrue();
-        Assert.NotNull(firstValue);
-        await Assert.That(cache.TryGet(equalByValue, out _)).IsFalse();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
+        cache.TryGet(first, out Value? firstValue).Should().BeTrue();
+        firstValue.Should().NotBeNull();
+        cache.TryGet(equalByValue, out _).Should().BeFalse();
+        cache.EstimatedCount.Should().Be(1);
     }
 
     [Test]
@@ -28,7 +29,7 @@ public sealed class WeakCacheTests
         AllocationTestProcess.VerifyAsync("weak-hit");
 
     [Test]
-    public async Task WeakKeyLookupDoesNotInvokeKeyEqualityOrHashCodeOverrides()
+    public void WeakKeyLookupDoesNotInvokeKeyEqualityOrHashCodeOverrides()
     {
         using ICache<ThrowingKey, Value> cache = CacheBuilder
             .Create<ThrowingKey, Value>()
@@ -39,12 +40,12 @@ public sealed class WeakCacheTests
         ThrowingKey key = new();
         Value value = new();
         cache.Put(key, value);
-        await Assert.That(cache.TryGet(key, out Value? current)).IsTrue();
-        await Assert.That(ReferenceEquals(current, value)).IsTrue();
+        cache.TryGet(key, out Value? current).Should().BeTrue();
+        current.Should().BeSameAs(value);
     }
 
     [Test]
-    public async Task ReplacedWeakKeyEntryCanBeCollectedAfterLookupAndCleanup()
+    public void ReplacedWeakKeyEntryCanBeCollectedAfterLookupAndCleanup()
     {
         using ICache<Key, Value> cache = CacheBuilder
             .Create<Key, Value>()
@@ -54,13 +55,13 @@ public sealed class WeakCacheTests
             .Build();
         WeakReference key = PopulateReplacedWeakKey(cache);
         ForceCollection(key);
-        await Assert.That(key.IsAlive).IsFalse();
+        key.IsAlive.Should().BeFalse();
         cache.CleanUp();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
+        cache.EstimatedCount.Should().Be(0);
     }
 
     [Test]
-    public async Task WeakKeyIsCollectedAndRemovedByCleanup()
+    public void WeakKeyIsCollectedAndRemovedByCleanup()
     {
         using ICache<Key, Value> cache = CacheBuilder
             .Create<Key, Value>()
@@ -70,14 +71,14 @@ public sealed class WeakCacheTests
             .Build();
         WeakReference key = PopulateWeakKey(cache);
         ForceCollection(key);
-        await Assert.That(key.IsAlive).IsFalse();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
+        key.IsAlive.Should().BeFalse();
+        cache.EstimatedCount.Should().Be(0);
         cache.CleanUp();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
+        cache.EstimatedCount.Should().Be(0);
     }
 
     [Test]
-    public async Task WeakValuesDoNotKeepAValueAlive()
+    public void WeakValuesDoNotKeepAValueAlive()
     {
         using ICache<Key, Value> cache = CacheBuilder
             .Create<Key, Value>()
@@ -88,15 +89,15 @@ public sealed class WeakCacheTests
         Key key = new(7);
         WeakReference value = PopulateWeakValue(cache, key);
         ForceCollection(value);
-        await Assert.That(value.IsAlive).IsFalse();
-        await Assert.That(cache.TryGet(key, out _)).IsFalse();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
+        value.IsAlive.Should().BeFalse();
+        cache.TryGet(key, out _).Should().BeFalse();
+        cache.EstimatedCount.Should().Be(0);
         cache.CleanUp();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
+        cache.EstimatedCount.Should().Be(0);
     }
 
     [Test]
-    public async Task WeakValuesWorkWithSynchronousLoadingCaches()
+    public void WeakValuesWorkWithSynchronousLoadingCaches()
     {
         using ILoadingCache<Key, Value> cache = CacheBuilder
             .Create<Key, Value>()
@@ -107,9 +108,9 @@ public sealed class WeakCacheTests
         Key key = new(7);
         WeakReference value = PopulateWeakLoadedValue(cache, key);
         ForceCollection(value);
-        await Assert.That(value.IsAlive).IsFalse();
-        await Assert.That(cache.TryGet(key, out _)).IsFalse();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
+        value.IsAlive.Should().BeFalse();
+        cache.TryGet(key, out _).Should().BeFalse();
+        cache.EstimatedCount.Should().Be(0);
     }
 
     [Test]
@@ -126,16 +127,16 @@ public sealed class WeakCacheTests
             .BuildAsyncLoading((_, _) => release.Task);
         (Task<Value> wait, WeakReference key) = StartWeakKeyLoad(cache, release);
         release.SetResult(new Value());
-        Assert.NotNull((await wait));
+        (await wait).Should().NotBeNull();
         ForceCollection(key);
-        await Assert.That(key.IsAlive).IsFalse();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
+        key.IsAlive.Should().BeFalse();
+        cache.EstimatedCount.Should().Be(0);
         cache.CleanUp();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
+        cache.EstimatedCount.Should().Be(0);
     }
 
     [Test]
-    public async Task CollectedWeakValueCannotRemoveItsSameKeyReplacement()
+    public void CollectedWeakValueCannotRemoveItsSameKeyReplacement()
     {
         using ICache<Key, Value> cache = CacheBuilder
             .Create<Key, Value>()
@@ -146,18 +147,18 @@ public sealed class WeakCacheTests
         Key key = new(7);
         WeakReference oldReference = PopulateWeakValue(cache, key);
         ForceCollection(oldReference);
-        await Assert.That(oldReference.IsAlive).IsFalse();
-        await Assert.That(cache.TryGet(key, out _)).IsFalse();
+        oldReference.IsAlive.Should().BeFalse();
+        cache.TryGet(key, out _).Should().BeFalse();
         Value replacement = new();
         cache.Put(key, replacement);
         cache.CleanUp();
-        await Assert.That(cache.TryGet(key, out Value? current)).IsTrue();
-        await Assert.That(ReferenceEquals(current, replacement)).IsTrue();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
+        cache.TryGet(key, out Value? current).Should().BeTrue();
+        current.Should().BeSameAs(replacement);
+        cache.EstimatedCount.Should().Be(1);
     }
 
     [Test]
-    public async Task ExpiredWeakValueCanBeReplacedWithoutLeavingAnOldGeneration()
+    public void ExpiredWeakValueCanBeReplacedWithoutLeavingAnOldGeneration()
     {
         var clock = new FakeTimeProvider();
         using ICache<Key, Value> cache = CacheBuilder
@@ -171,19 +172,19 @@ public sealed class WeakCacheTests
         Key key = new(7);
         WeakReference oldReference = PopulateWeakValue(cache, key);
         clock.Advance(TimeSpan.FromSeconds(2));
-        await Assert.That(cache.TryGet(key, out _)).IsFalse();
+        cache.TryGet(key, out _).Should().BeFalse();
         ForceCollection(oldReference);
-        await Assert.That(oldReference.IsAlive).IsFalse();
+        oldReference.IsAlive.Should().BeFalse();
         Value replacement = new();
         cache.Put(key, replacement);
         cache.CleanUp();
-        await Assert.That(cache.TryGet(key, out Value? current)).IsTrue();
-        await Assert.That(ReferenceEquals(current, replacement)).IsTrue();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
+        cache.TryGet(key, out Value? current).Should().BeTrue();
+        current.Should().BeSameAs(replacement);
+        cache.EstimatedCount.Should().Be(1);
     }
 
     [Test]
-    public async Task StrongValueCanKeepAWeakKeyAliveThroughItsOwnObjectGraph()
+    public void StrongValueCanKeepAWeakKeyAliveThroughItsOwnObjectGraph()
     {
         using ICache<Key, Value> cache = CacheBuilder
             .Create<Key, Value>()
@@ -193,13 +194,13 @@ public sealed class WeakCacheTests
             .Build();
         (WeakReference keyReference, Value value) = PopulateStrongValueWithWeakKey(cache);
         ForceCollection(keyReference);
-        await Assert.That(keyReference.IsAlive).IsTrue();
+        keyReference.IsAlive.Should().BeTrue();
         GC.KeepAlive(value);
         GC.KeepAlive(cache);
     }
 
     [Test]
-    public async Task RepeatedWeakCollectionDoesNotLeaveGhostPolicyEntries()
+    public void RepeatedWeakCollectionDoesNotLeaveGhostPolicyEntries()
     {
         using ICache<Key, Value> cache = CacheBuilder
             .Create<Key, Value>()
@@ -211,15 +212,15 @@ public sealed class WeakCacheTests
         (WeakReference[] keys, WeakReference[] values) = PopulateWeakEntries(cache, 32);
         ForceCollection([.. keys, .. values]);
         cache.CleanUp();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
-        Assert.NotNull(cache.Policy.Eviction);
-        await Assert.That(cache.Policy.Eviction!.WeightedSize).IsEqualTo(0);
-        await Assert.That(cache.Policy.Eviction.Hottest(64)).IsEmpty();
-        await Assert.That(cache.Policy.Eviction.Coldest(64)).IsEmpty();
+        cache.EstimatedCount.Should().Be(0);
+        cache.Policy.Eviction.Should().NotBeNull();
+        cache.Policy.Eviction!.WeightedSize.Should().Be(0);
+        cache.Policy.Eviction.Hottest(64).Should().BeEmpty();
+        cache.Policy.Eviction.Coldest(64).Should().BeEmpty();
     }
 
     [Test]
-    public async Task LiveWeakLookupAndDictionarySnapshotNeverExposeCollectedTargets()
+    public void LiveWeakLookupAndDictionarySnapshotNeverExposeCollectedTargets()
     {
         using ICache<Key, Value> cache = CacheBuilder
             .Create<Key, Value>()
@@ -233,20 +234,20 @@ public sealed class WeakCacheTests
         Value liveValue = new();
         cache.Put(liveKey, liveValue);
         ForceCollection([.. deadKeys, .. deadValues]);
-        await Assert.That(cache.TryGet(liveKey, out Value? current)).IsTrue();
-        await Assert.That(ReferenceEquals(current, liveValue)).IsTrue();
+        cache.TryGet(liveKey, out Value? current).Should().BeTrue();
+        current.Should().BeSameAs(liveValue);
         KeyValuePair<Key, Value>[] snapshot = [.. cache.AsDictionary()];
-        await Assert
-            .That(snapshot)
-            .HasSingleItem(pair =>
+        snapshot
+            .Should()
+            .ContainSingle(pair =>
                 ReferenceEquals(pair.Key, liveKey) && ReferenceEquals(pair.Value, liveValue)
             );
-        await Assert.That(snapshot).DoesNotContain(pair => pair.Key == null || pair.Value == null);
-        await Assert.That(cache.AsDictionary().Count).IsEqualTo(1);
+        snapshot.Should().NotContain(pair => pair.Key == null || pair.Value == null);
+        cache.AsDictionary().Count.Should().Be(1);
     }
 
     [Test]
-    public async Task SynchronousRefreshPublishesAWeakValue()
+    public void SynchronousRefreshPublishesAWeakValue()
     {
         int calls = 0;
         using ILoadingCache<Key, Value> cache = CacheBuilder
@@ -265,14 +266,14 @@ public sealed class WeakCacheTests
             cache,
             key
         );
-        await Assert.That(calls).IsEqualTo(2);
+        calls.Should().Be(2);
         ForceCollection(firstReference, secondReference);
-        await Assert.That(cache.TryGet(key, out _)).IsFalse();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
+        cache.TryGet(key, out _).Should().BeFalse();
+        cache.EstimatedCount.Should().Be(0);
     }
 
     [Test]
-    public async Task WeakKeysRejectAnExplicitComparer()
+    public void WeakKeysRejectAnExplicitComparer()
     {
         Action build = () =>
             CacheBuilder
@@ -282,14 +283,15 @@ public sealed class WeakCacheTests
                 .Comparer(EqualityComparer<Key>.Default)
                 .WeakKeys()
                 .Build();
-        await Assert
-            .That(build)
-            .Throws<InvalidOperationException>()
-            .WithMessageContaining("identity");
+        build
+            .Should()
+            .Throw<InvalidOperationException>()
+            .Which.Message.Should()
+            .Contain("identity");
     }
 
     [Test]
-    public async Task WeakValuesRejectAsynchronousCachePersonalities()
+    public void WeakValuesRejectAsynchronousCachePersonalities()
     {
         Action build = () =>
             CacheBuilder
@@ -298,21 +300,22 @@ public sealed class WeakCacheTests
                 .MaxConcurrentLoads(1)
                 .WeakValues()
                 .BuildAsync();
-        await Assert
-            .That(build)
-            .Throws<InvalidOperationException>()
-            .WithMessageContaining("asynchronous");
+        build
+            .Should()
+            .Throw<InvalidOperationException>()
+            .Which.Message.Should()
+            .Contain("asynchronous");
     }
 
     [Test]
-    public async Task WeakReferenceModesRejectValueTypeArguments()
+    public void WeakReferenceModesRejectValueTypeArguments()
     {
         Action weakKey = () =>
             CacheBuilder.Create<int, Value>().MaximumSize(8).MaxConcurrentLoads(1).WeakKeys();
         Action weakValue = () =>
             CacheBuilder.Create<Key, int>().MaximumSize(8).MaxConcurrentLoads(1).WeakValues();
-        await Assert.That(weakKey).Throws<InvalidOperationException>();
-        await Assert.That(weakValue).Throws<InvalidOperationException>();
+        weakKey.Should().Throw<InvalidOperationException>();
+        weakValue.Should().Throw<InvalidOperationException>();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -321,12 +324,9 @@ public sealed class WeakCacheTests
         Key key = new(7);
         cache.Put(key, new Value());
         WeakReference reference = new(key);
-        if (!(cache.TryGet(key, out Value? value)))
-            Assert.Fail("Expected cache.TryGet(key, out Value? value) to be true ().");
-        if (!((value) is not null))
-            Assert.Fail("Expected value to be non-null ().");
-        if ((cache.EstimatedCount) != (1))
-            Assert.Fail("Expected cache.EstimatedCount to equal (1).");
+        cache.TryGet(key, out Value? value).Should().BeTrue();
+        value.Should().NotBeNull();
+        cache.EstimatedCount.Should().Be(1);
         GC.KeepAlive(key);
         GC.KeepAlive(value);
         return reference;
@@ -338,10 +338,8 @@ public sealed class WeakCacheTests
         Key key = new(7);
         cache.Put(key, new Value());
         cache.Put(key, new Value());
-        if (!(cache.TryGet(key, out Value? value)))
-            Assert.Fail("Expected cache.TryGet(key, out Value? value) to be true ().");
-        if (!((value) is not null))
-            Assert.Fail("Expected value to be non-null ().");
+        cache.TryGet(key, out Value? value).Should().BeTrue();
+        value.Should().NotBeNull();
         WeakReference reference = new(key);
         GC.KeepAlive(key);
         GC.KeepAlive(value);
@@ -353,10 +351,8 @@ public sealed class WeakCacheTests
     {
         Value value = new();
         cache.Put(key, value);
-        if (!(cache.TryGet(key, out Value? liveValue)))
-            Assert.Fail("Expected cache.TryGet(key, out Value? liveValue) to be true ().");
-        if (!(ReferenceEquals(liveValue, value)))
-            Assert.Fail("Expected liveValue to reference (value).");
+        cache.TryGet(key, out Value? liveValue).Should().BeTrue();
+        liveValue.Should().BeSameAs(value);
         WeakReference reference = new(value);
         GC.KeepAlive(value);
         GC.KeepAlive(liveValue);
@@ -368,10 +364,8 @@ public sealed class WeakCacheTests
     {
         Value value = cache.Get(key);
         WeakReference reference = new(value);
-        if (!(cache.TryGet(key, out Value? current)))
-            Assert.Fail("Expected cache.TryGet(key, out Value? current) to be true ().");
-        if (!(ReferenceEquals(current, value)))
-            Assert.Fail("Expected current to reference (value).");
+        cache.TryGet(key, out Value? current).Should().BeTrue();
+        current.Should().BeSameAs(value);
         GC.KeepAlive(value);
         GC.KeepAlive(current);
         return reference;
@@ -386,8 +380,7 @@ public sealed class WeakCacheTests
         Value value = new(key);
         cache.Put(key, value);
         WeakReference reference = new(key);
-        if (!(value.References(key)))
-            Assert.Fail("Expected value.References(key) to be true ().");
+        value.References(key).Should().BeTrue();
         GC.KeepAlive(key);
         return (reference, value);
     }
@@ -402,10 +395,8 @@ public sealed class WeakCacheTests
         WeakReference firstReference = new(first);
         Value second = cache.RefreshAsync(key).GetAwaiter().GetResult();
         WeakReference secondReference = new(second);
-        if (!(cache.TryGet(key, out Value? current)))
-            Assert.Fail("Expected cache.TryGet(key, out Value? current) to be true ().");
-        if (!(ReferenceEquals(current, second)))
-            Assert.Fail("Expected current to reference (second).");
+        cache.TryGet(key, out Value? current).Should().BeTrue();
+        current.Should().BeSameAs(second);
         GC.KeepAlive(first);
         GC.KeepAlive(second);
         GC.KeepAlive(current);

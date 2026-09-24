@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using FluentAssertions;
 
 namespace LoadingCache.StressTests;
 
@@ -31,7 +32,7 @@ public sealed class FeatureCombinationStabilityTests
             "LOADINGCACHE_FEATURE_SOAK_SECONDS"
         );
         int seconds = configured is null ? 5 : int.Parse(configured, CultureInfo.InvariantCulture);
-        await Assert.That(seconds).IsBetween(1, 86_400);
+        seconds.Should().BeInRange(1, 86_400);
         string directory =
             Environment.GetEnvironmentVariable("LOADINGCACHE_SOAK_OUTPUT")
             ?? Path.Combine(Environment.CurrentDirectory, "artifacts", "soak");
@@ -279,17 +280,14 @@ public sealed class FeatureCombinationStabilityTests
                 break;
         }
 
-        await Assert.That((cache.Error) is null).IsTrue();
+        cache.Error.Should().BeNull();
     }
 
     private static void Validate(Payload value, int id, int instance)
     {
-        if ((value.KeyId) != (id))
-            Assert.Fail("Expected value.KeyId to equal (id).");
-        if ((value.Instance) != (instance))
-            Assert.Fail("Expected value.Instance to equal (instance).");
-        if ((value.Complement) != (~value.Version))
-            Assert.Fail("Expected value.Complement to equal (~value.Version).");
+        value.KeyId.Should().Be(id);
+        value.Instance.Should().Be(instance);
+        value.Complement.Should().Be(~value.Version);
     }
 
     private static void Progress(
@@ -406,8 +404,7 @@ public sealed class FeatureCombinationStabilityTests
 
         internal void Validate(IReadOnlyDictionary<Key, Payload> values)
         {
-            if ((values.Count) != (2))
-                Assert.Fail("Expected values.Count to equal (2).");
+            values.Count.Should().Be(2);
             foreach (var pair in values)
                 FeatureCombinationStabilityTests.Validate(pair.Value, pair.Key.Id, Instance);
         }
@@ -422,8 +419,7 @@ public sealed class FeatureCombinationStabilityTests
             } while (
                 prior < active && Interlocked.CompareExchange(ref _peak, active, prior) != prior
             );
-            if ((active) > (LoadLimit))
-                Assert.Fail("Expected active to be at most (LoadLimit).");
+            active.Should().BeLessThanOrEqualTo(LoadLimit);
         }
 
         private Payload Load(Key key)
@@ -519,17 +515,18 @@ public sealed class FeatureCombinationStabilityTests
                     int count = eviction
                         ? Interlocked.Increment(ref value.Evictions)
                         : Interlocked.Increment(ref value.Removals);
-                    if ((count) != (1))
-                        Assert.Fail(
-                            "Expected count to equal ( 1, \"each payload is published only once and must not be notified twice\" )."
+                    count
+                        .Should()
+                        .Be(
+                            1,
+                            "each payload is published only once and must not be notified twice"
                         );
                 }
 
                 if (notification.Cause == RemovalCause.Collected)
                     Interlocked.Increment(ref _collected);
                 if (eviction)
-                    if (notification.Cause is not (RemovalCause.Size or RemovalCause.Collected))
-                        Assert.Fail($"Unexpected removal cause: {notification.Cause}");
+                    notification.Cause.Should().BeOneOf(RemovalCause.Size, RemovalCause.Collected);
                 if (notification.Key is not { } key)
                     return;
                 try
@@ -572,16 +569,16 @@ public sealed class FeatureCombinationStabilityTests
 
             Engine.CleanUp();
             Engine.AssertInvariants();
-            await Assert.That(Engine.EstimatedCount).IsLessThanOrEqualTo(Maximum);
-            await Assert.That(Engine.GetStatistics().InFlightLoads).IsEqualTo(0);
-            await Assert.That(Volatile.Read(ref _active)).IsEqualTo(0);
-            await Assert.That(Volatile.Read(ref _peak)).IsLessThanOrEqualTo(LoadLimit);
-            await Assert.That(Engine.GetNotificationStatistics().Queued).IsLessThanOrEqualTo(32);
+            Engine.EstimatedCount.Should().BeLessThanOrEqualTo(Maximum);
+            Engine.GetStatistics().InFlightLoads.Should().Be(0);
+            Volatile.Read(ref _active).Should().Be(0);
+            Volatile.Read(ref _peak).Should().BeLessThanOrEqualTo(LoadLimit);
+            Engine.GetNotificationStatistics().Queued.Should().BeLessThanOrEqualTo(32);
             foreach (var pair in Engine.DictionarySnapshot())
                 FeatureCombinationStabilityTests.Validate(pair.Value, pair.Key.Id, Instance);
-            await Assert.That((Error) is null).IsTrue();
+            Error.Should().BeNull();
             if (!_statistics)
-                await Assert.That(Engine.GetStatistics().BulkLoads).IsEqualTo(0);
+                Engine.GetStatistics().BulkLoads.Should().Be(0);
         }
 
         internal object Snapshot() =>
@@ -614,8 +611,8 @@ public sealed class FeatureCombinationStabilityTests
                 await Task.Yield();
             }
 
-            await Assert.That((Error) is null).IsTrue();
-            await Assert.That(Engine.GetNotificationStatistics().Queued).IsEqualTo(0);
+            Error.Should().BeNull();
+            Engine.GetNotificationStatistics().Queued.Should().Be(0);
         }
     }
 

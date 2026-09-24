@@ -1,4 +1,5 @@
-using TUnit.Assertions.Exceptions;
+using FluentAssertions;
+using FluentAssertions.Execution;
 
 namespace LoadingCache.Tests;
 
@@ -9,7 +10,7 @@ public sealed class ParallelResidentPutTests
     [Arguments(false, true)]
     [Arguments(true, false)]
     [Arguments(true, true)]
-    public async Task StableReplacementUsesEntryOwnershipUnlessBulkRequiresCoordination(
+    public void StableReplacementUsesEntryOwnershipUnlessBulkRequiresCoordination(
         bool supportsBulk,
         bool statistics
     )
@@ -29,11 +30,11 @@ public sealed class ParallelResidentPutTests
         engine.Put(1, "old");
         engine.CleanUp();
         engine.Put(1, "new");
-        await Assert.That(probe.Calls).IsEqualTo(1);
-        await Assert.That(probe.CoordinationHeld).IsEqualTo(supportsBulk);
-        await Assert.That(engine.TryGet(1, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("new");
-        await Assert.That(engine.GetStatistics().ReplacedRemovals).IsEqualTo(statistics ? 1 : 0);
+        probe.Calls.Should().Be(1);
+        probe.CoordinationHeld.Should().Be(supportsBulk);
+        engine.TryGet(1, out string? value).Should().BeTrue();
+        value.Should().Be("new");
+        engine.GetStatistics().ReplacedRemovals.Should().Be(statistics ? 1 : 0);
         engine.AssertInvariants();
     }
 
@@ -49,44 +50,43 @@ public sealed class ParallelResidentPutTests
             .CreateEngine(supportsBulkLoading: false);
         if (asynchronous)
         {
-            await Assert
-                .That(
-                    (Func<Task>)(
-                        () =>
-                            engine
-                                .GetAllAsync(
-                                    static (_, _) =>
-                                        throw new AssertionException(
-                                            "Single loader must not execute."
-                                        ),
-                                    null,
-                                    static (_, _) =>
-                                        throw new AssertionException(
-                                            "Bulk loader must not execute."
-                                        ),
-                                    [1],
-                                    CancellationToken.None
-                                )
-                                .AsTask()
-                    )
+            await engine
+                .Awaiting(static current =>
+                    current
+                        .GetAllAsync(
+                            static (_, _) =>
+                                throw new AssertionFailedException(
+                                    "Single loader must not execute."
+                                ),
+                            null,
+                            static (_, _) =>
+                                throw new AssertionFailedException("Bulk loader must not execute."),
+                            [1],
+                            CancellationToken.None
+                        )
+                        .AsTask()
                 )
-                .ThrowsExactly<InvalidOperationException>();
+                .Should()
+                .ThrowExactlyAsync<InvalidOperationException>();
         }
         else
         {
-            await Assert
-                .That(() =>
-                    engine.GetAll(
+            engine
+                .Invoking(static current =>
+                    current.GetAll(
                         [1],
-                        static _ => throw new AssertionException("Single loader must not execute."),
+                        static _ =>
+                            throw new AssertionFailedException("Single loader must not execute."),
                         null,
-                        static _ => throw new AssertionException("Bulk loader must not execute.")
+                        static _ =>
+                            throw new AssertionFailedException("Bulk loader must not execute.")
                     )
                 )
-                .ThrowsExactly<InvalidOperationException>();
+                .Should()
+                .ThrowExactly<InvalidOperationException>();
         }
 
-        await Assert.That(engine.EstimatedCount).IsEqualTo(0);
+        engine.EstimatedCount.Should().Be(0);
         engine.AssertInvariants();
     }
 

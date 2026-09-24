@@ -1,3 +1,4 @@
+using FluentAssertions;
 using JetBrains.Annotations;
 using LoadingCache.Maintenance;
 using Microsoft.Extensions.Time.Testing;
@@ -41,7 +42,7 @@ public sealed class AtomicPublicationRaceTests
         Task<string>? oldTask = null;
         if (materializeOldTask)
         {
-            await Assert.That(cache.TryGetTask(1, out oldTask)).IsTrue();
+            cache.TryGetTask(1, out oldTask).Should().BeTrue();
         }
 
         var readerEntered = NewSignal();
@@ -50,19 +51,16 @@ public sealed class AtomicPublicationRaceTests
         try
         {
             await publication.Entered.WaitAsync(Watchdog);
-            await Assert.That(cache.TryGet(1, out string? oldValue)).IsTrue();
-            await Assert.That(oldValue).IsEqualTo("old");
+            cache.TryGet(1, out string? oldValue).Should().BeTrue();
+            oldValue.Should().Be("old");
             reader = Task.Run(() =>
             {
                 readerEntered.TrySetResult();
-                if (!(cache.TryGetTask(1, out Task<string>? task)))
-                    Assert.Fail(
-                        "Expected cache.TryGetTask(1, out Task<string>? task) to be true ()."
-                    );
+                cache.TryGetTask(1, out Task<string>? task).Should().BeTrue();
                 return new TaskObservation<string>(task!);
             });
             await readerEntered.Task.WaitAsync(Watchdog);
-            await Assert.That(reader.IsCompleted).IsFalse();
+            reader.IsCompleted.Should().BeFalse();
         }
         finally
         {
@@ -70,16 +68,15 @@ public sealed class AtomicPublicationRaceTests
             await Task.WhenAll(writer, reader ?? Task.CompletedTask).WaitAsync(Watchdog);
         }
 
-        await Assert.That(publication.TimedOut).IsFalse();
+        publication.TimedOut.Should().BeFalse();
         Task<string> observed = (await reader).Task;
-        await Assert.That((await observed)).IsEqualTo("new");
-        await Assert.That(cache.TryGetTask(1, out Task<string>? current)).IsTrue();
-        Assert.NotNull(current);
-        await Assert.That(ReferenceEquals(current, observed)).IsTrue();
+        (await observed).Should().Be("new");
+        cache.TryGetTask(1, out Task<string>? current).Should().BeTrue();
+        current.Should().BeSameAs(observed);
         if (oldTask is not null)
         {
-            await Assert.That(ReferenceEquals(observed, oldTask)).IsFalse();
-            await Assert.That((await oldTask)).IsEqualTo("old");
+            observed.Should().NotBeSameAs(oldTask);
+            (await oldTask).Should().Be("old");
         }
     }
 
@@ -127,8 +124,7 @@ public sealed class AtomicPublicationRaceTests
             (_, _) => Task.FromResult(refreshedValue)
         );
         cache.Set(1, oldValue);
-        await Assert.That(cache.TryGetTask(1, out Task<TValue>? oldTask)).IsTrue();
-        Assert.NotNull(oldTask);
+        cache.TryGetTask(1, out Task<TValue>? oldTask).Should().BeTrue();
         Task<TValue> refresh = Task
             .Factory.StartNew(
                 static async state =>
@@ -142,18 +138,16 @@ public sealed class AtomicPublicationRaceTests
         try
         {
             await completion.Entered.WaitAsync(Watchdog);
-            await Assert.That(refresh.IsCompleted).IsFalse();
-            await Assert.That(cache.TryGet(1, out TValue? published)).IsTrue();
-            await Assert.That(published).IsEqualTo(refreshedValue);
-            await Assert.That(cache.TryGetTask(1, out Task<TValue>? publishedTask)).IsTrue();
-            Assert.NotNull(publishedTask);
-            await Assert.That((await publishedTask!)).IsEqualTo(refreshedValue);
+            refresh.IsCompleted.Should().BeFalse();
+            cache.TryGet(1, out TValue? published).Should().BeTrue();
+            published.Should().Be(refreshedValue);
+            cache.TryGetTask(1, out Task<TValue>? publishedTask).Should().BeTrue();
+            (await publishedTask!).Should().Be(refreshedValue);
             cache.Set(1, replacement);
-            await Assert.That(cache.TryGetTask(1, out Task<TValue>? replacementTask)).IsTrue();
-            Assert.NotNull(replacementTask);
-            await Assert.That((await replacementTask!)).IsEqualTo(replacement);
-            await Assert.That((await publishedTask)).IsEqualTo(refreshedValue);
-            await Assert.That((await oldTask!)).IsEqualTo(oldValue);
+            cache.TryGetTask(1, out Task<TValue>? replacementTask).Should().BeTrue();
+            (await replacementTask!).Should().Be(replacement);
+            (await publishedTask).Should().Be(refreshedValue);
+            (await oldTask!).Should().Be(oldValue);
         }
         finally
         {
@@ -161,13 +155,13 @@ public sealed class AtomicPublicationRaceTests
             await refresh.WaitAsync(Watchdog);
         }
 
-        await Assert.That(completion.TimedOut).IsFalse();
-        await Assert.That((await refresh)).IsEqualTo(refreshedValue);
-        await Assert.That(cache.TryGet(1, out TValue? final)).IsTrue();
-        await Assert.That(final).IsEqualTo(replacement);
+        completion.TimedOut.Should().BeFalse();
+        (await refresh).Should().Be(refreshedValue);
+        cache.TryGet(1, out TValue? final).Should().BeTrue();
+        final.Should().Be(replacement);
         cache.CleanUp();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
-        await Assert.That(cache.Policy.Eviction!.WeightedSize).IsEqualTo(1);
+        cache.EstimatedCount.Should().Be(1);
+        cache.Policy.Eviction!.WeightedSize.Should().Be(1);
     }
 
     [Test]
@@ -278,8 +272,7 @@ public sealed class AtomicPublicationRaceTests
             (_, _) => Task.FromResult(refreshedValue)
         );
         cache.Set(1, oldValue);
-        await Assert.That(cache.TryGetTask(1, out Task<TValue>? oldTask)).IsTrue();
-        Assert.NotNull(oldTask);
+        cache.TryGetTask(1, out Task<TValue>? oldTask).Should().BeTrue();
         Task<TValue> refresh = Task
             .Factory.StartNew(
                 static async state =>
@@ -294,11 +287,10 @@ public sealed class AtomicPublicationRaceTests
         try
         {
             await publication.Entered.WaitAsync(Watchdog);
-            await Assert.That(cache.TryGet(1, out TValue? published)).IsTrue();
-            await Assert.That(published).IsEqualTo(refreshedValue);
-            await Assert.That(cache.TryGetTask(1, out publishedTask)).IsTrue();
-            Assert.NotNull(publishedTask);
-            await Assert.That((await publishedTask!)).IsEqualTo(refreshedValue);
+            cache.TryGet(1, out TValue? published).Should().BeTrue();
+            published.Should().Be(refreshedValue);
+            cache.TryGetTask(1, out publishedTask).Should().BeTrue();
+            (await publishedTask!).Should().Be(refreshedValue);
             if (replaceBeforeFailure)
             {
                 cache.Set(1, replacement);
@@ -310,25 +302,24 @@ public sealed class AtomicPublicationRaceTests
             await ObserveControlledFailure(refresh);
         }
 
-        await Assert.That(publication.TimedOut).IsFalse();
-        await Assert.That(cache.TryGet(1, out TValue? restored)).IsTrue();
-        await Assert.That(restored).IsEqualTo(replaceBeforeFailure ? replacement : oldValue);
-        await Assert.That(cache.TryGetTask(1, out Task<TValue>? current)).IsTrue();
-        Assert.NotNull(current);
-        await Assert.That((await current!)).IsEqualTo(restored);
+        publication.TimedOut.Should().BeFalse();
+        cache.TryGet(1, out TValue? restored).Should().BeTrue();
+        restored.Should().Be(replaceBeforeFailure ? replacement : oldValue);
+        cache.TryGetTask(1, out Task<TValue>? current).Should().BeTrue();
+        (await current!).Should().Be(restored);
         if (!replaceBeforeFailure)
         {
-            await Assert.That(ReferenceEquals(current, oldTask)).IsTrue();
+            current.Should().BeSameAs(oldTask);
             cache.Set(1, replacement);
         }
 
-        await Assert.That((await oldTask!)).IsEqualTo(oldValue);
-        await Assert.That((await publishedTask)).IsEqualTo(refreshedValue);
-        await Assert.That(cache.TryGet(1, out TValue? final)).IsTrue();
-        await Assert.That(final).IsEqualTo(replacement);
+        (await oldTask!).Should().Be(oldValue);
+        (await publishedTask).Should().Be(refreshedValue);
+        cache.TryGet(1, out TValue? final).Should().BeTrue();
+        final.Should().Be(replacement);
         cache.CleanUp();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
-        await Assert.That(cache.Policy.Eviction!.WeightedSize).IsEqualTo(1);
+        cache.EstimatedCount.Should().Be(1);
+        cache.Policy.Eviction!.WeightedSize.Should().Be(1);
     }
 
     [Test]
@@ -356,10 +347,10 @@ public sealed class AtomicPublicationRaceTests
         {
             await publication.Entered.WaitAsync(Watchdog);
             stale = engine.CaptureMemoryPressureSnapshot(1, 1);
-            Assert.NotNull(stale);
-            await Assert.That(stale.Candidates).HasSingleItem();
-            await Assert.That(cache.TryGet(1, out string? value)).IsTrue();
-            await Assert.That(value).IsEqualTo("refresh");
+            stale.Should().NotBeNull();
+            stale.Candidates.Should().ContainSingle();
+            cache.TryGet(1, out string? value).Should().BeTrue();
+            value.Should().Be("refresh");
         }
         finally
         {
@@ -367,13 +358,13 @@ public sealed class AtomicPublicationRaceTests
             await ObserveControlledFailure(refresh);
         }
 
-        await Assert.That(publication.TimedOut).IsFalse();
-        await Assert.That(cache.TryGet(1, out string? restored)).IsTrue();
-        await Assert.That(restored).IsEqualTo("old");
+        publication.TimedOut.Should().BeFalse();
+        cache.TryGet(1, out string? restored).Should().BeTrue();
+        restored.Should().Be("old");
         cache.Set(1, "new");
-        await Assert.That(engine.TrimForMemoryPressure(stale)).IsEqualTo(0);
-        await Assert.That(cache.TryGet(1, out string? current)).IsTrue();
-        await Assert.That(current).IsEqualTo("new");
+        engine.TrimForMemoryPressure(stale).Should().Be(0);
+        cache.TryGet(1, out string? current).Should().BeTrue();
+        current.Should().Be("new");
     }
 
     [Test]
@@ -412,14 +403,12 @@ public sealed class AtomicPublicationRaceTests
                     {
                         if (Interlocked.Increment(ref callbacks) == 1)
                         {
-                            if ((current.Value) != ("refresh"))
-                                Assert.Fail("Expected current.Value to equal (\"refresh\").");
+                            current.Value.Should().Be("refresh");
                             pauseTransform();
                             return CacheMutation.Set("stale transform");
                         }
 
-                        if ((current.Value) != ("new"))
-                            Assert.Fail("Expected current.Value to equal (\"new\").");
+                        current.Value.Should().Be("new");
                         return CacheMutation.Keep<string>();
                     }
                 )
@@ -429,11 +418,9 @@ public sealed class AtomicPublicationRaceTests
             await ObserveControlledFailure(refresh);
             cache.Set(1, "new");
             transform.Release();
-            await Assert
-                .That((await compute.WaitAsync(Watchdog)).Kind)
-                .IsEqualTo(CacheMutationKind.Keep);
-            await Assert.That(callbacks).IsEqualTo(2);
-            await Assert.That(dictionary[1]).IsEqualTo("new");
+            (await compute.WaitAsync(Watchdog)).Kind.Should().Be(CacheMutationKind.Keep);
+            callbacks.Should().Be(2);
+            dictionary[1].Should().Be("new");
         }
         finally
         {
@@ -443,8 +430,8 @@ public sealed class AtomicPublicationRaceTests
                 .WaitAsync(Watchdog);
         }
 
-        await Assert.That(publication.TimedOut).IsFalse();
-        await Assert.That(transform.TimedOut).IsFalse();
+        publication.TimedOut.Should().BeFalse();
+        transform.TimedOut.Should().BeFalse();
     }
 
     [Test]
@@ -506,10 +493,10 @@ public sealed class AtomicPublicationRaceTests
             reader = Task.Factory.StartNew(
                 static state =>
                 {
-                    if (!(((AsyncLoadingCache<int, string>)state!).TryGet(1, out string? value)))
-                        Assert.Fail(
-                            "Expected ((AsyncLoadingCache<int, string>)state!) .TryGet(1, out string? value) to be true ()."
-                        );
+                    ((AsyncLoadingCache<int, string>)state!)
+                        .TryGet(1, out string? value)
+                        .Should()
+                        .BeTrue();
                     return value!;
                 },
                 cache,
@@ -521,18 +508,16 @@ public sealed class AtomicPublicationRaceTests
             publication.Release();
             await ObserveControlledFailure(refresh);
             retry = cache.RefreshAsync(1).AsTask();
-            await Assert.That((await retry.WaitAsync(Watchdog))).IsEqualTo("retry");
-            await Assert.That(clock.GetTimestamp()).IsEqualTo(timestamp);
+            (await retry.WaitAsync(Watchdog)).Should().Be("retry");
+            clock.GetTimestamp().Should().Be(timestamp);
             readExpiry.Release();
-            await Assert.That((await reader.WaitAsync(Watchdog))).IsEqualTo("failed refresh");
-            await Assert
-                .That(cache.Policy.VariableExpiration!.GetExpiresAfter(1))
-                .IsEqualTo(TimeSpan.FromHours(1));
-            await Assert.That(cache.TryGet(1, out string? current)).IsTrue();
-            await Assert.That(current).IsEqualTo("retry");
+            (await reader.WaitAsync(Watchdog)).Should().Be("failed refresh");
+            cache.Policy.VariableExpiration!.GetExpiresAfter(1).Should().Be(TimeSpan.FromHours(1));
+            cache.TryGet(1, out string? current).Should().BeTrue();
+            current.Should().Be("retry");
             cache.CleanUp();
-            await Assert.That(cache.EstimatedCount).IsEqualTo(1);
-            await Assert.That(reloads).IsEqualTo(2);
+            cache.EstimatedCount.Should().Be(1);
+            reloads.Should().Be(2);
         }
         finally
         {
@@ -546,8 +531,8 @@ public sealed class AtomicPublicationRaceTests
                 .WaitAsync(Watchdog);
         }
 
-        await Assert.That(publication.TimedOut).IsFalse();
-        await Assert.That(readExpiry.TimedOut).IsFalse();
+        publication.TimedOut.Should().BeFalse();
+        readExpiry.TimedOut.Should().BeFalse();
     }
 
     [Test]
@@ -573,10 +558,7 @@ public sealed class AtomicPublicationRaceTests
         Task<string> reader = Task.Factory.StartNew(
             static state =>
             {
-                if (!(((Cache<int, string>)state!).TryGet(1, out string? value)))
-                    Assert.Fail(
-                        "Expected ((Cache<int, string>)state!).TryGet(1, out string? value) to be true ()."
-                    );
+                ((Cache<int, string>)state!).TryGet(1, out string? value).Should().BeTrue();
                 return value!;
             },
             cache,
@@ -589,7 +571,7 @@ public sealed class AtomicPublicationRaceTests
             await access.Entered.WaitAsync(Watchdog);
             ReplaceSlot(cache, clear);
             cache.CleanUp();
-            await Assert.That(policy.ResidentCount).IsEqualTo(2);
+            policy.ResidentCount.Should().Be(2);
         }
         finally
         {
@@ -597,18 +579,18 @@ public sealed class AtomicPublicationRaceTests
             await reader.WaitAsync(Watchdog);
         }
 
-        await Assert.That(access.TimedOut).IsFalse();
-        await Assert.That((await reader)).IsEqualTo("old");
-        await Assert.That(policy.GetReadBufferStatistics().Enqueued).IsEqualTo(1);
+        access.TimedOut.Should().BeFalse();
+        (await reader).Should().Be("old");
+        policy.GetReadBufferStatistics().Enqueued.Should().Be(1);
         cache.CleanUp();
         AssertReplacementResidents(cache);
-        await Assert.That(policy.GetReadBufferStatistics().Queued).IsEqualTo(0);
+        policy.GetReadBufferStatistics().Queued.Should().Be(0);
     }
 
     [Test]
     [Arguments(false)]
     [Arguments(true)]
-    public async Task BuiltInPolicyDropsQueuedOldAccessAfterSlotReplacement(bool clear)
+    public void BuiltInPolicyDropsQueuedOldAccessAfterSlotReplacement(bool clear)
     {
         var scheduler = new ManualScheduler();
         var engine = new CacheEngine<int, string>(
@@ -626,13 +608,13 @@ public sealed class AtomicPublicationRaceTests
         using var cache = new Cache<int, string>(engine);
         cache.Put(1, "old");
         cache.CleanUp();
-        await Assert.That(cache.TryGet(1, out _)).IsTrue();
-        await Assert.That(engine.GetPolicyReadBufferStatistics().Queued).IsEqualTo(1);
+        cache.TryGet(1, out _).Should().BeTrue();
+        engine.GetPolicyReadBufferStatistics().Queued.Should().Be(1);
         ReplaceSlot(cache, clear);
         scheduler.RunAll();
         cache.CleanUp();
         AssertReplacementResidents(cache);
-        await Assert.That(engine.GetPolicyReadBufferStatistics().Queued).IsEqualTo(0);
+        engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
     }
 
     private static CacheEngine<int, TValue> CreateEngine<TValue>(
@@ -669,9 +651,10 @@ public sealed class AtomicPublicationRaceTests
         };
 
     private static async Task ObserveControlledFailure<TValue>(Task<TValue> task) =>
-        await Assert
-            .That((Func<Task>)(() => task.WaitAsync(Watchdog)))
-            .ThrowsExactly<ControlledPublicationFailure>();
+        await FluentActions
+            .Awaiting(() => task.WaitAsync(Watchdog))
+            .Should()
+            .ThrowExactlyAsync<ControlledPublicationFailure>();
 
     private static TaskCompletionSource NewSignal() =>
         new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -684,8 +667,7 @@ public sealed class AtomicPublicationRaceTests
         }
         else
         {
-            if (!(cache.Invalidate(1)))
-                Assert.Fail("Expected cache.Invalidate(1) to be true ().");
+            cache.Invalidate(1).Should().BeTrue();
         }
 
         cache.Put(1, "new");
@@ -694,17 +676,12 @@ public sealed class AtomicPublicationRaceTests
 
     private static void AssertReplacementResidents(Cache<int, string> cache)
     {
-        if ((cache.EstimatedCount) != (2))
-            Assert.Fail("Expected cache.EstimatedCount to equal (2).");
-        if ((cache.Policy.Eviction!.WeightedSize) != (2))
-            Assert.Fail("Expected cache.Policy.Eviction!.WeightedSize to equal (2).");
-        if (
-            !cache
-                .Policy.Eviction.Hottest(2)
-                .OrderBy(pair => pair.Key)
-                .SequenceEqual(new Dictionary<int, string> { [1] = "new", [2] = "other" })
-        )
-            Assert.Fail("Unexpected hottest entries after replacement.");
+        cache.EstimatedCount.Should().Be(2);
+        cache.Policy.Eviction!.WeightedSize.Should().Be(2);
+        cache
+            .Policy.Eviction.Hottest(2)
+            .Should()
+            .BeEquivalentTo(new Dictionary<int, string> { [1] = "new", [2] = "other" });
     }
 
     private readonly record struct TaskObservation<TValue>(Task<TValue> Task);

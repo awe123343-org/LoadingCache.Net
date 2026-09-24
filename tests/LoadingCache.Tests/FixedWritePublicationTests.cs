@@ -1,3 +1,4 @@
+using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
 
 namespace LoadingCache.Tests;
@@ -81,8 +82,7 @@ public sealed class FixedWritePublicationTests
                 throw new InvalidOperationException("The pending resident refresh became a load."),
             (_, current, _) =>
             {
-                if ((current) != ("old"))
-                    Assert.Fail("Expected current to equal (\"old\").");
+                current.Should().Be("old");
                 reloadEntered.TrySetResult();
                 return reloadResult.Task;
             }
@@ -107,10 +107,7 @@ public sealed class FixedWritePublicationTests
                         state!;
                     return readerClock.ReadAtNextTimestamp(() =>
                     {
-                        if (!(readerCache.TryGet(1, out string? value)))
-                            Assert.Fail(
-                                "Expected readerCache.TryGet(1, out string? value) to be true ()."
-                            );
+                        readerCache.TryGet(1, out string? value).Should().BeTrue();
                         return value!;
                     });
                 },
@@ -122,7 +119,7 @@ public sealed class FixedWritePublicationTests
             // At t=11 the reader has captured old@t=0, already past its t=10
             // deadline, and pauses before returning the clock observation.
             await timestamp.Entered.WaitAsync(Watchdog);
-            await Assert.That(reader.IsCompleted).IsFalse();
+            reader.IsCompleted.Should().BeFalse();
             if (replaceWithSet)
             {
                 // Fixed-write Set replaces the physical Entry and revokes the
@@ -131,13 +128,13 @@ public sealed class FixedWritePublicationTests
             }
 
             reloadResult.TrySetResult("refreshed");
-            await Assert.That((await refresh.WaitAsync(Watchdog))).IsEqualTo("refreshed");
+            (await refresh.WaitAsync(Watchdog)).Should().Be("refreshed");
             cache.Policy.ExpireAfterWrite!.SetDuration(TimeSpan.FromSeconds(20));
-            await Assert.That(timestamp.Returned.IsCompleted).IsFalse();
+            timestamp.Returned.IsCompleted.Should().BeFalse();
             // The new duration must not make the captured, expired old value
             // eligible again after a different publication has replaced it.
             timestamp.Release();
-            await Assert.That((await reader.WaitAsync(Watchdog))).IsEqualTo(expectedValue);
+            (await reader.WaitAsync(Watchdog)).Should().Be(expectedValue);
         }
         finally
         {
@@ -146,9 +143,9 @@ public sealed class FixedWritePublicationTests
             await Task.WhenAll(refresh, reader ?? Task.CompletedTask).WaitAsync(Watchdog);
         }
 
-        await Assert.That(timestamp.TimedOut).IsFalse();
-        await Assert.That(cache.TryGet(1, out string? currentValue)).IsTrue();
-        await Assert.That(currentValue).IsEqualTo(expectedValue);
+        timestamp.TimedOut.Should().BeFalse();
+        cache.TryGet(1, out string? currentValue).Should().BeTrue();
+        currentValue.Should().Be(expectedValue);
         engine.AssertInvariants();
     }
 
@@ -209,25 +206,23 @@ public sealed class FixedWritePublicationTests
         {
             // The reader holds old@t=0 past its deadline, before observing t=11.
             await timestamp.Entered.WaitAsync(Watchdog);
-            await Assert.That(cache.Invalidate(1)).IsTrue();
+            cache.Invalidate(1).Should().BeTrue();
             firstLoad = cache.GetAsync(1).AsTask();
             await loadEntered.Task.WaitAsync(Watchdog);
-            await Assert.That(cache.TryGetTask(1, out Task<string>? pendingTask)).IsTrue();
-            Assert.NotNull(pendingTask);
-            await Assert.That(pendingTask!.IsCompleted).IsFalse();
-            await Assert.That(timestamp.Returned.IsCompleted).IsFalse();
+            cache.TryGetTask(1, out Task<string>? pendingTask).Should().BeTrue();
+            pendingTask!.IsCompleted.Should().BeFalse();
+            timestamp.Returned.IsCompleted.Should().BeFalse();
             // Retrying the lookup must leave this newer Loading entry intact.
             timestamp.Release();
-            await Assert.That((await reader.WaitAsync(Watchdog))).IsFalse();
-            await Assert.That(cache.TryGetTask(1, out Task<string>? currentTask)).IsTrue();
-            Assert.NotNull(currentTask);
-            await Assert.That(ReferenceEquals(currentTask, pendingTask)).IsTrue();
+            (await reader.WaitAsync(Watchdog)).Should().BeFalse();
+            cache.TryGetTask(1, out Task<string>? currentTask).Should().BeTrue();
+            currentTask.Should().BeSameAs(pendingTask);
             secondLoad = cache.GetAsync(1).AsTask();
-            await Assert.That(secondLoad.IsCompleted).IsFalse();
-            await Assert.That(Volatile.Read(ref loadCount[0])).IsEqualTo(1);
+            secondLoad.IsCompleted.Should().BeFalse();
+            Volatile.Read(ref loadCount[0]).Should().Be(1);
             loadResult.TrySetResult("loaded");
-            await Assert.That((await firstLoad.WaitAsync(Watchdog))).IsEqualTo("loaded");
-            await Assert.That((await secondLoad.WaitAsync(Watchdog))).IsEqualTo("loaded");
+            (await firstLoad.WaitAsync(Watchdog)).Should().Be("loaded");
+            (await secondLoad.WaitAsync(Watchdog)).Should().Be("loaded");
         }
         finally
         {
@@ -241,10 +236,10 @@ public sealed class FixedWritePublicationTests
                 .WaitAsync(Watchdog);
         }
 
-        await Assert.That(timestamp.TimedOut).IsFalse();
-        await Assert.That(Volatile.Read(ref loadCount[0])).IsEqualTo(1);
-        await Assert.That(cache.TryGet(1, out string? currentValue)).IsTrue();
-        await Assert.That(currentValue).IsEqualTo("loaded");
+        timestamp.TimedOut.Should().BeFalse();
+        Volatile.Read(ref loadCount[0]).Should().Be(1);
+        cache.TryGet(1, out string? currentValue).Should().BeTrue();
+        currentValue.Should().Be("loaded");
         engine.AssertInvariants();
     }
 
@@ -265,8 +260,7 @@ public sealed class FixedWritePublicationTests
         await using var cache = CreateCache(engine, oldValue, refreshedValue);
         cache.Set(1, oldValue);
         cache.CleanUp();
-        await Assert.That(cache.TryGetTask(1, out Task<TValue>? oldTask)).IsTrue();
-        Assert.NotNull(oldTask);
+        cache.TryGetTask(1, out Task<TValue>? oldTask).Should().BeTrue();
         clock.Advance(TimeSpan.FromSeconds(5));
         Task<TValue> refresh = StartRefresh(cache);
         Task<TValue>[] readers = [];
@@ -275,14 +269,14 @@ public sealed class FixedWritePublicationTests
             // Mutable value, timestamps and Task are already new, but the
             // composite snapshot has not been published and entry.Sync is held.
             await publication.Entered.WaitAsync(Watchdog);
-            await Assert.That(refresh.IsCompleted).IsFalse();
+            refresh.IsCompleted.Should().BeFalse();
             readers = StartReaders(cache);
             TValue[] observations = await Task.WhenAll(readers).WaitAsync(ReaderWatchdog);
-            await Assert.That(observations.Count).IsEqualTo(2);
+            observations.Should().HaveCount(2);
             AssertValue(observations[0], oldValue);
             AssertValue(observations[1], oldValue);
-            await Assert.That(publication.Returned.IsCompleted).IsFalse();
-            await Assert.That(refresh.IsCompleted).IsFalse();
+            publication.Returned.IsCompleted.Should().BeFalse();
+            refresh.IsCompleted.Should().BeFalse();
         }
         finally
         {
@@ -290,25 +284,24 @@ public sealed class FixedWritePublicationTests
             await Task.WhenAll(readers.Append<Task>(refresh)).WaitAsync(Watchdog);
         }
 
-        await Assert.That(publication.TimedOut).IsFalse();
+        publication.TimedOut.Should().BeFalse();
         AssertValue(await refresh, refreshedValue);
-        await Assert.That(cache.TryGet(1, out TValue? currentValue)).IsTrue();
+        cache.TryGet(1, out TValue? currentValue).Should().BeTrue();
         AssertValue(currentValue, refreshedValue);
-        await Assert.That(cache.TryGetTask(1, out Task<TValue>? currentTask)).IsTrue();
-        Assert.NotNull(currentTask);
-        await Assert.That(ReferenceEquals(currentTask, oldTask)).IsFalse();
+        cache.TryGetTask(1, out Task<TValue>? currentTask).Should().BeTrue();
+        currentTask.Should().NotBeSameAs(oldTask);
         AssertValue(await currentTask, refreshedValue);
         AssertValue(await oldTask!, oldValue);
         // A complete new publication expires at t=15, not the old t=10 deadline.
         clock.Advance(TimeSpan.FromSeconds(5));
-        await Assert.That(cache.TryGet(1, out currentValue)).IsTrue();
+        cache.TryGet(1, out currentValue).Should().BeTrue();
         AssertValue(currentValue, refreshedValue);
         clock.Advance(TimeSpan.FromSeconds(5) - TimeSpan.FromTicks(1));
-        await Assert.That(cache.TryGet(1, out currentValue)).IsTrue();
+        cache.TryGet(1, out currentValue).Should().BeTrue();
         AssertValue(currentValue, refreshedValue);
         clock.Advance(TimeSpan.FromTicks(1));
-        await Assert.That(cache.TryGet(1, out _)).IsFalse();
-        await Assert.That(cache.TryGetTask(1, out _)).IsFalse();
+        cache.TryGet(1, out _).Should().BeFalse();
+        cache.TryGetTask(1, out _).Should().BeFalse();
         cache.CleanUp();
         engine.AssertInvariants();
     }
@@ -335,8 +328,7 @@ public sealed class FixedWritePublicationTests
         await using var cache = CreateCache(engine, oldValue, refreshedValue);
         cache.Set(1, oldValue);
         cache.CleanUp();
-        await Assert.That(cache.TryGetTask(1, out Task<TValue>? oldTask)).IsTrue();
-        Assert.NotNull(oldTask);
+        cache.TryGetTask(1, out Task<TValue>? oldTask).Should().BeTrue();
         clock.Advance(TimeSpan.FromSeconds(5));
         Task<TValue> refresh = StartRefresh(cache);
         Task<TValue>[] readers = [];
@@ -346,22 +338,21 @@ public sealed class FixedWritePublicationTests
             // Preserve a caller-owned Task from the successful new publication
             // before the controlled finalization failure begins its rollback.
             await published.Entered.WaitAsync(Watchdog);
-            await Assert.That(cache.TryGetTask(1, out publishedTask)).IsTrue();
-            Assert.NotNull(publishedTask);
-            await Assert.That(ReferenceEquals(publishedTask, oldTask)).IsFalse();
+            cache.TryGetTask(1, out publishedTask).Should().BeTrue();
+            publishedTask.Should().NotBeSameAs(oldTask);
             AssertValue(await publishedTask, refreshedValue);
             published.Release();
             await restoration.Entered.WaitAsync(Watchdog);
             // SetValue(old) has run while entry.Sync is held; the still-published
             // new snapshot must remain the complete reader-visible version.
-            await Assert.That(refresh.IsCompleted).IsFalse();
+            refresh.IsCompleted.Should().BeFalse();
             readers = StartReaders(cache);
             TValue[] observations = await Task.WhenAll(readers).WaitAsync(ReaderWatchdog);
-            await Assert.That(observations.Count).IsEqualTo(2);
+            observations.Should().HaveCount(2);
             AssertValue(observations[0], refreshedValue);
             AssertValue(observations[1], refreshedValue);
-            await Assert.That(restoration.Returned.IsCompleted).IsFalse();
-            await Assert.That(refresh.IsCompleted).IsFalse();
+            restoration.Returned.IsCompleted.Should().BeFalse();
+            refresh.IsCompleted.Should().BeFalse();
         }
         finally
         {
@@ -371,23 +362,22 @@ public sealed class FixedWritePublicationTests
                 .WaitAsync(Watchdog);
         }
 
-        await Assert.That(published.TimedOut).IsFalse();
-        await Assert.That(restoration.TimedOut).IsFalse();
-        await Assert.That(cache.TryGet(1, out TValue? restoredValue)).IsTrue();
+        published.TimedOut.Should().BeFalse();
+        restoration.TimedOut.Should().BeFalse();
+        cache.TryGet(1, out TValue? restoredValue).Should().BeTrue();
         AssertValue(restoredValue, oldValue);
-        await Assert.That(cache.TryGetTask(1, out Task<TValue>? restoredTask)).IsTrue();
-        Assert.NotNull(restoredTask);
-        await Assert.That(ReferenceEquals(restoredTask, oldTask)).IsTrue();
+        cache.TryGetTask(1, out Task<TValue>? restoredTask).Should().BeTrue();
+        restoredTask.Should().BeSameAs(oldTask);
         AssertValue(await restoredTask, oldValue);
         AssertValue(await oldTask!, oldValue);
         AssertValue(await publishedTask, refreshedValue);
         // Rollback restores the old t=0 write time, so t=10 is hard-expired.
         clock.Advance(TimeSpan.FromSeconds(5) - TimeSpan.FromTicks(1));
-        await Assert.That(cache.TryGet(1, out restoredValue)).IsTrue();
+        cache.TryGet(1, out restoredValue).Should().BeTrue();
         AssertValue(restoredValue, oldValue);
         clock.Advance(TimeSpan.FromTicks(1));
-        await Assert.That(cache.TryGet(1, out _)).IsFalse();
-        await Assert.That(cache.TryGetTask(1, out _)).IsFalse();
+        cache.TryGet(1, out _).Should().BeFalse();
+        cache.TryGetTask(1, out _).Should().BeFalse();
         cache.CleanUp();
         engine.AssertInvariants();
     }
@@ -448,10 +438,7 @@ public sealed class FixedWritePublicationTests
                 static state =>
                 {
                     var readerCache = (AsyncLoadingCache<int, TValue>)state!;
-                    if (!(readerCache.TryGet(1, out TValue? value)))
-                        Assert.Fail(
-                            "Expected readerCache.TryGet(1, out TValue? value) to be true ()."
-                        );
+                    readerCache.TryGet(1, out TValue? value).Should().BeTrue();
                     return value!;
                 },
                 cache,
@@ -465,8 +452,7 @@ public sealed class FixedWritePublicationTests
                     {
                         var readerCache = (AsyncLoadingCache<int, TValue>)state!;
                         ValueTask<TValue> read = readerCache.GetAsync(1);
-                        if (!(read.IsCompletedSuccessfully))
-                            Assert.Fail("Expected read.IsCompletedSuccessfully to be true ().");
+                        read.IsCompletedSuccessfully.Should().BeTrue();
                         return read.AsTask();
                     },
                     cache,
@@ -478,28 +464,24 @@ public sealed class FixedWritePublicationTests
         ];
 
     private static async Task ObserveControlledFailure<TValue>(Task<TValue> refresh) =>
-        await Assert
-            .That((Func<Task>)(() => refresh.WaitAsync(Watchdog)))
-            .ThrowsExactly<ControlledPublicationFailure>();
+        await FluentActions
+            .Awaiting(() => refresh.WaitAsync(Watchdog))
+            .Should()
+            .ThrowExactlyAsync<ControlledPublicationFailure>();
 
     private static void AssertValue<TValue>(TValue? actual, TValue expected)
         where TValue : notnull
     {
         if (actual is LargeValue actualLarge && expected is LargeValue expectedLarge)
         {
-            if ((actualLarge.First) != (expectedLarge.First))
-                Assert.Fail("Expected actualLarge.First to equal (expectedLarge.First).");
-            if ((actualLarge.Second) != (expectedLarge.Second))
-                Assert.Fail("Expected actualLarge.Second to equal (expectedLarge.Second).");
-            if ((actualLarge.Third) != (expectedLarge.Third))
-                Assert.Fail("Expected actualLarge.Third to equal (expectedLarge.Third).");
-            if ((actualLarge.Fourth) != (expectedLarge.Fourth))
-                Assert.Fail("Expected actualLarge.Fourth to equal (expectedLarge.Fourth).");
+            actualLarge.First.Should().Be(expectedLarge.First);
+            actualLarge.Second.Should().Be(expectedLarge.Second);
+            actualLarge.Third.Should().Be(expectedLarge.Third);
+            actualLarge.Fourth.Should().Be(expectedLarge.Fourth);
         }
         else
         {
-            if (!EqualityComparer<TValue>.Default.Equals(actual, expected))
-                Assert.Fail("Expected actual to equal (expected).");
+            actual.Should().Be(expected);
         }
     }
 

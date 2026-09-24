@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using FluentAssertions;
 
 namespace LoadingCache.Tests;
 
@@ -7,51 +8,50 @@ public sealed class PublicationOwnershipTests
     [Test]
     [Arguments(false)]
     [Arguments(true)]
-    public async Task FaultedReadyPublicationRequiresPhysicalRepair(bool dictionary)
+    public void FaultedReadyPublicationRequiresPhysicalRepair(bool dictionary)
     {
         var probe = new PublicationProbe(failFinalization: true);
         CacheEngine<int, string> engine = CreateEngine(probe);
         using var cache = new Cache<int, string>(engine);
         if (dictionary)
         {
-            await Assert
-                .That(() => cache.AsDictionary().TryAdd(1, "failed"))
-                .ThrowsExactly<ControlledPublicationFailure>();
+            cache
+                .Invoking(static current => current.AsDictionary().TryAdd(1, "failed"))
+                .Should()
+                .ThrowExactly<ControlledPublicationFailure>();
         }
         else
         {
-            await Assert
-                .That(() => cache.Put(1, "failed"))
-                .ThrowsExactly<ControlledPublicationFailure>();
+            cache
+                .Invoking(static current => current.Put(1, "failed"))
+                .Should()
+                .ThrowExactly<ControlledPublicationFailure>();
         }
 
         probe.Stop();
         cache.Put(1, "repaired");
-        await Assert
-            .That(probe.ResidentPublicationCalls)
-            .IsEqualTo(0)
-            .Because(
-                "an entry with unfinished policy publication cannot take the resident shortcut"
-            );
+        probe
+            .ResidentPublicationCalls.Should()
+            .Be(0, "an entry with unfinished policy publication cannot take the resident shortcut");
         cache.CleanUp();
         AssertResident(cache, 1, "repaired");
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
-        await Assert.That(cache.Policy.Eviction!.WeightedSize).IsEqualTo(1);
-        await Assert.That(cache.Statistics.ReplacedRemovals).IsEqualTo(1);
+        cache.EstimatedCount.Should().Be(1);
+        cache.Policy.Eviction!.WeightedSize.Should().Be(1);
+        cache.Statistics.ReplacedRemovals.Should().Be(1);
         AssertResidentShortcut(engine, probe, 1);
     }
 
     [Test]
     [Arguments(false)]
     [Arguments(true)]
-    public async Task ReadyEntryRemainsOwnedThroughPolicyPublication(bool dictionary)
+    public void ReadyEntryRemainsOwnedThroughPolicyPublication(bool dictionary)
     {
         var probe = new PublicationProbe();
         CacheEngine<int, string> engine = CreateEngine(probe);
         using var cache = new Cache<int, string>(engine);
         if (dictionary)
         {
-            await Assert.That(cache.AsDictionary().TryAdd(1, "published")).IsTrue();
+            cache.AsDictionary().TryAdd(1, "published").Should().BeTrue();
         }
         else
         {
@@ -60,7 +60,7 @@ public sealed class PublicationOwnershipTests
 
         probe.Stop();
         AssertResident(cache, 1, "published");
-        await Assert.That(cache.Statistics.ReplacedRemovals).IsEqualTo(0);
+        cache.Statistics.ReplacedRemovals.Should().Be(0);
         probe.AssertOwnership(expectedCalls: 1, expectedOutsideCalls: 0);
         AssertResidentShortcut(engine, probe, 1);
     }
@@ -78,13 +78,12 @@ public sealed class PublicationOwnershipTests
                 engine,
                 static (_, _) => Task.FromResult("published")
             );
-            await Assert.That((await cache.GetAsync(1))).IsEqualTo("published");
+            (await cache.GetAsync(1)).Should().Be("published");
             probe.Stop();
-            await Assert.That(cache.TryGet(1, out string? value)).IsTrue();
-            await Assert.That(value).IsEqualTo("published");
-            await Assert.That(cache.TryGetTask(1, out Task<string>? task)).IsTrue();
-            Assert.NotNull(task);
-            await Assert.That((await task!)).IsEqualTo("published");
+            cache.TryGet(1, out string? value).Should().BeTrue();
+            value.Should().Be("published");
+            cache.TryGetTask(1, out Task<string>? task).Should().BeTrue();
+            (await task!).Should().Be("published");
             engine.AssertInvariants();
             probe.AssertOwnership(expectedCalls: 1, expectedOutsideCalls: 1);
             AssertResidentShortcut(engine, probe, 1);
@@ -92,7 +91,7 @@ public sealed class PublicationOwnershipTests
         else
         {
             using var cache = new LoadingCache<int, string>(engine, static _ => "published");
-            await Assert.That(cache.Get(1)).IsEqualTo("published");
+            cache.Get(1).Should().Be("published");
             probe.Stop();
             AssertResident(cache, 1, "published");
             probe.AssertOwnership(expectedCalls: 1, expectedOutsideCalls: 1);
@@ -120,21 +119,24 @@ public sealed class PublicationOwnershipTests
             );
             await ExpectFailure(cache.GetAsync(1).AsTask());
             probe.Stop();
-            await Assert.That(cache.TryGet(1, out _)).IsFalse();
-            await Assert.That(cache.EstimatedCount).IsEqualTo(0);
-            await Assert.That(cache.Statistics.InFlightLoads).IsEqualTo(0);
-            await Assert.That((await cache.GetAsync(1))).IsEqualTo("published");
+            cache.TryGet(1, out _).Should().BeFalse();
+            cache.EstimatedCount.Should().Be(0);
+            cache.Statistics.InFlightLoads.Should().Be(0);
+            (await cache.GetAsync(1)).Should().Be("published");
             engine.AssertInvariants();
         }
         else
         {
             using var cache = new LoadingCache<int, string>(engine, static _ => "published");
-            await Assert.That(() => cache.Get(1)).ThrowsExactly<ControlledPublicationFailure>();
+            cache
+                .Invoking(static current => current.Get(1))
+                .Should()
+                .ThrowExactly<ControlledPublicationFailure>();
             probe.Stop();
-            await Assert.That(cache.TryGet(1, out _)).IsFalse();
-            await Assert.That(cache.EstimatedCount).IsEqualTo(0);
-            await Assert.That(cache.Statistics.InFlightLoads).IsEqualTo(0);
-            await Assert.That(cache.Get(1)).IsEqualTo("published");
+            cache.TryGet(1, out _).Should().BeFalse();
+            cache.EstimatedCount.Should().Be(0);
+            cache.Statistics.InFlightLoads.Should().Be(0);
+            cache.Get(1).Should().Be("published");
             AssertResident(cache, 1, "published");
         }
 
@@ -157,12 +159,15 @@ public sealed class PublicationOwnershipTests
                     Task.FromResult<IReadOnlyDictionary<int, string>>(BulkValues())
             );
             IReadOnlyDictionary<int, string> result = await cache.GetAllAsync([1]);
-            await Assert.That(result).HasSingleItem();
-            await Assert.That(result[1]).IsEqualTo("one");
+            result
+                .Should()
+                .ContainSingle()
+                .Which.Should()
+                .Be(new KeyValuePair<int, string>(1, "one"));
             probe.Stop();
-            await Assert.That(cache.TryGet(2, out string? extra)).IsTrue();
-            await Assert.That(extra).IsEqualTo("two");
-            await Assert.That(cache.EstimatedCount).IsEqualTo(2);
+            cache.TryGet(2, out string? extra).Should().BeTrue();
+            extra.Should().Be("two");
+            cache.EstimatedCount.Should().Be(2);
             engine.AssertInvariants();
             probe.AssertOwnership(expectedCalls: 2, expectedOutsideCalls: 1);
             AssertResidentShortcut(engine, probe, 1);
@@ -176,11 +181,14 @@ public sealed class PublicationOwnershipTests
                 bulkLoader: static _ => BulkValues()
             );
             IReadOnlyDictionary<int, string> result = cache.GetAll([1]);
-            await Assert.That(result).HasSingleItem();
-            await Assert.That(result[1]).IsEqualTo("one");
+            result
+                .Should()
+                .ContainSingle()
+                .Which.Should()
+                .Be(new KeyValuePair<int, string>(1, "one"));
             probe.Stop();
             AssertResident(cache, 2, "two");
-            await Assert.That(cache.EstimatedCount).IsEqualTo(2);
+            cache.EstimatedCount.Should().Be(2);
             probe.AssertOwnership(expectedCalls: 2, expectedOutsideCalls: 1);
             AssertResidentShortcut(engine, probe, 1);
             AssertResidentShortcut(engine, probe, 2);
@@ -209,11 +217,11 @@ public sealed class PublicationOwnershipTests
             );
             await ExpectFailure(cache.GetAllAsync([1]).AsTask());
             probe.Stop();
-            await Assert.That(cache.TryGet(1, out _)).IsFalse();
-            await Assert.That(cache.TryGet(2, out _)).IsFalse();
-            await Assert.That(cache.EstimatedCount).IsEqualTo(0);
-            await Assert.That(cache.Statistics.InFlightLoads).IsEqualTo(0);
-            await Assert.That((await cache.GetAllAsync([1]))).ContainsKey(1);
+            cache.TryGet(1, out _).Should().BeFalse();
+            cache.TryGet(2, out _).Should().BeFalse();
+            cache.EstimatedCount.Should().Be(0);
+            cache.Statistics.InFlightLoads.Should().Be(0);
+            (await cache.GetAllAsync([1])).Should().ContainKey(1);
             engine.AssertInvariants();
         }
         else
@@ -223,15 +231,16 @@ public sealed class PublicationOwnershipTests
                 static _ => throw new InvalidOperationException("Unexpected single load."),
                 bulkLoader: static _ => BulkValues()
             );
-            await Assert
-                .That(() => cache.GetAll([1]))
-                .ThrowsExactly<ControlledPublicationFailure>();
+            cache
+                .Invoking(static current => current.GetAll([1]))
+                .Should()
+                .ThrowExactly<ControlledPublicationFailure>();
             probe.Stop();
-            await Assert.That(cache.TryGet(1, out _)).IsFalse();
-            await Assert.That(cache.TryGet(2, out _)).IsFalse();
-            await Assert.That(cache.EstimatedCount).IsEqualTo(0);
-            await Assert.That(cache.Statistics.InFlightLoads).IsEqualTo(0);
-            await Assert.That(cache.GetAll([1])).ContainsKey(1);
+            cache.TryGet(1, out _).Should().BeFalse();
+            cache.TryGet(2, out _).Should().BeFalse();
+            cache.EstimatedCount.Should().Be(0);
+            cache.Statistics.InFlightLoads.Should().Be(0);
+            cache.GetAll([1]).Should().ContainKey(1);
             cache.AssertInvariants();
         }
 
@@ -264,14 +273,12 @@ public sealed class PublicationOwnershipTests
             if (failAfterPublication)
                 await ExpectFailure(refresh);
             else
-                await Assert.That((await refresh)).IsEqualTo("new");
+                (await refresh).Should().Be("new");
             probe.Stop();
-            await Assert.That(cache.TryGet(1, out string? current)).IsTrue();
-            await Assert.That(current).IsEqualTo(failAfterPublication ? "old" : "new");
-            await Assert.That(cache.Statistics.InFlightLoads).IsEqualTo(0);
-            await Assert
-                .That(cache.Statistics.ReplacedRemovals)
-                .IsEqualTo(failAfterPublication ? 0 : 1);
+            cache.TryGet(1, out string? current).Should().BeTrue();
+            current.Should().Be(failAfterPublication ? "old" : "new");
+            cache.Statistics.InFlightLoads.Should().Be(0);
+            cache.Statistics.ReplacedRemovals.Should().Be(failAfterPublication ? 0 : 1);
             engine.AssertInvariants();
             probe.AssertOwnership(
                 expectedCalls: failAfterPublication ? 3 : 2,
@@ -289,13 +296,11 @@ public sealed class PublicationOwnershipTests
             if (failAfterPublication)
                 await ExpectFailure(refresh);
             else
-                await Assert.That((await refresh)).IsEqualTo("new");
+                (await refresh).Should().Be("new");
             probe.Stop();
             AssertResident(cache, 1, failAfterPublication ? "old" : "new");
-            await Assert.That(cache.Statistics.InFlightLoads).IsEqualTo(0);
-            await Assert
-                .That(cache.Statistics.ReplacedRemovals)
-                .IsEqualTo(failAfterPublication ? 0 : 1);
+            cache.Statistics.InFlightLoads.Should().Be(0);
+            cache.Statistics.ReplacedRemovals.Should().Be(failAfterPublication ? 0 : 1);
             probe.AssertOwnership(
                 expectedCalls: failAfterPublication ? 3 : 2,
                 expectedOutsideCalls: 2
@@ -323,8 +328,8 @@ public sealed class PublicationOwnershipTests
             probe.Start();
             await ExpectFailure(cache.RefreshAsync(1).AsTask());
             probe.Stop();
-            await Assert.That(cache.TryGet(1, out string? current)).IsTrue();
-            await Assert.That(current).IsEqualTo("old");
+            cache.TryGet(1, out string? current).Should().BeTrue();
+            current.Should().Be("old");
             engine.AssertInvariants();
         }
         else
@@ -368,10 +373,8 @@ public sealed class PublicationOwnershipTests
 
     private static void AssertResident(Cache<int, string> cache, int key, string expected)
     {
-        if (!(cache.TryGet(key, out string? value)))
-            Assert.Fail("Expected cache.TryGet(key, out string? value) to be true ().");
-        if ((value) != (expected))
-            Assert.Fail("Expected value to equal (expected).");
+        cache.TryGet(key, out string? value).Should().BeTrue();
+        value.Should().Be(expected);
         cache.AssertInvariants();
     }
 
@@ -384,25 +387,26 @@ public sealed class PublicationOwnershipTests
         probe.Stop();
         int previousCalls = probe.ResidentPublicationCalls;
         engine.Put(key, "next");
-        if ((probe.ResidentPublicationCalls) != (previousCalls + 1))
-            Assert.Fail(
-                "Expected probe .ResidentPublicationCalls to equal ( previousCalls + 1, \"successful publication or repair must reopen the same-weight resident shortcut\" )."
+        probe
+            .ResidentPublicationCalls.Should()
+            .Be(
+                previousCalls + 1,
+                "successful publication or repair must reopen the same-weight resident shortcut"
             );
-        if (!(engine.TryGet(key, out string? value)))
-            Assert.Fail("Expected engine.TryGet(key, out string? value) to be true ().");
-        if ((value) != ("next"))
-            Assert.Fail("Expected value to equal (\"next\").");
+        engine.TryGet(key, out string? value).Should().BeTrue();
+        value.Should().Be("next");
         engine.AssertInvariants();
     }
 
     private static async Task ExpectFailure<T>(Task<T> operation)
     {
-        await Assert
-            .That(async () =>
+        await FluentActions
+            .Awaiting(async () =>
             {
                 await operation;
             })
-            .ThrowsExactly<ControlledPublicationFailure>();
+            .Should()
+            .ThrowExactlyAsync<ControlledPublicationFailure>();
     }
 
     private sealed class ControlledPublicationFailure : Exception;
@@ -484,30 +488,22 @@ public sealed class PublicationOwnershipTests
             );
             bool timely = competitor.Wait(Watchdog);
             bool acquiredByCompetitor = competitor.GetAwaiter().GetResult();
-            if (!(timely))
-                Assert.Fail(
-                    "Expected timely to be true (\"the dedicated nonblocking probe must complete\")."
-                );
+            timely.Should().BeTrue("the dedicated nonblocking probe must complete");
             return (ownerHeld, acquiredByCompetitor);
         }
 
         internal void AssertOwnership(int expectedCalls, int expectedOutsideCalls)
         {
-            if (!(_owned.Count == expectedCalls))
-                Assert.Fail("Expected _owned to have count (expectedCalls).");
-            if (!_owned.All(result => result.OwnerHeld && !result.CompetitorAcquired))
-                Assert.Fail("Entry ownership was not continuous.");
-            if ((_outsideCalls) != (expectedOutsideCalls))
-                Assert.Fail("Expected _outsideCalls to equal (expectedOutsideCalls).");
+            _owned.Should().HaveCount(expectedCalls);
+            _owned.Should().OnlyContain(result => result.OwnerHeld && !result.CompetitorAcquired);
+            _outsideCalls.Should().Be(expectedOutsideCalls);
             if (expectedOutsideCalls == 0)
             {
                 return;
             }
 
-            if (_outside.IsEmpty)
-                Assert.Fail("No outside-lock observation was recorded.");
-            if (!_outside.All(result => !result.OwnerHeld && result.CompetitorAcquired))
-                Assert.Fail("Callback ran with entry ownership.");
+            _outside.Should().NotBeEmpty();
+            _outside.Should().OnlyContain(result => !result.OwnerHeld && result.CompetitorAcquired);
         }
     }
 }

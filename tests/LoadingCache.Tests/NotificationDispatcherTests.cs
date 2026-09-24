@@ -1,3 +1,4 @@
+using FluentAssertions;
 using LoadingCache.Notifications;
 
 namespace LoadingCache.Tests;
@@ -8,60 +9,56 @@ public sealed class NotificationDispatcherTests
     private static readonly AsyncLocal<string?> Context = new();
 
     [Test]
-    public async Task CapacityMustBePositive()
+    public void CapacityMustBePositive()
     {
         Action action = () =>
         {
             using BoundedNotificationDispatcher<int> dispatcher = new(0, _ => { });
         };
-        await Assert.That(action).Throws<ArgumentOutOfRangeException>();
+        action.Should().Throw<ArgumentOutOfRangeException>();
     }
 
     [Test]
-    public async Task AcceptedNotificationsAreDrainedInFifoOrderByOneScheduledWorkItem()
+    public void AcceptedNotificationsAreDrainedInFifoOrderByOneScheduledWorkItem()
     {
         ManualNotificationScheduler scheduler = new();
         List<int> observed = [];
         using BoundedNotificationDispatcher<int> dispatcher = new(4, observed.Add, scheduler);
-        await Assert.That(dispatcher.TryEnqueue(1)).IsTrue();
-        await Assert.That(dispatcher.TryEnqueue(2)).IsTrue();
-        await Assert.That(dispatcher.TryEnqueue(3)).IsTrue();
-        await Assert.That(scheduler.ScheduleCalls).IsEqualTo(1);
-        await Assert.That(scheduler.Pending).IsEqualTo(1);
+        dispatcher.TryEnqueue(1).Should().BeTrue();
+        dispatcher.TryEnqueue(2).Should().BeTrue();
+        dispatcher.TryEnqueue(3).Should().BeTrue();
+        scheduler.ScheduleCalls.Should().Be(1);
+        scheduler.Pending.Should().Be(1);
         scheduler.RunNext();
-        await Assert
-            .That(observed)
-            .IsEquivalentTo([1, 2, 3], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        observed.Should().Equal(1, 2, 3);
         NotificationDispatchStatistics statistics = dispatcher.GetStatistics();
-        await Assert.That(statistics.Enqueued).IsEqualTo(3);
-        await Assert.That(statistics.Invoked).IsEqualTo(3);
-        await Assert.That(statistics.Delivered).IsEqualTo(3);
-        await Assert.That(statistics.HandlerFailures).IsEqualTo(0);
-        await Assert.That(statistics.Queued).IsEqualTo(0);
-        await Assert.That(statistics.HandlerRunning).IsFalse();
+        statistics.Enqueued.Should().Be(3);
+        statistics.Invoked.Should().Be(3);
+        statistics.Delivered.Should().Be(3);
+        statistics.HandlerFailures.Should().Be(0);
+        statistics.Queued.Should().Be(0);
+        statistics.HandlerRunning.Should().BeFalse();
     }
 
     [Test]
-    public async Task FullQueueDropsNewestNotification()
+    public void FullQueueDropsNewestNotification()
     {
         ManualNotificationScheduler scheduler = new();
         List<int> observed = [];
         using BoundedNotificationDispatcher<int> dispatcher = new(2, observed.Add, scheduler);
-        await Assert.That(dispatcher.TryEnqueue(1)).IsTrue();
-        await Assert.That(dispatcher.TryEnqueue(2)).IsTrue();
-        await Assert.That(dispatcher.TryEnqueue(3)).IsFalse();
+        dispatcher.TryEnqueue(1).Should().BeTrue();
+        dispatcher.TryEnqueue(2).Should().BeTrue();
+        dispatcher.TryEnqueue(3).Should().BeFalse();
         NotificationDispatchStatistics beforeDrain = dispatcher.GetStatistics();
-        await Assert.That(beforeDrain.Queued).IsEqualTo(2);
-        await Assert.That(beforeDrain.DroppedFull).IsEqualTo(1);
+        beforeDrain.Queued.Should().Be(2);
+        beforeDrain.DroppedFull.Should().Be(1);
         scheduler.RunNext();
-        await Assert
-            .That(observed)
-            .IsEquivalentTo([1, 2], TUnit.Assertions.Enums.CollectionOrdering.Matching);
-        await Assert.That(dispatcher.GetStatistics().Dropped).IsEqualTo(1);
+        observed.Should().Equal(1, 2);
+        dispatcher.GetStatistics().Dropped.Should().Be(1);
     }
 
     [Test]
-    public async Task HandlerFailureIsCountedAndDoesNotStrandFollowingNotifications()
+    public void HandlerFailureIsCountedAndDoesNotStrandFollowingNotifications()
     {
         ManualNotificationScheduler scheduler = new();
         List<int> observed = [];
@@ -77,22 +74,20 @@ public sealed class NotificationDispatcherTests
             },
             scheduler
         );
-        await Assert.That(dispatcher.TryEnqueue(1)).IsTrue();
-        await Assert.That(dispatcher.TryEnqueue(2)).IsTrue();
+        dispatcher.TryEnqueue(1).Should().BeTrue();
+        dispatcher.TryEnqueue(2).Should().BeTrue();
         Action action = scheduler.RunNext;
-        await Assert.That(action).ThrowsNothing();
-        await Assert
-            .That(observed)
-            .IsEquivalentTo([1, 2], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        action.Should().NotThrow();
+        observed.Should().Equal(1, 2);
         NotificationDispatchStatistics statistics = dispatcher.GetStatistics();
-        await Assert.That(statistics.Invoked).IsEqualTo(2);
-        await Assert.That(statistics.Delivered).IsEqualTo(1);
-        await Assert.That(statistics.HandlerFailures).IsEqualTo(1);
-        await Assert.That(statistics.Queued).IsEqualTo(0);
+        statistics.Invoked.Should().Be(2);
+        statistics.Delivered.Should().Be(1);
+        statistics.HandlerFailures.Should().Be(1);
+        statistics.Queued.Should().Be(0);
     }
 
     [Test]
-    public async Task ReentrantHandlerCanEnqueueWithoutDeadlockAndKeepsFifoOrder()
+    public void ReentrantHandlerCanEnqueueWithoutDeadlockAndKeepsFifoOrder()
     {
         ManualNotificationScheduler scheduler = new();
         List<int> observed = [];
@@ -101,38 +96,34 @@ public sealed class NotificationDispatcherTests
         handler.Dispatcher = dispatcher;
         using (dispatcher)
         {
-            await Assert.That(dispatcher.TryEnqueue(1)).IsTrue();
-            await Assert.That(dispatcher.TryEnqueue(2)).IsTrue();
+            dispatcher.TryEnqueue(1).Should().BeTrue();
+            dispatcher.TryEnqueue(2).Should().BeTrue();
             scheduler.RunNext();
-            await Assert
-                .That(observed)
-                .IsEquivalentTo([1, 2, 3], TUnit.Assertions.Enums.CollectionOrdering.Matching);
-            await Assert.That(scheduler.ScheduleCalls).IsEqualTo(1);
+            observed.Should().Equal(1, 2, 3);
+            scheduler.ScheduleCalls.Should().Be(1);
         }
     }
 
     [Test]
-    public async Task ScheduleRejectionDropsTheBatchAndDoesNotStrandTheNextBatch()
+    public void ScheduleRejectionDropsTheBatchAndDoesNotStrandTheNextBatch()
     {
         ManualNotificationScheduler scheduler = new() { Reject = true };
         List<int> observed = [];
         using BoundedNotificationDispatcher<int> dispatcher = new(4, observed.Add, scheduler);
-        await Assert.That(dispatcher.TryEnqueue(1)).IsFalse();
+        dispatcher.TryEnqueue(1).Should().BeFalse();
         NotificationDispatchStatistics rejected = dispatcher.GetStatistics();
-        await Assert.That(rejected.ScheduleRejections).IsEqualTo(1);
-        await Assert.That(rejected.DroppedSchedule).IsEqualTo(1);
-        await Assert.That(rejected.Queued).IsEqualTo(0);
+        rejected.ScheduleRejections.Should().Be(1);
+        rejected.DroppedSchedule.Should().Be(1);
+        rejected.Queued.Should().Be(0);
         scheduler.Reject = false;
-        await Assert.That(dispatcher.TryEnqueue(2)).IsTrue();
+        dispatcher.TryEnqueue(2).Should().BeTrue();
         scheduler.RunNext();
-        await Assert
-            .That(observed)
-            .IsEquivalentTo([2], TUnit.Assertions.Enums.CollectionOrdering.Matching);
-        await Assert.That(dispatcher.GetStatistics().HandlerFailures).IsEqualTo(0);
+        observed.Should().Equal(2);
+        dispatcher.GetStatistics().HandlerFailures.Should().Be(0);
     }
 
     [Test]
-    public async Task SlowHandlerRunsOutsideDispatcherLockAndDisposeDoesNotWaitForIt()
+    public void SlowHandlerRunsOutsideDispatcherLockAndDisposeDoesNotWaitForIt()
     {
         ManualNotificationScheduler scheduler = new();
         TaskCompletionSource<bool> entered = NewCompletionSource<bool>();
@@ -146,30 +137,30 @@ public sealed class NotificationDispatcherTests
             },
             scheduler
         );
-        await Assert.That(dispatcher.TryEnqueue(1)).IsTrue();
+        dispatcher.TryEnqueue(1).Should().BeTrue();
         Task drain = Task.Run(scheduler.RunNext);
         try
         {
             entered.Task.WaitAsync(TestTimeout).GetAwaiter().GetResult();
-            await Assert.That(dispatcher.TryEnqueue(2)).IsTrue();
+            dispatcher.TryEnqueue(2).Should().BeTrue();
             Task dispose = Task.Run(dispatcher.Dispose);
-            await Assert.That(dispose.Wait(TestTimeout)).IsTrue();
+            dispose.Wait(TestTimeout).Should().BeTrue();
             NotificationDispatchStatistics disposed = dispatcher.GetStatistics();
-            await Assert.That(disposed.IsDisposed).IsTrue();
-            await Assert.That(disposed.DroppedShutdown).IsEqualTo(1);
-            await Assert.That(dispatcher.TryEnqueue(3)).IsFalse();
+            disposed.IsDisposed.Should().BeTrue();
+            disposed.DroppedShutdown.Should().Be(1);
+            dispatcher.TryEnqueue(3).Should().BeFalse();
         }
         finally
         {
             release.TrySetResult(true);
         }
 
-        await Assert.That(drain.Wait(TestTimeout)).IsTrue();
-        await Assert.That(dispatcher.GetStatistics().DroppedShutdown).IsEqualTo(2);
+        drain.Wait(TestTimeout).Should().BeTrue();
+        dispatcher.GetStatistics().DroppedShutdown.Should().Be(2);
     }
 
     [Test]
-    public async Task DuplicateSchedulerCallbacksStillExecuteOnlyOneHandlerAtATime()
+    public void DuplicateSchedulerCallbacksStillExecuteOnlyOneHandlerAtATime()
     {
         ManualNotificationScheduler scheduler = new();
         TaskCompletionSource<bool> entered = NewCompletionSource<bool>();
@@ -189,8 +180,8 @@ public sealed class NotificationDispatcherTests
             },
             scheduler
         );
-        await Assert.That(dispatcher.TryEnqueue(1)).IsTrue();
-        await Assert.That(dispatcher.TryEnqueue(2)).IsTrue();
+        dispatcher.TryEnqueue(1).Should().BeTrue();
+        dispatcher.TryEnqueue(2).Should().BeTrue();
         Action callback = scheduler.Peek();
         Task first = Task.Run(callback);
         Task? second;
@@ -209,12 +200,12 @@ public sealed class NotificationDispatcherTests
             release.TrySetResult(true);
         }
 
-        await Assert.That(Task.WaitAll([first, second], TestTimeout)).IsTrue();
-        await Assert.That(maximumActive).IsEqualTo(1);
+        Task.WaitAll([first, second], TestTimeout).Should().BeTrue();
+        maximumActive.Should().Be(1);
     }
 
     [Test]
-    public async Task QueueEmptyHandoffDoesNotStrandAConcurrentlyAdmittedBatch()
+    public void QueueEmptyHandoffDoesNotStrandAConcurrentlyAdmittedBatch()
     {
         ManualNotificationScheduler scheduler = new();
         List<int> observed = [];
@@ -236,14 +227,14 @@ public sealed class NotificationDispatcherTests
                 releaseFirstHandoff.Task.GetAwaiter().GetResult();
             }
         );
-        await Assert.That(dispatcher.TryEnqueue(1)).IsTrue();
+        dispatcher.TryEnqueue(1).Should().BeTrue();
         Task firstDrain = Task.Run(scheduler.RunNext);
         bool firstDrainCompleted;
         try
         {
             firstHandoff.Task.WaitAsync(TestTimeout).GetAwaiter().GetResult();
-            await Assert.That(dispatcher.TryEnqueue(2)).IsTrue();
-            await Assert.That(scheduler.Pending).IsEqualTo(1);
+            dispatcher.TryEnqueue(2).Should().BeTrue();
+            scheduler.Pending.Should().Be(1);
             scheduler.RunNext();
         }
         finally
@@ -252,11 +243,9 @@ public sealed class NotificationDispatcherTests
             firstDrainCompleted = firstDrain.Wait(TestTimeout);
         }
 
-        await Assert.That(firstDrainCompleted).IsTrue();
-        await Assert
-            .That(observed)
-            .IsEquivalentTo([1, 2], TUnit.Assertions.Enums.CollectionOrdering.Matching);
-        await Assert.That(dispatcher.GetStatistics().Queued).IsEqualTo(0);
+        firstDrainCompleted.Should().BeTrue();
+        observed.Should().Equal(1, 2);
+        dispatcher.GetStatistics().Queued.Should().Be(0);
     }
 
     [Test]
@@ -270,14 +259,14 @@ public sealed class NotificationDispatcherTests
         Context.Value = "request-context";
         try
         {
-            await Assert.That(dispatcher.TryEnqueue(1)).IsTrue();
+            dispatcher.TryEnqueue(1).Should().BeTrue();
         }
         finally
         {
             Context.Value = null;
         }
 
-        await Assert.That(((await observed.Task.WaitAsync(TestTimeout))) is null).IsTrue();
+        (await observed.Task.WaitAsync(TestTimeout)).Should().BeNull();
     }
 
     private static TaskCompletionSource<T> NewCompletionSource<T>() =>
@@ -334,8 +323,7 @@ public sealed class NotificationDispatcherTests
             observed.Add(value);
             if (value == 1)
             {
-                if (!(Dispatcher.TryEnqueue(3)))
-                    Assert.Fail("Expected Dispatcher.TryEnqueue(3) to be true ().");
+                Dispatcher.TryEnqueue(3).Should().BeTrue();
             }
         }
     }

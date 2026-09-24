@@ -1,3 +1,4 @@
+using FluentAssertions;
 using LoadingCache.Maintenance;
 
 namespace LoadingCache.Tests;
@@ -20,8 +21,8 @@ public sealed class ReadBufferTailHintTests
     {
         using StripedReadBuffer<int> buffer = new(1, 1, recordStatistics);
         await using BlockingTestHook reservation = new(TestTimeout);
-        await Assert.That(buffer.TryOffer(0)).IsEqualTo(ReadBufferOfferResult.Success);
-        await Assert.That(buffer.TryRead(out _)).IsTrue();
+        buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
+        buffer.TryRead(out _).Should().BeTrue();
         buffer.SetCounterForTesting(initialCounter);
         int reservations = 0;
         Action pause = reservation.Invoke;
@@ -45,24 +46,18 @@ public sealed class ReadBufferTailHintTests
         try
         {
             await reservation.Entered.WaitAsync(TestTimeout);
-            await Assert.That(buffer.TryOffer(2)).IsEqualTo(ReadBufferOfferResult.Success);
+            buffer.TryOffer(2).Should().Be(ReadBufferOfferResult.Success);
             reservation.Release();
-            await Assert
-                .That((await paused.WaitAsync(TestTimeout)))
-                .IsEqualTo(ReadBufferOfferResult.Full);
+            (await paused.WaitAsync(TestTimeout)).Should().Be(ReadBufferOfferResult.Full);
             List<int> observed = [];
-            await Assert.That(buffer.DrainTo(observed.Add, 1)).IsEqualTo(1);
-            await Assert
-                .That(observed)
-                .IsEquivalentTo([2], TUnit.Assertions.Enums.CollectionOrdering.Matching);
-            await Assert.That(buffer.DrainTo(observed.Add, 1)).IsEqualTo(0);
-            await Assert.That(buffer.TryOffer(1)).IsEqualTo(ReadBufferOfferResult.Success);
-            await Assert.That(buffer.DrainTo(observed.Add, 1)).IsEqualTo(1);
-            await Assert
-                .That(observed)
-                .IsEquivalentTo([2, 1], TUnit.Assertions.Enums.CollectionOrdering.Matching);
-            await Assert.That(buffer.DrainTo(observed.Add, 1)).IsEqualTo(0);
-            await Assert.That(reservation.TimedOut).IsFalse();
+            buffer.DrainTo(observed.Add, 1).Should().Be(1);
+            observed.Should().Equal(2);
+            buffer.DrainTo(observed.Add, 1).Should().Be(0);
+            buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Success);
+            buffer.DrainTo(observed.Add, 1).Should().Be(1);
+            observed.Should().Equal(2, 1);
+            buffer.DrainTo(observed.Add, 1).Should().Be(0);
+            reservation.TimedOut.Should().BeFalse();
         }
         finally
         {

@@ -1,3 +1,4 @@
+using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
 
 namespace LoadingCache.Tests;
@@ -29,19 +30,24 @@ public sealed class TimeoutAdversarialTests
             await loaderEntered.Task.WaitAsync(Watchdog, CancellationToken.None);
             clock.Advance(TimeSpan.FromSeconds(1));
             await WaitForCompletion(first);
-            await Assert.That((Func<Task>)(() => first)).ThrowsExactly<TimeoutException>();
+            await FluentActions
+                .Awaiting(() => first)
+                .Should()
+                .ThrowExactlyAsync<TimeoutException>();
             await cancellationEntered.Task.WaitAsync(Watchdog);
             backend.TrySetResult("late");
             Func<CacheStatistics> readStatistics = cache.GetStatistics;
-            await Assert
-                .That(SpinWait.SpinUntil(() => readStatistics().InFlightLoads == 0, Watchdog))
-                .IsTrue();
+            SpinWait
+                .SpinUntil(() => readStatistics().InFlightLoads == 0, Watchdog)
+                .Should()
+                .BeTrue();
             Task<string> second = cache.GetAsync(2).AsTask();
             await WaitForCompletion(second);
-            await Assert
-                .That((Func<Task>)(() => second))
-                .ThrowsExactly<CacheLoadRejectedException>();
-            await Assert.That(Volatile.Read(ref callbackCount.Value)).IsEqualTo(1);
+            await FluentActions
+                .Awaiting(() => second)
+                .Should()
+                .ThrowExactlyAsync<CacheLoadRejectedException>();
+            Volatile.Read(ref callbackCount.Value).Should().Be(1);
         }
         finally
         {
@@ -84,11 +90,9 @@ public sealed class TimeoutAdversarialTests
             .BuildAsyncLoading((_, _) => Task.FromResult("value"));
         Task<string> first = cache.GetAsync(1).AsTask();
         await WaitForCompletion(first);
-        await Assert.That((Func<Task>)(() => first)).ThrowsExactly<TimeoutException>();
-        await Assert.That(cache.GetStatistics().InFlightLoads).IsEqualTo(0);
-        await Assert
-            .That((await cache.GetAsync(2).AsTask().WaitAsync(Watchdog)))
-            .IsEqualTo("value");
+        await FluentActions.Awaiting(() => first).Should().ThrowExactlyAsync<TimeoutException>();
+        cache.GetStatistics().InFlightLoads.Should().Be(0);
+        (await cache.GetAsync(2).AsTask().WaitAsync(Watchdog)).Should().Be("value");
     }
 
     [Test]
@@ -121,11 +125,14 @@ public sealed class TimeoutAdversarialTests
         );
         Task<string> first = cache.GetAsync(1).AsTask();
         await WaitForCompletion(first);
-        await Assert.That((Func<Task>)(() => first)).ThrowsExactly<ControlledTimestampException>();
+        await FluentActions
+            .Awaiting(() => first)
+            .Should()
+            .ThrowExactlyAsync<ControlledTimestampException>();
         Task<string> retry = cache.GetAsync(1).AsTask();
         await WaitForCompletion(retry);
-        await Assert.That((await retry)).IsEqualTo("retry");
-        await Assert.That(Volatile.Read(ref loads.Value)).IsEqualTo(2);
+        (await retry).Should().Be("retry");
+        Volatile.Read(ref loads.Value).Should().Be(2);
     }
 
     [Test]
@@ -153,10 +160,13 @@ public sealed class TimeoutAdversarialTests
             await loaderEntered.Task.WaitAsync(Watchdog, CancellationToken.None);
             await cache.DisposeAsync().AsTask().WaitAsync(Watchdog, CancellationToken.None);
             await WaitForCompletion(pending);
-            await Assert.That((Func<Task>)(() => pending)).ThrowsExactly<ObjectDisposedException>();
-            await Assert.That(timeProvider.CreatedTimers).HasSingleItem();
-            await Assert.That(timeProvider.CreatedTimers[0].DisposeCount).IsEqualTo(1);
-            await Assert.That(timeProvider.CreatedTimers[0].CallbackCount).IsEqualTo(0);
+            await FluentActions
+                .Awaiting(() => pending)
+                .Should()
+                .ThrowExactlyAsync<ObjectDisposedException>();
+            timeProvider.CreatedTimers.Should().ContainSingle();
+            timeProvider.CreatedTimers[0].DisposeCount.Should().Be(1);
+            timeProvider.CreatedTimers[0].CallbackCount.Should().Be(0);
         }
         finally
         {
@@ -169,10 +179,9 @@ public sealed class TimeoutAdversarialTests
     private static async Task WaitForCompletion(Task task)
     {
         Task completed = await Task.WhenAny(task, Task.Delay(Watchdog));
-        await Assert
-            .That(ReferenceEquals(completed, task))
-            .IsTrue()
-            .Because("the adversarial operation must complete within the watchdog");
+        completed
+            .Should()
+            .BeSameAs(task, "the adversarial operation must complete within the watchdog");
     }
 
     private static TaskCompletionSource<bool> Signal() =>

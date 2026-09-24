@@ -19,30 +19,27 @@
       "sha256": "65bfe8f98fd87eea27dfd770e191075407dbc1c91eafdd356b8c315b802b747a"
     },
     {
-      "package": "TUnit.Assertions",
-      "version": "1.69.0",
-      "url": "https://api.nuget.org/v3-flatcontainer/tunit.assertions/1.69.0/tunit.assertions.1.69.0.nupkg",
-      "license": "MIT",
-      "licenseUrl": "https://licenses.nuget.org/MIT",
+      "package": "FluentAssertions",
+      "version": "8.11.0",
+      "url": "https://api.nuget.org/v3-flatcontainer/fluentassertions/8.11.0/fluentassertions.8.11.0.nupkg",
+      "license": "Xceed Community License Agreement",
+      "licenseUrl": "https://www.nuget.org/packages/FluentAssertions/8.11.0/License",
       "repository": [
         {
           "type": "git",
-          "url": "https://github.com/thomhurst/TUnit",
-          "branch": "refs/heads/main",
-          "commit": "da404b0e28293b95b2b25a732851e5af79330388"
+          "url": "https://github.com/fluentassertions/fluentassertions",
+          "commit": "9ed9dc02c47e6ad6bb0b00401fe8ab21b6fd60eb"
         }
       ],
       "assets": [
-        "analyzers/dotnet/cs/TUnit.Assertions.Analyzers.CodeFixers.dll",
-        "analyzers/dotnet/cs/TUnit.Assertions.Analyzers.dll",
-        "analyzers/dotnet/cs/TUnit.Assertions.SourceGenerator.dll",
-        "lib/net10.0/TUnit.Assertions.dll",
-        "lib/net8.0/TUnit.Assertions.dll",
-        "lib/net9.0/TUnit.Assertions.dll",
-        "lib/netstandard2.0/TUnit.Assertions.dll"
+        "lib/net47/FluentAssertions.dll",
+        "lib/net6.0/FluentAssertions.dll",
+        "lib/netstandard2.0/FluentAssertions.dll",
+        "lib/netstandard2.1/FluentAssertions.dll"
       ],
-      "accessed": "2026-09-23",
-      "sha256": "d33663972e0a76ed3eb54517224c8f95ec45ad4622f9ab7e722f6d63e3f354c0"
+      "accessed": "2026-09-19",
+      "sha256": "71407b70ad4861be38548fbbe10620c0722de52bf6445c8e343cb22b968ee593",
+      "licenseFile": "LICENSE"
     },
     {
       "package": "CSharpier",

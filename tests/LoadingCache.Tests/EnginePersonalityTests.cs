@@ -1,27 +1,28 @@
-using TUnit.Assertions.Exceptions;
+using FluentAssertions;
+using FluentAssertions.Execution;
 
 namespace LoadingCache.Tests;
 
 public sealed class EnginePersonalityTests
 {
     [Test]
-    public async Task BuilderCreatesManualSynchronousCache()
+    public void BuilderCreatesManualSynchronousCache()
     {
         using ICache<int, string> cache = CacheBuilder
             .Create<int, string>()
             .MaximumSize(8)
             .MaxConcurrentLoads(8)
             .Build();
-        Assert.NotNull(cache.Policy.Eviction);
-        await Assert.That(cache.Policy.Eviction!.Maximum).IsEqualTo(8);
+        cache.Policy.Eviction.Should().NotBeNull();
+        cache.Policy.Eviction!.Maximum.Should().Be(8);
         cache.Put(1, "one");
-        await Assert.That(cache.TryGet(1, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("one");
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
+        cache.TryGet(1, out string? value).Should().BeTrue();
+        value.Should().Be("one");
+        cache.EstimatedCount.Should().Be(1);
     }
 
     [Test]
-    public async Task SynchronousLoadingCacheUsesARealSynchronousFactory()
+    public void SynchronousLoadingCacheUsesARealSynchronousFactory()
     {
         int calls = 0;
         using ILoadingCache<int, string> cache = CacheBuilder
@@ -33,9 +34,9 @@ public sealed class EnginePersonalityTests
                 Interlocked.Increment(ref calls);
                 return key.ToString(System.Globalization.CultureInfo.InvariantCulture);
             });
-        await Assert.That(cache.Get(7)).IsEqualTo("7");
-        await Assert.That(cache.Get(7)).IsEqualTo("7");
-        await Assert.That(calls).IsEqualTo(1);
+        cache.Get(7).Should().Be("7");
+        cache.Get(7).Should().Be("7");
+        calls.Should().Be(1);
     }
 
     [Test]
@@ -53,9 +54,9 @@ public sealed class EnginePersonalityTests
         ValueTask<string> second = cache.GetOrAddAsync(1, Load);
         await entered.Task.WaitAsync(TestTimeout, CancellationToken.None);
         release.TrySetResult(true);
-        await Assert.That((await first)).IsEqualTo("1");
-        await Assert.That((await second)).IsEqualTo("1");
-        await Assert.That(calls).IsEqualTo(1);
+        (await first).Should().Be("1");
+        (await second).Should().Be("1");
+        calls.Should().Be(1);
         return;
         Task<string> Load(int key, CancellationToken cancellationToken)
         {
@@ -85,9 +86,9 @@ public sealed class EnginePersonalityTests
                     return key.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 }
             );
-        await Assert.That((await cache.GetAsync(3))).IsEqualTo("3");
-        await Assert.That((await cache.GetAsync(3))).IsEqualTo("3");
-        await Assert.That(calls).IsEqualTo(1);
+        (await cache.GetAsync(3)).Should().Be("3");
+        (await cache.GetAsync(3)).Should().Be("3");
+        calls.Should().Be(1);
     }
 
     [Test]
@@ -106,9 +107,9 @@ public sealed class EnginePersonalityTests
         ValueTask<int> second = cache.GetOrAddAsync(1, Load, CancellationToken.None);
         await canceled.CancelAsync();
         Func<Task<int>> waitFirst = first.AsTask;
-        await Assert.That(waitFirst).Throws<OperationCanceledException>();
+        await waitFirst.Should().ThrowAsync<OperationCanceledException>();
         release.TrySetResult(true);
-        await Assert.That((await second)).IsEqualTo(42);
+        (await second).Should().Be(42);
         return;
         Task<int> Load(int _, CancellationToken cancellationToken)
         {
@@ -118,7 +119,7 @@ public sealed class EnginePersonalityTests
     }
 
     [Test]
-    public async Task WeightedBuilderRequiresAnExplicitResidentCount()
+    public void WeightedBuilderRequiresAnExplicitResidentCount()
     {
         Action action = () =>
             CacheBuilder
@@ -126,11 +127,11 @@ public sealed class EnginePersonalityTests
                 .MaximumWeight(100)
                 .Weigher((_, value) => value.Length)
                 .Build();
-        await Assert.That(action).ThrowsExactly<InvalidOperationException>();
+        action.Should().ThrowExactly<InvalidOperationException>();
     }
 
     [Test]
-    public async Task MaximumSizeAndMaximumWeightAreMutuallyExclusive()
+    public void MaximumSizeAndMaximumWeightAreMutuallyExclusive()
     {
         Action action = () =>
             CacheBuilder
@@ -140,7 +141,7 @@ public sealed class EnginePersonalityTests
                 .MaximumResidentCount(10)
                 .Weigher((_, _) => 1)
                 .Build();
-        await Assert.That(action).ThrowsExactly<InvalidOperationException>();
+        action.Should().ThrowExactly<InvalidOperationException>();
     }
 
     [Test]
@@ -184,8 +185,8 @@ public sealed class EnginePersonalityTests
             await put.WaitAsync(TestTimeout, CancellationToken.None);
         }
 
-        await Assert.That(cache.TryGet(1, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("value");
+        cache.TryGet(1, out string? value).Should().BeTrue();
+        value.Should().Be("value");
     }
 
     [Test]
@@ -201,12 +202,12 @@ public sealed class EnginePersonalityTests
                 (key, _) =>
                     Task.FromResult(key.ToString(System.Globalization.CultureInfo.InvariantCulture))
             );
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("1");
-        await Assert.That((await cache.GetAsync(2))).IsEqualTo("2");
-        await Assert.That((await cache.GetAsync(3))).IsEqualTo("3");
+        (await cache.GetAsync(1)).Should().Be("1");
+        (await cache.GetAsync(2)).Should().Be("2");
+        (await cache.GetAsync(3)).Should().Be("3");
         // Capacity is a quiescent bound; ready publication precedes policy replay.
         cache.CleanUp();
-        await Assert.That(cache.EstimatedCount).IsLessThanOrEqualTo(2);
+        cache.EstimatedCount.Should().BeLessThanOrEqualTo(2);
     }
 
     [Test]
@@ -221,8 +222,8 @@ public sealed class EnginePersonalityTests
         Task<string> pending = cache.GetAsync(1).AsTask();
         cache.Set(1, "new");
         load.TrySetResult("old");
-        await Assert.That((await pending)).IsEqualTo("old");
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("new");
+        (await pending).Should().Be("old");
+        (await cache.GetAsync(1)).Should().Be("new");
     }
 
     [Test]
@@ -243,9 +244,9 @@ public sealed class EnginePersonalityTests
         Task<string> current = cache.GetAsync(1).AsTask();
         newLoad.TrySetResult("new");
         oldLoad.TrySetResult("old");
-        await Assert.That((await current)).IsEqualTo("new");
-        await Assert.That((await old)).IsEqualTo("old");
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("new");
+        (await current).Should().Be("new");
+        (await old).Should().Be("old");
+        (await cache.GetAsync(1)).Should().Be("new");
     }
 
     [Test]
@@ -265,8 +266,8 @@ public sealed class EnginePersonalityTests
         {
             await Eventually(() => Volatile.Read(ref maximum) == 2);
             release.TrySetResult(true);
-            await Assert.That((await first)).IsEqualTo(1);
-            await Assert.That((await second)).IsEqualTo(2);
+            (await first).Should().Be(1);
+            (await second).Should().Be(2);
         }
         finally
         {
@@ -319,16 +320,12 @@ public sealed class EnginePersonalityTests
                 TaskCreationOptions.DenyChildAttach,
                 TaskScheduler.Default
             );
-            await Assert
-                .That((await probe.WaitAsync(TestTimeout, CancellationToken.None)))
-                .IsFalse();
+            (await probe.WaitAsync(TestTimeout, CancellationToken.None)).Should().BeFalse();
             publication.Release();
-            await Assert
-                .That((await load.WaitAsync(TestTimeout, CancellationToken.None)))
-                .IsEqualTo("1");
-            await Assert.That(cache.TryGet(1, out string? value)).IsTrue();
-            await Assert.That(value).IsEqualTo("1");
-            await Assert.That(cache.EstimatedCount).IsEqualTo(1);
+            (await load.WaitAsync(TestTimeout, CancellationToken.None)).Should().Be("1");
+            cache.TryGet(1, out string? value).Should().BeTrue();
+            value.Should().Be("1");
+            cache.EstimatedCount.Should().Be(1);
         }
         finally
         {
@@ -373,14 +370,14 @@ public sealed class EnginePersonalityTests
             await installation.Entered.WaitAsync(TestTimeout, CancellationToken.None);
             ValueTask<string> joined = cache.GetOrAddAsync(
                 1,
-                (_, _) => throw new AssertionException("The stored task was not joined.")
+                (_, _) => throw new AssertionFailedException("The stored task was not joined.")
             );
             source.SetResult("stored");
             installation.Release();
             await installer.WaitAsync(TestTimeout, CancellationToken.None);
-            await Assert
-                .That((await joined.AsTask().WaitAsync(TestTimeout, CancellationToken.None)))
-                .IsEqualTo("stored");
+            (await joined.AsTask().WaitAsync(TestTimeout, CancellationToken.None))
+                .Should()
+                .Be("stored");
         }
         finally
         {
@@ -414,7 +411,7 @@ public sealed class EnginePersonalityTests
         {
             if (DateTimeOffset.UtcNow >= deadline)
             {
-                throw new AssertionException(
+                throw new AssertionFailedException(
                     "The controlled concurrency condition was not reached."
                 );
             }

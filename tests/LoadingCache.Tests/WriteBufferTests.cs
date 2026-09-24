@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using FluentAssertions;
 using LoadingCache.Maintenance;
 
 namespace LoadingCache.Tests;
@@ -7,48 +8,48 @@ namespace LoadingCache.Tests;
 public sealed class WriteBufferTests
 {
     [Test]
-    public async Task FullBufferRejectsWithoutDroppingTheNewEvent()
+    public void FullBufferRejectsWithoutDroppingTheNewEvent()
     {
         BoundedWriteBuffer<int> buffer = new(2);
-        await Assert.That(buffer.TryEnqueue(1)).IsTrue();
-        await Assert.That(buffer.TryEnqueue(2)).IsTrue();
-        await Assert.That(buffer.TryEnqueue(3)).IsFalse();
-        await Assert.That(buffer.TryDequeue(out int first)).IsTrue();
-        await Assert.That(buffer.TryDequeue(out int second)).IsTrue();
-        await Assert.That(buffer.TryDequeue(out _)).IsFalse();
-        await Assert.That(first).IsEqualTo(1);
-        await Assert.That(second).IsEqualTo(2);
+        buffer.TryEnqueue(1).Should().BeTrue();
+        buffer.TryEnqueue(2).Should().BeTrue();
+        buffer.TryEnqueue(3).Should().BeFalse();
+        buffer.TryDequeue(out int first).Should().BeTrue();
+        buffer.TryDequeue(out int second).Should().BeTrue();
+        buffer.TryDequeue(out _).Should().BeFalse();
+        first.Should().Be(1);
+        second.Should().Be(2);
         WriteBufferStatistics statistics = buffer.GetStatistics();
-        await Assert.That(statistics.Capacity).IsEqualTo(2);
-        await Assert.That(statistics.Queued).IsEqualTo(0);
-        await Assert.That(statistics.Enqueued).IsEqualTo(2);
-        await Assert.That(statistics.Dequeued).IsEqualTo(2);
-        await Assert.That(statistics.Full).IsEqualTo(1);
-        await Assert.That(statistics.Dropped).IsEqualTo(0);
+        statistics.Capacity.Should().Be(2);
+        statistics.Queued.Should().Be(0);
+        statistics.Enqueued.Should().Be(2);
+        statistics.Dequeued.Should().Be(2);
+        statistics.Full.Should().Be(1);
+        statistics.Dropped.Should().Be(0);
         buffer.Dispose();
     }
 
     [Test]
-    public async Task ClearAndDisposeAreTheOnlyExplicitDiscardBoundaries()
+    public void ClearAndDisposeAreTheOnlyExplicitDiscardBoundaries()
     {
         BoundedWriteBuffer<int> buffer = new(4);
-        await Assert.That(buffer.TryEnqueue(1)).IsTrue();
-        await Assert.That(buffer.TryEnqueue(2)).IsTrue();
-        await Assert.That(buffer.Clear()).IsEqualTo(2);
-        await Assert.That(buffer.TryDequeue(out _)).IsFalse();
-        await Assert.That(buffer.TryEnqueue(3)).IsTrue();
+        buffer.TryEnqueue(1).Should().BeTrue();
+        buffer.TryEnqueue(2).Should().BeTrue();
+        buffer.Clear().Should().Be(2);
+        buffer.TryDequeue(out _).Should().BeFalse();
+        buffer.TryEnqueue(3).Should().BeTrue();
         buffer.Dispose();
-        await Assert.That(buffer.TryEnqueue(4)).IsFalse();
+        buffer.TryEnqueue(4).Should().BeFalse();
         WriteBufferStatistics statistics = buffer.GetStatistics();
-        await Assert.That(statistics.DroppedClear).IsEqualTo(2);
-        await Assert.That(statistics.DroppedShutdown).IsEqualTo(2);
-        await Assert.That(statistics.Dropped).IsEqualTo(4);
-        await Assert.That(statistics.IsDisposed).IsTrue();
-        await Assert.That(statistics.Queued).IsEqualTo(0);
+        statistics.DroppedClear.Should().Be(2);
+        statistics.DroppedShutdown.Should().Be(2);
+        statistics.Dropped.Should().Be(4);
+        statistics.IsDisposed.Should().BeTrue();
+        statistics.Queued.Should().Be(0);
     }
 
     [Test]
-    public async Task ConcurrentProducersPreserveEveryAcceptedEvent()
+    public void ConcurrentProducersPreserveEveryAcceptedEvent()
     {
         const int producerCount = 8;
         const int eventsPerProducer = 64;
@@ -64,10 +65,10 @@ public sealed class WriteBufferTests
                 observed.Add(value);
             }
 
-            await Assert.That(observed.Count).IsEqualTo(accepted.Count);
-            await Assert.That(observed).HasDistinctItems();
-            await Assert.That(observed).IsEquivalentTo(accepted);
-            await Assert.That(buffer.GetStatistics().Full).IsEqualTo(0);
+            observed.Should().HaveSameCount(accepted);
+            observed.Should().OnlyHaveUniqueItems();
+            observed.Should().BeEquivalentTo(accepted);
+            buffer.GetStatistics().Full.Should().Be(0);
         }
         finally
         {
@@ -83,18 +84,16 @@ public sealed class WriteBufferTests
         {
             for (int value = 0; value < buffer.Capacity; value++)
             {
-                await Assert.That(buffer.TryEnqueue(value)).IsTrue();
+                buffer.TryEnqueue(value).Should().BeTrue();
             }
 
             Task consumer = StartConsumer(buffer);
             Task disposer = StartDisposer(buffer);
             await Task.WhenAll(consumer, disposer);
             WriteBufferStatistics statistics = buffer.GetStatistics();
-            await Assert.That(statistics.IsDisposed).IsTrue();
-            await Assert.That(statistics.Queued).IsEqualTo(0);
-            await Assert
-                .That((statistics.Dequeued + statistics.DroppedShutdown))
-                .IsEqualTo(statistics.Enqueued);
+            statistics.IsDisposed.Should().BeTrue();
+            statistics.Queued.Should().Be(0);
+            (statistics.Dequeued + statistics.DroppedShutdown).Should().Be(statistics.Enqueued);
         }
         finally
         {
@@ -103,7 +102,7 @@ public sealed class WriteBufferTests
     }
 
     [Test]
-    public async Task DisposeReleasesQueuedEventReferences()
+    public void DisposeReleasesQueuedEventReferences()
     {
         BoundedWriteBuffer<object> buffer = new(1);
         WeakReference reference = EnqueueObject(buffer);
@@ -111,7 +110,7 @@ public sealed class WriteBufferTests
         {
             buffer.Dispose();
             ForceCollection(reference);
-            await Assert.That(reference.IsAlive).IsFalse();
+            reference.IsAlive.Should().BeFalse();
         }
         finally
         {
@@ -120,7 +119,7 @@ public sealed class WriteBufferTests
     }
 
     [Test]
-    public async Task PolicyPublishesAndRemovesOnlyWhenItsWriteOwnerDrains()
+    public void PolicyPublishesAndRemovesOnlyWhenItsWriteOwnerDrains()
     {
         List<object> evicted = [];
         using WindowTinyLfuEnginePolicy policy = new(
@@ -136,20 +135,20 @@ public sealed class WriteBufferTests
         );
         WindowTinyLfuEnginePolicy.EngineEntryToken first = new(new object(), 1);
         policy.OnPublish(first, 1);
-        await Assert.That((first.Node) is null).IsTrue();
-        await Assert.That(policy.HasPendingWrites).IsTrue();
+        first.Node.Should().BeNull();
+        policy.HasPendingWrites.Should().BeTrue();
         policy.FlushWrites();
-        Assert.NotNull(first.Node);
-        await Assert.That(policy.HasPendingWrites).IsFalse();
+        first.Node.Should().NotBeNull();
+        policy.HasPendingWrites.Should().BeFalse();
         policy.OnRemove(first);
-        Assert.NotNull(first.Node);
+        first.Node.Should().NotBeNull();
         policy.FlushWrites();
-        await Assert.That((first.Node) is null).IsTrue();
-        await Assert.That(evicted).IsEmpty();
+        first.Node.Should().BeNull();
+        evicted.Should().BeEmpty();
     }
 
     [Test]
-    public async Task FullPolicyWriteBufferDrainsOlderEventsBeforeAcceptingNewerOnes()
+    public void FullPolicyWriteBufferDrainsOlderEventsBeforeAcceptingNewerOnes()
     {
         using WindowTinyLfuEnginePolicy policy = new(
             maximum: 2,
@@ -167,20 +166,20 @@ public sealed class WriteBufferTests
         policy.OnPublish(first, 1);
         policy.OnPublish(second, 1);
         WriteBufferStatistics beforeFlush = policy.GetWriteBufferStatistics();
-        await Assert.That(beforeFlush.Full).IsGreaterThan(0);
-        await Assert.That(beforeFlush.Enqueued).IsEqualTo(2);
-        await Assert.That(beforeFlush.Dequeued).IsEqualTo(1);
-        await Assert.That((second.Node) is null).IsTrue();
+        beforeFlush.Full.Should().BeGreaterThan(0);
+        beforeFlush.Enqueued.Should().Be(2);
+        beforeFlush.Dequeued.Should().Be(1);
+        second.Node.Should().BeNull();
         policy.FlushWrites();
-        Assert.NotNull(second.Node);
-        await Assert.That(policy.ResidentCount).IsEqualTo(2);
+        second.Node.Should().NotBeNull();
+        policy.ResidentCount.Should().Be(2);
         WriteBufferStatistics afterFlush = policy.GetWriteBufferStatistics();
-        await Assert.That(afterFlush.Queued).IsEqualTo(0);
-        await Assert.That(afterFlush.Enqueued).IsEqualTo(afterFlush.Dequeued);
+        afterFlush.Queued.Should().Be(0);
+        afterFlush.Enqueued.Should().Be(afterFlush.Dequeued);
     }
 
     [Test]
-    public async Task RemoveThenRepublishSameTokenRetainsTheNewerQueuedState()
+    public void RemoveThenRepublishSameTokenRetainsTheNewerQueuedState()
     {
         using WindowTinyLfuEnginePolicy policy = new(
             maximum: 2,
@@ -199,13 +198,13 @@ public sealed class WriteBufferTests
         policy.OnRemove(token);
         policy.OnPublish(token, 1);
         policy.FlushWrites();
-        Assert.NotNull(token.Node);
-        await Assert.That(policy.ResidentCount).IsEqualTo(1);
-        await Assert.That(policy.WeightedSize).IsEqualTo(1);
+        token.Node.Should().NotBeNull();
+        policy.ResidentCount.Should().Be(1);
+        policy.WeightedSize.Should().Be(1);
     }
 
     [Test]
-    public async Task SupersededPublishDoesNotEvictAnUnrelatedResidentEntry()
+    public void SupersededPublishDoesNotEvictAnUnrelatedResidentEntry()
     {
         List<object> evicted = [];
         using WindowTinyLfuEnginePolicy policy = new(
@@ -226,15 +225,15 @@ public sealed class WriteBufferTests
         policy.OnPublish(invalidated, 1);
         policy.OnRemove(invalidated);
         policy.FlushWrites();
-        Assert.NotNull(resident.Node);
-        await Assert.That((invalidated.Node) is null).IsTrue();
-        await Assert.That(policy.ResidentCount).IsEqualTo(1);
-        await Assert.That(evicted).IsEmpty();
+        resident.Node.Should().NotBeNull();
+        invalidated.Node.Should().BeNull();
+        policy.ResidentCount.Should().Be(1);
+        evicted.Should().BeEmpty();
         policy.AssertInvariants();
     }
 
     [Test]
-    public async Task WeightIncreasePastMaximumReportsTheExactEntryEviction()
+    public void WeightIncreasePastMaximumReportsTheExactEntryEviction()
     {
         List<object> evicted = [];
         using WindowTinyLfuEnginePolicy policy = new(
@@ -254,17 +253,15 @@ public sealed class WriteBufferTests
         policy.FlushWrites();
         policy.OnPublish(token, 3);
         policy.FlushWrites();
-        await Assert.That((token.Node) is null).IsTrue();
-        await Assert.That(policy.ResidentCount).IsEqualTo(0);
-        await Assert.That(policy.WeightedSize).IsEqualTo(0);
-        await Assert
-            .That(ReferenceEquals((await Assert.That(evicted).HasSingleItem()), entry))
-            .IsTrue();
+        token.Node.Should().BeNull();
+        policy.ResidentCount.Should().Be(0);
+        policy.WeightedSize.Should().Be(0);
+        evicted.Should().ContainSingle().Which.Should().BeSameAs(entry);
         policy.AssertInvariants();
     }
 
     [Test]
-    public async Task DeferredBatchPreservesLongWeightOverflowAccounting()
+    public void DeferredBatchPreservesLongWeightOverflowAccounting()
     {
         List<object> evicted = [];
         using WindowTinyLfuEnginePolicy policy = new(
@@ -285,18 +282,16 @@ public sealed class WriteBufferTests
         policy.OnPublish(resident, long.MaxValue);
         policy.OnPublish(rejected, 1);
         policy.FlushWrites();
-        Assert.NotNull(resident.Node);
-        await Assert.That((rejected.Node) is null).IsTrue();
-        await Assert.That(policy.ResidentCount).IsEqualTo(1);
-        await Assert.That(policy.WeightedSize).IsEqualTo(long.MaxValue);
-        await Assert
-            .That(ReferenceEquals((await Assert.That(evicted).HasSingleItem()), rejectedEntry))
-            .IsTrue();
+        resident.Node.Should().NotBeNull();
+        rejected.Node.Should().BeNull();
+        policy.ResidentCount.Should().Be(1);
+        policy.WeightedSize.Should().Be(long.MaxValue);
+        evicted.Should().ContainSingle().Which.Should().BeSameAs(rejectedEntry);
         policy.AssertInvariants();
     }
 
     [Test]
-    public async Task DeferredBatchKeepsTinyCountBoundForZeroWeightEntries()
+    public void DeferredBatchKeepsTinyCountBoundForZeroWeightEntries()
     {
         using WindowTinyLfuEnginePolicy policy = new(
             maximum: 2,
@@ -316,14 +311,14 @@ public sealed class WriteBufferTests
         policy.OnPublish(second, 0);
         policy.OnPublish(third, 0);
         policy.FlushWrites();
-        await Assert.That(policy.ResidentCount).IsEqualTo(1);
-        await Assert.That(policy.WeightedSize).IsEqualTo(0);
-        await Assert.That(policy.Snapshot(hottest: false, limit: 4)).HasSingleItem();
+        policy.ResidentCount.Should().Be(1);
+        policy.WeightedSize.Should().Be(0);
+        policy.Snapshot(hottest: false, limit: 4).Should().ContainSingle();
         policy.AssertInvariants();
     }
 
     [Test]
-    public async Task OversizedPublicationIsRemovedAtSynchronousFlushBoundary()
+    public void OversizedPublicationIsRemovedAtSynchronousFlushBoundary()
     {
         List<object> evicted = [];
         using WindowTinyLfuEnginePolicy policy = new(
@@ -341,17 +336,15 @@ public sealed class WriteBufferTests
         WindowTinyLfuEnginePolicy.EngineEntryToken token = new(entry, 1);
         policy.OnPublish(token, 3);
         policy.FlushWrites();
-        await Assert.That((token.Node) is null).IsTrue();
-        await Assert.That(policy.ResidentCount).IsEqualTo(0);
-        await Assert.That(policy.WeightedSize).IsEqualTo(0);
-        await Assert
-            .That(ReferenceEquals((await Assert.That(evicted).HasSingleItem()), entry))
-            .IsTrue();
+        token.Node.Should().BeNull();
+        policy.ResidentCount.Should().Be(0);
+        policy.WeightedSize.Should().Be(0);
+        evicted.Should().ContainSingle().Which.Should().BeSameAs(entry);
         policy.AssertInvariants();
     }
 
     [Test]
-    public async Task NegativePublicationWeightIsRejectedBeforeQueueAdmission()
+    public void NegativePublicationWeightIsRejectedBeforeQueueAdmission()
     {
         using WindowTinyLfuEnginePolicy policy = new(
             maximum: 2,
@@ -365,15 +358,15 @@ public sealed class WriteBufferTests
             writeBufferCapacity: 4
         );
         WindowTinyLfuEnginePolicy.EngineEntryToken token = new(new object(), 1);
-        await Assert.That(() => policy.OnPublish(token, -1)).Throws<ArgumentOutOfRangeException>();
-        await Assert.That(token.PendingPolicyWrites).IsEqualTo(0);
-        await Assert.That(policy.HasPendingWrites).IsFalse();
-        await Assert.That(policy.GetWriteBufferStatistics().Enqueued).IsEqualTo(0);
+        policy.Invoking(p => p.OnPublish(token, -1)).Should().Throw<ArgumentOutOfRangeException>();
+        token.PendingPolicyWrites.Should().Be(0);
+        policy.HasPendingWrites.Should().BeFalse();
+        policy.GetWriteBufferStatistics().Enqueued.Should().Be(0);
         policy.AssertInvariants();
     }
 
     [Test]
-    public async Task ResizeCommitsMaximumBeforeCallbackFailureAndClearUsesIt()
+    public void ResizeCommitsMaximumBeforeCallbackFailureAndClearUsesIt()
     {
         int callbackCount = 0;
         using WindowTinyLfuEnginePolicy policy = new(
@@ -400,18 +393,19 @@ public sealed class WriteBufferTests
         policy.OnPublish(second, 1);
         policy.OnPublish(third, 1);
         policy.FlushWrites();
-        await Assert
-            .That(() => policy.SetMaximum(1, weighted: true))
-            .Throws<InvalidOperationException>();
-        await Assert.That(policy.Maximum).IsEqualTo(1);
+        policy
+            .Invoking(static p => p.SetMaximum(1, weighted: true))
+            .Should()
+            .Throw<InvalidOperationException>();
+        policy.Maximum.Should().Be(1);
         policy.Clear();
-        await Assert.That(policy.Maximum).IsEqualTo(1);
-        await Assert.That(policy.ResidentCount).IsEqualTo(0);
+        policy.Maximum.Should().Be(1);
+        policy.ResidentCount.Should().Be(0);
         policy.AssertInvariants();
     }
 
     [Test]
-    public async Task NonWeightedResizeCommitsBothLimitsBeforeCallbackFailureAndClearUsesThem()
+    public void NonWeightedResizeCommitsBothLimitsBeforeCallbackFailureAndClearUsesThem()
     {
         int callbackCount = 0;
         using WindowTinyLfuEnginePolicy policy = new(
@@ -436,18 +430,19 @@ public sealed class WriteBufferTests
         policy.OnPublish(first, 2);
         policy.OnPublish(second, 2);
         policy.FlushWrites();
-        await Assert
-            .That(() => policy.SetMaximum(1, weighted: false))
-            .Throws<InvalidOperationException>();
-        await Assert.That(policy.Maximum).IsEqualTo(1);
+        policy
+            .Invoking(static p => p.SetMaximum(1, weighted: false))
+            .Should()
+            .Throw<InvalidOperationException>();
+        policy.Maximum.Should().Be(1);
         policy.Clear();
-        await Assert.That(policy.Maximum).IsEqualTo(1);
-        await Assert.That(policy.ResidentCount).IsEqualTo(0);
+        policy.Maximum.Should().Be(1);
+        policy.ResidentCount.Should().Be(0);
         policy.AssertInvariants();
     }
 
     [Test]
-    public async Task EvictionCallbackFailureStillCleansEveryRetiredNode()
+    public void EvictionCallbackFailureStillCleansEveryRetiredNode()
     {
         List<object> evicted = [];
         int callbackCount = 0;
@@ -475,15 +470,15 @@ public sealed class WriteBufferTests
         policy.OnPublish(first, 1);
         policy.OnPublish(second, 1);
         policy.OnPublish(third, 1);
-        await Assert.That(() => policy.FlushWrites()).Throws<InvalidOperationException>();
-        await Assert.That(evicted.Count).IsEqualTo(2);
+        policy.Invoking(static p => p.FlushWrites()).Should().Throw<InvalidOperationException>();
+        evicted.Should().HaveCount(2);
         policy.AssertInvariants();
         policy.FlushWrites();
         policy.AssertInvariants();
     }
 
     [Test]
-    public async Task FullFallbackInstallsSequenceBeforeApplyingOlderEvent()
+    public void FullFallbackInstallsSequenceBeforeApplyingOlderEvent()
     {
         List<object> evicted = [];
         using WindowTinyLfuEnginePolicy policy = new(
@@ -505,15 +500,15 @@ public sealed class WriteBufferTests
         policy.OnPublish(invalidated, 1);
         policy.OnRemove(invalidated);
         policy.FlushWrites();
-        Assert.NotNull(resident.Node);
-        await Assert.That((invalidated.Node) is null).IsTrue();
-        await Assert.That(policy.ResidentCount).IsEqualTo(1);
-        await Assert.That(evicted).IsEmpty();
+        resident.Node.Should().NotBeNull();
+        invalidated.Node.Should().BeNull();
+        policy.ResidentCount.Should().Be(1);
+        evicted.Should().BeEmpty();
         policy.AssertInvariants();
     }
 
     [Test]
-    public async Task FlushWritesProcessesOnlyTheCapturedBatch()
+    public void FlushWritesProcessesOnlyTheCapturedBatch()
     {
         using WindowTinyLfuEnginePolicy policy = new(
             maximum: 1,
@@ -531,13 +526,13 @@ public sealed class WriteBufferTests
         policy.OnPublish(first, 1);
         policy.OnPublish(second, 1);
         policy.FlushWrites();
-        await Assert.That(policy.HasPendingWrites).IsFalse();
-        await Assert.That(policy.ResidentCount).IsEqualTo(1);
+        policy.HasPendingWrites.Should().BeFalse();
+        policy.ResidentCount.Should().Be(1);
         policy.AssertInvariants();
     }
 
     [Test]
-    public async Task SequenceRolloverResetsLiveNodeFencesBeforeIssuingNewEvents()
+    public void SequenceRolloverResetsLiveNodeFencesBeforeIssuingNewEvents()
     {
         using WindowTinyLfuEnginePolicy policy = new(
             maximum: 2,
@@ -558,9 +553,9 @@ public sealed class WriteBufferTests
         policy.OnPublish(first, 1);
         policy.OnPublish(second, 1);
         policy.FlushWrites();
-        Assert.NotNull(first.Node);
-        Assert.NotNull(second.Node);
-        await Assert.That(policy.ResidentCount).IsEqualTo(2);
+        first.Node.Should().NotBeNull();
+        second.Node.Should().NotBeNull();
+        policy.ResidentCount.Should().Be(2);
         policy.AssertInvariants();
     }
 
@@ -569,8 +564,7 @@ public sealed class WriteBufferTests
     {
         object value = new();
         WeakReference reference = new(value);
-        if (!(buffer.TryEnqueue(value)))
-            Assert.Fail("Expected buffer.TryEnqueue(value) to be true ().");
+        buffer.TryEnqueue(value).Should().BeTrue();
         return reference;
     }
 
@@ -595,8 +589,7 @@ public sealed class WriteBufferTests
             total,
             value =>
             {
-                if (!(buffer.TryEnqueue(value)))
-                    Assert.Fail("Expected buffer.TryEnqueue(value) to be true ().");
+                buffer.TryEnqueue(value).Should().BeTrue();
                 accepted.Add(value);
             }
         );

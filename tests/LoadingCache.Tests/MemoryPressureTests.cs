@@ -1,4 +1,5 @@
 using System.Globalization;
+using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
 
 namespace LoadingCache.Tests;
@@ -6,7 +7,7 @@ namespace LoadingCache.Tests;
 public sealed class MemoryPressureTests
 {
     [Test]
-    public async Task PolicyIsDisabledByDefault()
+    public void PolicyIsDisabledByDefault()
     {
         var source = new TestMemoryPressureSource(1);
         using ICache<int, string> cache = CacheBuilder
@@ -16,13 +17,13 @@ public sealed class MemoryPressureTests
             .MemoryPressureSource(source)
             .Build();
         cache.Put(1, "one");
-        await Assert.That(source.Calls).IsEqualTo(0);
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
-        await Assert.That((cache.Policy.MemoryPressureStatistics) is null).IsTrue();
+        source.Calls.Should().Be(0);
+        cache.EstimatedCount.Should().Be(1);
+        cache.Policy.MemoryPressureStatistics.Should().BeNull();
     }
 
     [Test]
-    public async Task HighPressureTrimsBoundedPolicyColdestEntry()
+    public void HighPressureTrimsBoundedPolicyColdestEntry()
     {
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
         var source = new TestMemoryPressureSource(1);
@@ -43,17 +44,17 @@ public sealed class MemoryPressureTests
         clock.Advance(TimeSpan.FromMilliseconds(1));
         cache.Put(2, "two");
         cache.CleanUp();
-        await Assert.That(cache.Policy.Eviction!.Coldest(1).Select(pair => pair.Key)).Contains(1);
+        cache.Policy.Eviction!.Coldest(1).Select(pair => pair.Key).Should().Contain(1);
         clock.Advance(TimeSpan.FromSeconds(1));
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
-        await Assert.That(cache.TryGet(1, out _)).IsFalse();
-        await Assert.That(cache.TryGet(2, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("two");
-        await Assert.That(source.Calls).IsEqualTo(1);
+        cache.EstimatedCount.Should().Be(1);
+        cache.TryGet(1, out _).Should().BeFalse();
+        cache.TryGet(2, out string? value).Should().BeTrue();
+        value.Should().Be("two");
+        source.Calls.Should().Be(1);
     }
 
     [Test]
-    public async Task PressureTrimHonorsTheConfiguredMaximumTrimCount()
+    public void PressureTrimHonorsTheConfiguredMaximumTrimCount()
     {
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
         var source = new TestMemoryPressureSource(1);
@@ -73,16 +74,16 @@ public sealed class MemoryPressureTests
 
         cache.CleanUp();
         engine.SampleMemoryPressureForTesting();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(14);
+        cache.EstimatedCount.Should().Be(14);
         MemoryPressureStatistics? diagnostics = cache.Policy.MemoryPressureStatistics;
-        Assert.NotNull(diagnostics);
-        await Assert.That(diagnostics.Value.Samples).IsEqualTo(1);
-        await Assert.That(diagnostics.Value.PressureSamples).IsEqualTo(1);
-        await Assert.That(diagnostics.Value.EvictedEntries).IsEqualTo(2);
+        diagnostics.Should().NotBeNull();
+        diagnostics.Value.Samples.Should().Be(1);
+        diagnostics.Value.PressureSamples.Should().Be(1);
+        diagnostics.Value.EvictedEntries.Should().Be(2);
     }
 
     [Test]
-    public async Task PressureBelowThresholdDoesNotTrim()
+    public void PressureBelowThresholdDoesNotTrim()
     {
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
         var source = new TestMemoryPressureSource(0.5);
@@ -96,13 +97,13 @@ public sealed class MemoryPressureTests
             .Build();
         cache.Put(1, "one");
         clock.Advance(TimeSpan.FromSeconds(1));
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
-        await Assert.That(cache.TryGet(1, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("one");
+        cache.EstimatedCount.Should().Be(1);
+        cache.TryGet(1, out string? value).Should().BeTrue();
+        value.Should().Be("one");
     }
 
     [Test]
-    public async Task MemoryPressureOptionsValidateAtBuilderBoundary()
+    public void MemoryPressureOptionsValidateAtBuilderBoundary()
     {
         Action invalidInterval = () =>
             CacheBuilder.Create<int, string>().MemoryPressureEviction(TimeSpan.Zero);
@@ -118,34 +119,34 @@ public sealed class MemoryPressureTests
             CacheBuilder
                 .Create<int, string>()
                 .MemoryPressureEviction(TimeSpan.FromSeconds(1), maximumTrimCount: 0);
-        await Assert.That(invalidInterval).ThrowsExactly<ArgumentOutOfRangeException>();
-        await Assert.That(invalidThreshold).ThrowsExactly<ArgumentOutOfRangeException>();
-        await Assert.That(invalidFraction).ThrowsExactly<ArgumentOutOfRangeException>();
-        await Assert.That(invalidCount).ThrowsExactly<ArgumentOutOfRangeException>();
+        invalidInterval.Should().ThrowExactly<ArgumentOutOfRangeException>();
+        invalidThreshold.Should().ThrowExactly<ArgumentOutOfRangeException>();
+        invalidFraction.Should().ThrowExactly<ArgumentOutOfRangeException>();
+        invalidCount.Should().ThrowExactly<ArgumentOutOfRangeException>();
     }
 
     [Test]
-    public async Task FailedPressureTimerConstructionDisposesAnAlreadyCreatedExpirationTimer()
+    public void FailedPressureTimerConstructionDisposesAnAlreadyCreatedExpirationTimer()
     {
         using var timeProvider = new ThrowingSecondTimerProvider();
-        Action build = () =>
+        Action build = timeProvider.Invoking(static current =>
         {
             CacheBuilder
                 .Create<int, string>()
                 .MaximumSize(8)
                 .MaxConcurrentLoads(1)
-                .TimeProvider(timeProvider)
+                .TimeProvider(current)
                 .ExpireAfterWrite(TimeSpan.FromMinutes(1))
                 .EnableExpirationScheduler()
                 .MemoryPressureEviction(TimeSpan.FromSeconds(1))
                 .Build();
-        };
-        await Assert.That(build).ThrowsExactly<InvalidOperationException>();
-        await Assert.That(timeProvider.DisposedTimerCount).IsEqualTo(1);
+        });
+        build.Should().ThrowExactly<InvalidOperationException>();
+        timeProvider.DisposedTimerCount.Should().Be(1);
     }
 
     [Test]
-    public async Task SamplingErrorsAreObservedWithoutDamagingCacheState()
+    public void SamplingErrorsAreObservedWithoutDamagingCacheState()
     {
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
         var source = new TestMemoryPressureSource(new InvalidOperationException("sample failed"));
@@ -161,13 +162,11 @@ public sealed class MemoryPressureTests
         cache.Put(1, "one");
         engine.SampleMemoryPressureForTesting();
         MemoryPressureStatistics? diagnostics = cache.Policy.MemoryPressureStatistics;
-        Assert.NotNull(diagnostics);
-        await Assert.That(diagnostics.Value.SamplingErrors).IsEqualTo(1);
-        await Assert
-            .That<object>(diagnostics.Value.LastSamplingError!)
-            .IsTypeOf<InvalidOperationException>();
-        await Assert.That(cache.TryGet(1, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("one");
+        diagnostics.Should().NotBeNull();
+        diagnostics.Value.SamplingErrors.Should().Be(1);
+        diagnostics.Value.LastSamplingError.Should().BeOfType<InvalidOperationException>();
+        cache.TryGet(1, out string? value).Should().BeTrue();
+        value.Should().Be("one");
     }
 
     [Test]
@@ -198,9 +197,9 @@ public sealed class MemoryPressureTests
         cache.Put(2, "new");
         release.TrySetResult(true);
         await sample.WaitAsync(TimeSpan.FromSeconds(5));
-        await Assert.That(cache.TryGet(2, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("new");
-        await Assert.That(cache.Policy.MemoryPressureStatistics!.Value.EvictedEntries).IsEqualTo(0);
+        cache.TryGet(2, out string? value).Should().BeTrue();
+        value.Should().Be("new");
+        cache.Policy.MemoryPressureStatistics!.Value.EvictedEntries.Should().Be(0);
     }
 
     [Test]
@@ -230,9 +229,9 @@ public sealed class MemoryPressureTests
         cache.Put(1, "new");
         release.TrySetResult(true);
         await sample.WaitAsync(TimeSpan.FromSeconds(5));
-        await Assert.That(cache.TryGet(1, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("new");
-        await Assert.That(cache.Policy.MemoryPressureStatistics!.Value.EvictedEntries).IsEqualTo(0);
+        cache.TryGet(1, out string? value).Should().BeTrue();
+        value.Should().Be("new");
+        cache.Policy.MemoryPressureStatistics!.Value.EvictedEntries.Should().Be(0);
     }
 
     [Test]
@@ -272,18 +271,18 @@ public sealed class MemoryPressureTests
                 return "v2";
             }
         );
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("v1");
+        (await cache.GetAsync(1)).Should().Be("v1");
         Task<string> refresh = cache.RefreshAsync(1).AsTask();
         await refreshEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Task sample = Task.Run(engine.SampleMemoryPressureForTesting);
         await sourceEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         releaseRefresh.TrySetResult(true);
-        await Assert.That((await refresh.WaitAsync(TimeSpan.FromSeconds(5)))).IsEqualTo("v2");
+        (await refresh.WaitAsync(TimeSpan.FromSeconds(5))).Should().Be("v2");
         releaseSource.TrySetResult(true);
         await sample.WaitAsync(TimeSpan.FromSeconds(5));
-        await Assert.That(cache.TryGet(1, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("v2");
-        await Assert.That(cache.Policy.MemoryPressureStatistics!.Value.EvictedEntries).IsEqualTo(0);
+        cache.TryGet(1, out string? value).Should().BeTrue();
+        value.Should().Be("v2");
+        cache.Policy.MemoryPressureStatistics!.Value.EvictedEntries.Should().Be(0);
     }
 
     [Test]
@@ -302,8 +301,8 @@ public sealed class MemoryPressureTests
         using var typedCache = new Cache<int, string>(engine);
         source.Cache = typedCache;
         await Task.Run(engine.SampleMemoryPressureForTesting).WaitAsync(TimeSpan.FromSeconds(5));
-        await Assert.That(typedCache.TryGet(2, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("reentrant");
+        typedCache.TryGet(2, out string? value).Should().BeTrue();
+        value.Should().Be("reentrant");
     }
 
     [Test]
@@ -332,10 +331,10 @@ public sealed class MemoryPressureTests
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Task second = Task.Run(engine.SampleMemoryPressureForTesting);
         await second.WaitAsync(TimeSpan.FromSeconds(5));
-        await Assert.That(source.Calls).IsEqualTo(1);
+        source.Calls.Should().Be(1);
         release.TrySetResult(true);
         await first.WaitAsync(TimeSpan.FromSeconds(5));
-        await Assert.That(cache.Policy.MemoryPressureStatistics!.Value.Samples).IsEqualTo(1);
+        cache.Policy.MemoryPressureStatistics!.Value.Samples.Should().Be(1);
     }
 
     [Test]
@@ -364,7 +363,7 @@ public sealed class MemoryPressureTests
         context.Value = "caller-context";
         await timeProvider.FireTimerAsync().WaitAsync(TimeSpan.FromSeconds(5));
         await observed.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await Assert.That((observedValue) is null).IsTrue();
+        observedValue.Should().BeNull();
     }
 
     [Test]
@@ -394,14 +393,14 @@ public sealed class MemoryPressureTests
         Task<string> load = cache.GetAsync(1).AsTask();
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         clock.Advance(TimeSpan.FromSeconds(1));
-        await Assert.That(cache.Statistics.InFlightLoads).IsEqualTo(1);
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
+        cache.Statistics.InFlightLoads.Should().Be(1);
+        cache.EstimatedCount.Should().Be(0);
         release.TrySetResult(true);
-        await Assert.That((await load.WaitAsync(TimeSpan.FromSeconds(5)))).IsEqualTo("loaded");
+        (await load.WaitAsync(TimeSpan.FromSeconds(5))).Should().Be("loaded");
     }
 
     [Test]
-    public async Task WeightedZeroEntriesRemainSubjectToPressureTrim()
+    public void WeightedZeroEntriesRemainSubjectToPressureTrim()
     {
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
         CacheEngine<int, string> engine = CacheBuilder
@@ -418,12 +417,12 @@ public sealed class MemoryPressureTests
         cache.Put(1, "one");
         cache.Put(2, "two");
         engine.SampleMemoryPressureForTesting();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
-        await Assert.That(cache.Policy.Eviction!.WeightedSize).IsEqualTo(0);
+        cache.EstimatedCount.Should().Be(1);
+        cache.Policy.Eviction!.WeightedSize.Should().Be(0);
     }
 
     [Test]
-    public async Task DisposingCacheStopsFutureSamples()
+    public void DisposingCacheStopsFutureSamples()
     {
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
         var source = new TestMemoryPressureSource(1);
@@ -437,10 +436,10 @@ public sealed class MemoryPressureTests
             .Build();
         cache.Put(1, "one");
         clock.Advance(TimeSpan.FromSeconds(1));
-        await Assert.That(source.Calls).IsEqualTo(1);
+        source.Calls.Should().Be(1);
         cache.Dispose();
         clock.Advance(TimeSpan.FromSeconds(3));
-        await Assert.That(source.Calls).IsEqualTo(1);
+        source.Calls.Should().Be(1);
     }
 
     private static TaskCompletionSource<bool> NewSignal() =>

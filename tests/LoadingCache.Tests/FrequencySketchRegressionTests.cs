@@ -1,3 +1,5 @@
+using FluentAssertions;
+using FluentAssertions.Execution;
 using LoadingCache.Policy;
 
 namespace LoadingCache.Tests;
@@ -16,7 +18,7 @@ public sealed class FrequencySketchRegressionTests
     ];
 
     [Test]
-    public async Task UninitializedIncrementsDoNotCreateCounters()
+    public void UninitializedIncrementsDoNotCreateCounters()
     {
         FrequencySketch actual = new(uint.MaxValue);
         UnpackedSketch expected = new(uint.MaxValue);
@@ -28,14 +30,14 @@ public sealed class FrequencySketchRegressionTests
             AssertEquivalent(actual, expected, hash, step);
         }
 
-        await Assert.That(actual.IsInitialized).IsFalse();
+        actual.IsInitialized.Should().BeFalse();
     }
 
     [Test]
     [Arguments(0u)]
     [Arguments(43u)]
     [Arguments(uint.MaxValue)]
-    public async Task HotUniformAndChangedPhasesMatchUnpackedCounters(uint seed)
+    public void HotUniformAndChangedPhasesMatchUnpackedCounters(uint seed)
     {
         FrequencySketch actual = new(seed);
         UnpackedSketch expected = new(seed);
@@ -56,7 +58,7 @@ public sealed class FrequencySketchRegressionTests
             AssertEquivalent(actual, expected, hash, step);
         }
 
-        await Assert.That(expected.ResetCount).IsGreaterThan(0);
+        expected.ResetCount.Should().BeGreaterThan(0);
     }
 
     [Test]
@@ -64,7 +66,7 @@ public sealed class FrequencySketchRegressionTests
     [Arguments(1)]
     [Arguments(2)]
     [Arguments(3)]
-    public async Task OneSaturatedLaneDoesNotPreventTheOtherThreeUpdates(int saturatedLane)
+    public void OneSaturatedLaneDoesNotPreventTheOtherThreeUpdates(int saturatedLane)
     {
         const uint target = 0x12345678;
         FrequencySketch actual = new(43);
@@ -79,18 +81,18 @@ public sealed class FrequencySketchRegressionTests
             AssertEquivalent(actual, expected, collider, step);
         }
 
-        await Assert.That(actual.Frequency(target)).IsEqualTo(0);
+        actual.Frequency(target).Should().Be(0);
         for (int step = 15; step < 19; step++)
         {
             actual.Increment(target);
             expected.Increment(target);
             AssertEquivalent(actual, expected, target, step);
-            await Assert.That(actual.Frequency(target)).IsEqualTo(step - 14);
+            actual.Frequency(target).Should().Be(step - 14);
         }
     }
 
     [Test]
-    public async Task FullySaturatedCountersDoNotAdvanceTheSample()
+    public void FullySaturatedCountersDoNotAdvanceTheSample()
     {
         const uint hash = uint.MaxValue;
         FrequencySketch actual = new(7);
@@ -104,13 +106,13 @@ public sealed class FrequencySketchRegressionTests
             AssertEquivalent(actual, expected, hash, step);
         }
 
-        await Assert.That(actual.SampleCount).IsEqualTo(15);
-        await Assert.That(actual.Frequency(hash)).IsEqualTo(15);
-        await Assert.That(expected.ResetCount).IsEqualTo(0);
+        actual.SampleCount.Should().Be(15);
+        actual.Frequency(hash).Should().Be(15);
+        expected.ResetCount.Should().Be(0);
     }
 
     [Test]
-    public async Task ResizeClampAndSampleResetPreserveTheReferenceState()
+    public void ResizeClampAndSampleResetPreserveTheReferenceState()
     {
         FrequencySketch actual = new(19);
         UnpackedSketch expected = new(19);
@@ -123,31 +125,31 @@ public sealed class FrequencySketchRegressionTests
             AssertEquivalent(actual, expected, hash, (int)hash);
         }
 
-        await Assert.That(actual.SampleCount).IsGreaterThan(10);
+        actual.SampleCount.Should().BeGreaterThan(10);
         actual.EnsureCapacity(0);
         expected.EnsureCapacity(0);
         AssertEquivalent(actual, expected, 63, 64);
-        await Assert.That(actual.SampleCount).IsEqualTo(9);
-        await Assert.That(actual.Capacity).IsEqualTo(64);
+        actual.SampleCount.Should().Be(9);
+        actual.Capacity.Should().Be(64);
         actual.Increment(uint.MaxValue);
         expected.Increment(uint.MaxValue);
         AssertEquivalent(actual, expected, uint.MaxValue, 65);
-        await Assert.That(expected.ResetCount).IsEqualTo(1);
+        expected.ResetCount.Should().Be(1);
         actual.EnsureCapacity(128);
         expected.EnsureCapacity(128);
         AssertEquivalent(actual, expected, 63, 66);
-        await Assert.That(actual.Frequency(63)).IsEqualTo(0);
+        actual.Frequency(63).Should().Be(0);
         actual.Increment(1);
         expected.Increment(1);
         AssertEquivalent(actual, expected, 1, 67);
         actual.ResetSampleCount();
         expected.ResetSampleCount();
         AssertEquivalent(actual, expected, 1, 68);
-        await Assert.That(actual.Frequency(1)).IsEqualTo(1);
+        actual.Frequency(1).Should().Be(1);
         actual.EnsureCapacity(16);
         expected.EnsureCapacity(16);
         AssertEquivalent(actual, expected, 1, 69);
-        await Assert.That(actual.Capacity).IsEqualTo(128);
+        actual.Capacity.Should().Be(128);
     }
 
     [Test]
@@ -157,7 +159,7 @@ public sealed class FrequencySketchRegressionTests
     [Arguments(9L, 16, 90L)]
     [Arguments(65L, 128, 650L)]
     [Arguments(long.MaxValue, 1 << 20, (long)int.MaxValue)]
-    public async Task CapacityBoundariesAndExtremeHashesMatchUnpackedCounters(
+    public void CapacityBoundariesAndExtremeHashesMatchUnpackedCounters(
         long estimatedEntries,
         int capacity,
         long sampleSize
@@ -167,8 +169,8 @@ public sealed class FrequencySketchRegressionTests
         UnpackedSketch expected = new(0x80000000);
         actual.EnsureCapacity(estimatedEntries);
         expected.EnsureCapacity(estimatedEntries);
-        await Assert.That(actual.Capacity).IsEqualTo(capacity);
-        await Assert.That(actual.SampleSize).IsEqualTo(sampleSize);
+        actual.Capacity.Should().Be(capacity);
+        actual.SampleSize.Should().Be(sampleSize);
         for (int step = 0; step < ProbeHashes.Length; step++)
         {
             uint hash = ProbeHashes[step];
@@ -206,33 +208,16 @@ public sealed class FrequencySketchRegressionTests
         int step
     )
     {
-        string context =
-            $"seed={expected.Seed}, step={step}, capacity={expected.Capacity}, hash={hash:X8}: ";
-        if ((actual.Capacity) != (expected.Capacity))
-            Assert.Fail(
-                context + $"Expected capacity {expected.Capacity}, found {actual.Capacity}."
-            );
-        if ((actual.SampleSize) != (expected.SampleSize))
-            Assert.Fail(
-                context + $"Expected sample size {expected.SampleSize}, found {actual.SampleSize}."
-            );
-        if ((actual.SampleCount) != (expected.SampleCount))
-            Assert.Fail(
-                context
-                    + $"Expected sample count {expected.SampleCount}, found {actual.SampleCount}."
-            );
-        if ((actual.Frequency(hash)) != (expected.Frequency(hash)))
-            Assert.Fail(
-                context
-                    + $"Expected frequency {expected.Frequency(hash)}, found {actual.Frequency(hash)}."
-            );
+        using var scope = new AssertionScope(
+            $"seed={expected.Seed}, step={step}, capacity={expected.Capacity}, hash={hash:X8}"
+        );
+        actual.Capacity.Should().Be(expected.Capacity);
+        actual.SampleSize.Should().Be(expected.SampleSize);
+        actual.SampleCount.Should().Be(expected.SampleCount);
+        actual.Frequency(hash).Should().Be(expected.Frequency(hash));
         foreach (uint probe in ProbeHashes)
         {
-            if ((actual.Frequency(probe)) != (expected.Frequency(probe)))
-                Assert.Fail(
-                    context
-                        + $"probe={probe:X8}: expected frequency {expected.Frequency(probe)}, found {actual.Frequency(probe)}."
-                );
+            actual.Frequency(probe).Should().Be(expected.Frequency(probe), $"probe={probe:X8}");
         }
     }
 

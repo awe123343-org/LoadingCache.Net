@@ -1,11 +1,12 @@
 using System.Collections.Concurrent;
+using FluentAssertions;
 
 namespace LoadingCache.Tests;
 
 public sealed class ResidentReplacementTests
 {
     [Test]
-    public async Task ResidentPutWithoutTimePoliciesDoesNotSampleTheClock()
+    public void ResidentPutWithoutTimePoliciesDoesNotSampleTheClock()
     {
         var clock = new CountingTimestampProvider();
         using ICache<int, string> cache = CacheBuilder
@@ -17,10 +18,10 @@ public sealed class ResidentReplacementTests
         cache.Put(1, "first");
         int timestampCalls = clock.TimestampCalls;
         cache.Put(1, "second");
-        await Assert.That(clock.TimestampCalls).IsEqualTo(timestampCalls);
-        await Assert.That(cache.TryGet(1, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("second");
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
+        clock.TimestampCalls.Should().Be(timestampCalls);
+        cache.TryGet(1, out string? value).Should().BeTrue();
+        value.Should().Be("second");
+        cache.EstimatedCount.Should().Be(1);
     }
 
     [Test]
@@ -48,14 +49,14 @@ public sealed class ResidentReplacementTests
         cache.Put(1, "second");
         cache.CleanUp();
         await replaced.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await Assert.That(cache.TryGet(1, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("second");
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
-        await Assert.That(cache.Policy.Eviction!.WeightedSize).IsEqualTo(1);
-        await Assert.That(cache.Statistics.ReplacedRemovals).IsEqualTo(1);
-        await Assert
-            .That(notifications)
-            .HasSingleItem(notification =>
+        cache.TryGet(1, out string? value).Should().BeTrue();
+        value.Should().Be("second");
+        cache.EstimatedCount.Should().Be(1);
+        cache.Policy.Eviction!.WeightedSize.Should().Be(1);
+        cache.Statistics.ReplacedRemovals.Should().Be(1);
+        notifications
+            .Should()
+            .ContainSingle(notification =>
                 notification.Key == 1
                 && notification.Value == "first"
                 && notification.Cause == RemovalCause.Replaced
@@ -63,7 +64,7 @@ public sealed class ResidentReplacementTests
     }
 
     [Test]
-    public async Task RepeatedSameWeightReplacementDoesNotCreatePolicyGhosts()
+    public void RepeatedSameWeightReplacementDoesNotCreatePolicyGhosts()
     {
         using ICache<int, int> cache = CacheBuilder
             .Create<int, int>()
@@ -76,10 +77,10 @@ public sealed class ResidentReplacementTests
         }
 
         cache.CleanUp();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
-        await Assert.That(cache.Policy.Eviction!.WeightedSize).IsEqualTo(1);
-        await Assert.That(cache.TryGet(1, out int current)).IsTrue();
-        await Assert.That(current).IsEqualTo(31);
+        cache.EstimatedCount.Should().Be(1);
+        cache.Policy.Eviction!.WeightedSize.Should().Be(1);
+        cache.TryGet(1, out int current).Should().BeTrue();
+        current.Should().Be(31);
     }
 
     [Test]
@@ -106,8 +107,8 @@ public sealed class ResidentReplacementTests
         RemovalNotification<string, string> replacement = await notification.Task.WaitAsync(
             TimeSpan.FromSeconds(5)
         );
-        await Assert.That(replacement.Key).IsEqualTo("Canonical");
-        await Assert.That(replacement.Value).IsEqualTo("first");
+        replacement.Key.Should().Be("Canonical");
+        replacement.Value.Should().Be("first");
     }
 
     [Test]
@@ -142,8 +143,7 @@ public sealed class ResidentReplacementTests
                         return CacheMutation.Keep<int>();
                     }
 
-                    if ((current.Value) != (1))
-                        Assert.Fail("Expected current.Value to equal (1).");
+                    current.Value.Should().Be(1);
                     callbackEntered.TrySetResult(null);
                     releaseCallback.Task.GetAwaiter().GetResult();
                     return CacheMutation.Set(2);
@@ -155,11 +155,11 @@ public sealed class ResidentReplacementTests
             await callbackEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
             cache.Put(1, 42);
             releaseCallback.TrySetResult(null);
-            await Assert
-                .That((await compute.WaitAsync(TimeSpan.FromSeconds(5))).Kind)
-                .IsEqualTo(CacheMutationKind.Keep);
-            await Assert.That(callbackCalls).IsEqualTo(2);
-            await Assert.That(dictionary[1]).IsEqualTo(42);
+            (await compute.WaitAsync(TimeSpan.FromSeconds(5)))
+                .Kind.Should()
+                .Be(CacheMutationKind.Keep);
+            callbackCalls.Should().Be(2);
+            dictionary[1].Should().Be(42);
         }
         finally
         {
@@ -169,7 +169,7 @@ public sealed class ResidentReplacementTests
     }
 
     [Test]
-    public async Task MemoryPressureCandidateCannotRemoveAnInPlaceReplacement()
+    public void MemoryPressureCandidateCannotRemoveAnInPlaceReplacement()
     {
         CacheEngine<int, string> engine = CacheBuilder
             .Create<int, string>()
@@ -181,11 +181,11 @@ public sealed class ResidentReplacementTests
         cache.Put(1, "old");
         cache.CleanUp();
         MemoryPressureSnapshot? snapshot = engine.CaptureMemoryPressureSnapshot(1, 1);
-        Assert.NotNull(snapshot);
+        snapshot.Should().NotBeNull();
         cache.Put(1, "new");
-        await Assert.That(engine.TrimForMemoryPressure(snapshot)).IsEqualTo(0);
-        await Assert.That(cache.TryGet(1, out string? current)).IsTrue();
-        await Assert.That(current).IsEqualTo("new");
+        engine.TrimForMemoryPressure(snapshot).Should().Be(0);
+        cache.TryGet(1, out string? current).Should().BeTrue();
+        current.Should().Be("new");
     }
 
     [Test]
@@ -197,17 +197,14 @@ public sealed class ResidentReplacementTests
             .MaxConcurrentLoads(2)
             .BuildAsyncLoading((_, _) => Task.FromResult("loader"));
         cache.Set(1, "first");
-        await Assert.That(cache.TryGetTask(1, out Task<string>? first)).IsTrue();
-        Assert.NotNull(first);
-        await Assert.That(cache.TryGetTask(1, out Task<string>? sameVersion)).IsTrue();
-        Assert.NotNull(sameVersion);
-        await Assert.That(ReferenceEquals(sameVersion, first)).IsTrue();
+        cache.TryGetTask(1, out Task<string>? first).Should().BeTrue();
+        cache.TryGetTask(1, out Task<string>? sameVersion).Should().BeTrue();
+        sameVersion.Should().BeSameAs(first);
         cache.Set(1, "second");
-        await Assert.That(cache.TryGetTask(1, out Task<string>? second)).IsTrue();
-        Assert.NotNull(second);
-        await Assert.That(ReferenceEquals(second, first)).IsFalse();
-        await Assert.That((await first!)).IsEqualTo("first");
-        await Assert.That((await second)).IsEqualTo("second");
+        cache.TryGetTask(1, out Task<string>? second).Should().BeTrue();
+        second.Should().NotBeSameAs(first);
+        (await first!).Should().Be("first");
+        (await second).Should().Be("second");
     }
 
     [Test]
@@ -234,25 +231,22 @@ public sealed class ResidentReplacementTests
                 static (_, _) => throw new InvalidOperationException("No load should start.")
             );
         cache.Set(1, value);
-        await Assert.That(cache.TryGetTask(1, out Task<object>? first)).IsTrue();
-        Assert.NotNull(first);
+        cache.TryGetTask(1, out Task<object>? first).Should().BeTrue();
         cache.Set(1, value);
-        await Assert.That(cache.TryGetTask(1, out Task<object>? second)).IsTrue();
-        Assert.NotNull(second);
-        await Assert.That(ReferenceEquals(second, first)).IsFalse();
-        await Assert.That(cache.TryGetTask(1, out Task<object>? sameVersion)).IsTrue();
-        Assert.NotNull(sameVersion);
-        await Assert.That(ReferenceEquals(sameVersion, second)).IsTrue();
-        await Assert.That(ReferenceEquals((await first!), value)).IsTrue();
-        await Assert.That(ReferenceEquals((await second), value)).IsTrue();
+        cache.TryGetTask(1, out Task<object>? second).Should().BeTrue();
+        second.Should().NotBeSameAs(first);
+        cache.TryGetTask(1, out Task<object>? sameVersion).Should().BeTrue();
+        sameVersion.Should().BeSameAs(second);
+        (await first!).Should().BeSameAs(value);
+        (await second).Should().BeSameAs(value);
         RemovalNotification<int, object> replacement = await replaced.Task.WaitAsync(
             TimeSpan.FromSeconds(5)
         );
-        await Assert.That(replacement.Key).IsEqualTo(1);
-        await Assert.That(ReferenceEquals(replacement.Value, value)).IsTrue();
-        await Assert.That(replacement.Cause).IsEqualTo(RemovalCause.Replaced);
-        await Assert.That(notifications).HasSingleItem();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
+        replacement.Key.Should().Be(1);
+        replacement.Value.Should().BeSameAs(value);
+        replacement.Cause.Should().Be(RemovalCause.Replaced);
+        notifications.Should().ContainSingle();
+        cache.EstimatedCount.Should().Be(1);
     }
 
     [Test]
@@ -291,16 +285,14 @@ public sealed class ResidentReplacementTests
         {
             await completionEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
             cache.Set(1, "set");
-            await Assert.That(cache.TryGetTask(1, out Task<string>? current)).IsTrue();
-            Assert.NotNull(current);
-            await Assert.That((await current!)).IsEqualTo("set");
+            cache.TryGetTask(1, out Task<string>? current).Should().BeTrue();
+            (await current!).Should().Be("set");
             releaseCompletion.TrySetResult(null);
-            await Assert.That((await load.WaitAsync(TimeSpan.FromSeconds(5)))).IsEqualTo("loaded");
-            await Assert.That(cache.TryGet(1, out string? value)).IsTrue();
-            await Assert.That(value).IsEqualTo("set");
-            await Assert.That(cache.TryGetTask(1, out Task<string>? after)).IsTrue();
-            Assert.NotNull(after);
-            await Assert.That(ReferenceEquals(after, current)).IsTrue();
+            (await load.WaitAsync(TimeSpan.FromSeconds(5))).Should().Be("loaded");
+            cache.TryGet(1, out string? value).Should().BeTrue();
+            value.Should().Be("set");
+            cache.TryGetTask(1, out Task<string>? after).Should().BeTrue();
+            after.Should().BeSameAs(current);
         }
         finally
         {
@@ -330,10 +322,10 @@ public sealed class ResidentReplacementTests
         );
         cache.Put(1, value);
         cache.Put(1, value);
-        await Assert.That(value.DisposeCount).IsEqualTo(0);
-        await Assert.That(cache.Invalidate(1)).IsTrue();
+        value.DisposeCount.Should().Be(0);
+        cache.Invalidate(1).Should().BeTrue();
         await disposed.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await Assert.That(value.DisposeCount).IsEqualTo(1);
+        value.DisposeCount.Should().Be(1);
     }
 
     private sealed class CountingTimestampProvider : TimeProvider

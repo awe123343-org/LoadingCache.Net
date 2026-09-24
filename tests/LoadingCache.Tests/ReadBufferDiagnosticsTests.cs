@@ -1,3 +1,4 @@
+using FluentAssertions;
 using LoadingCache.Diagnostics;
 using LoadingCache.Maintenance;
 
@@ -13,9 +14,9 @@ public sealed class ReadBufferDiagnosticsTests
         try
         {
             await using BlockingTestHook tableCaptured = new(watchdog);
-            await Assert.That(buffer.TryOffer(0)).IsEqualTo(ReadBufferOfferResult.Success);
-            await Assert.That(buffer.TryRead(out _)).IsTrue();
-            await Assert.That(buffer.TryOffer(1)).IsEqualTo(ReadBufferOfferResult.Success);
+            buffer.TryOffer(0).Should().Be(ReadBufferOfferResult.Success);
+            buffer.TryRead(out _).Should().BeTrue();
+            buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Success);
             Task<ReadBufferStatistics> snapshot = Task.Factory.StartNew(
                 static state =>
                 {
@@ -35,16 +36,16 @@ public sealed class ReadBufferDiagnosticsTests
             {
                 await tableCaptured.Entered.WaitAsync(watchdog);
                 buffer.SetForcedCasFailuresForTesting(3);
-                await Assert.That(buffer.TryOffer(2)).IsEqualTo(ReadBufferOfferResult.Failed);
-                await Assert.That(buffer.StripeCountForTesting).IsEqualTo(2);
+                buffer.TryOffer(2).Should().Be(ReadBufferOfferResult.Failed);
+                buffer.StripeCountForTesting.Should().Be(2);
                 buffer.Dispose();
                 tableCaptured.Release();
                 ReadBufferStatistics statistics = await snapshot.WaitAsync(watchdog);
-                await Assert.That(statistics.Enqueued).IsEqualTo(2);
-                await Assert.That(statistics.Dequeued).IsEqualTo(1);
-                await Assert.That(statistics.DroppedShutdown).IsEqualTo(1);
-                await Assert.That(statistics.Queued).IsEqualTo(0);
-                await Assert.That(tableCaptured.TimedOut).IsFalse();
+                statistics.Enqueued.Should().Be(2);
+                statistics.Dequeued.Should().Be(1);
+                statistics.DroppedShutdown.Should().Be(1);
+                statistics.Queued.Should().Be(0);
+                tableCaptured.TimedOut.Should().BeFalse();
             }
             finally
             {
@@ -61,23 +62,23 @@ public sealed class ReadBufferDiagnosticsTests
     [Test]
     [Arguments(false)]
     [Arguments(true)]
-    public async Task DiagnosticShardsAreBoundedAndAllocatedOnlyWhenRecording(bool recordStatistics)
+    public void DiagnosticShardsAreBoundedAndAllocatedOnlyWhenRecording(bool recordStatistics)
     {
         using StripedReadBuffer<int> buffer = new(1, 1, recordStatistics);
         int expected = recordStatistics
             ? StripedCacheCounters.NormalizeStripeCount(Environment.ProcessorCount)
             : 0;
-        await Assert.That(buffer.DiagnosticStripeCountForTesting).IsEqualTo(expected);
-        await Assert.That(buffer.DiagnosticStripeCountForTesting).IsBetween(0, 64);
+        buffer.DiagnosticStripeCountForTesting.Should().Be(expected);
+        buffer.DiagnosticStripeCountForTesting.Should().BeInRange(0, 64);
     }
 
     [Test]
-    public async Task SharedDropShardsAndShadowCountersAreAggregatedOnceAfterDisposal()
+    public void SharedDropShardsAndShadowCountersAreAggregatedOnceAfterDisposal()
     {
         StripedReadBuffer<int> buffer = new(2, 2);
         try
         {
-            await Assert.That(buffer.TryOffer(1)).IsEqualTo(ReadBufferOfferResult.Success);
+            buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Success);
             int stripes = buffer.DiagnosticStripeCountForTesting;
             for (int stripe = 0; stripe < stripes; stripe++)
             {
@@ -92,23 +93,23 @@ public sealed class ReadBufferDiagnosticsTests
             buffer.AddStatisticsForTesting(1, droppedFull: 11, droppedShutdown: 4);
             long expectedFull = stripes * (stripes + 1L) / 2 + 18;
             ReadBufferStatistics live = buffer.GetStatistics();
-            await Assert.That(live.DroppedFull).IsEqualTo(expectedFull);
-            await Assert.That(live.DroppedFailed).IsEqualTo(stripes);
-            await Assert.That(live.DroppedShutdown).IsEqualTo(7);
-            await Assert.That(live.Queued).IsEqualTo(1);
+            live.DroppedFull.Should().Be(expectedFull);
+            live.DroppedFailed.Should().Be(stripes);
+            live.DroppedShutdown.Should().Be(7);
+            live.Queued.Should().Be(1);
             buffer.Dispose();
             ReadBufferStatistics disposed = buffer.GetStatistics();
-            await Assert.That(disposed.DroppedFull).IsEqualTo(expectedFull);
-            await Assert.That(disposed.DroppedFailed).IsEqualTo(stripes);
-            await Assert.That(disposed.DroppedShutdown).IsEqualTo(8);
-            await Assert.That(disposed.Dropped).IsEqualTo(expectedFull + stripes + 8);
-            await Assert.That(disposed.Queued).IsEqualTo(0);
+            disposed.DroppedFull.Should().Be(expectedFull);
+            disposed.DroppedFailed.Should().Be(stripes);
+            disposed.DroppedShutdown.Should().Be(8);
+            disposed.Dropped.Should().Be(expectedFull + stripes + 8);
+            disposed.Queued.Should().Be(0);
             buffer.Dispose();
-            await Assert.That(buffer.GetStatistics().Dropped).IsEqualTo(disposed.Dropped);
-            await Assert.That(buffer.TryOffer(2)).IsEqualTo(ReadBufferOfferResult.Shutdown);
-            await Assert.That(buffer.GetStatistics().DroppedFull).IsEqualTo(expectedFull);
-            await Assert.That(buffer.GetStatistics().DroppedFailed).IsEqualTo(stripes);
-            await Assert.That(buffer.GetStatistics().DroppedShutdown).IsEqualTo(9);
+            buffer.GetStatistics().Dropped.Should().Be(disposed.Dropped);
+            buffer.TryOffer(2).Should().Be(ReadBufferOfferResult.Shutdown);
+            buffer.GetStatistics().DroppedFull.Should().Be(expectedFull);
+            buffer.GetStatistics().DroppedFailed.Should().Be(stripes);
+            buffer.GetStatistics().DroppedShutdown.Should().Be(9);
         }
         finally
         {
@@ -117,7 +118,7 @@ public sealed class ReadBufferDiagnosticsTests
     }
 
     [Test]
-    public async Task SharedDropShardsSaturateLocallyAndDuringAggregation()
+    public void SharedDropShardsSaturateLocallyAndDuringAggregation()
     {
         using StripedReadBuffer<int> buffer = new(1, 1);
         buffer.AddDropStatisticsForTesting(
@@ -131,14 +132,14 @@ public sealed class ReadBufferDiagnosticsTests
             droppedFailed: 2
         );
         ReadBufferStatistics statistics = buffer.GetStatistics();
-        await Assert.That(statistics.DroppedFull).IsEqualTo(long.MaxValue);
-        await Assert.That(statistics.DroppedFailed).IsEqualTo(long.MaxValue);
-        await Assert.That(statistics.Dropped).IsEqualTo(long.MaxValue);
-        await Assert.That(statistics.Queued).IsEqualTo(0);
+        statistics.DroppedFull.Should().Be(long.MaxValue);
+        statistics.DroppedFailed.Should().Be(long.MaxValue);
+        statistics.Dropped.Should().Be(long.MaxValue);
+        statistics.Queued.Should().Be(0);
     }
 
     [Test]
-    public async Task PolicyClearPreservesSharedDropCountersAcrossReadBatches()
+    public void PolicyClearPreservesSharedDropCountersAcrossReadBatches()
     {
         WindowTinyLfuEnginePolicy policy = new(
             maximum: 1,
@@ -157,15 +158,15 @@ public sealed class ReadBufferDiagnosticsTests
             {
                 policy.OnAccess(token);
                 policy.OnAccess(token);
-                await Assert.That(policy.GetReadBufferStatistics().DroppedFull).IsEqualTo(batch);
+                policy.GetReadBufferStatistics().DroppedFull.Should().Be(batch);
                 policy.Clear();
-                await Assert.That(policy.GetReadBufferStatistics().DroppedFull).IsEqualTo(batch);
-                await Assert.That(policy.GetReadBufferStatistics().Queued).IsEqualTo(0);
+                policy.GetReadBufferStatistics().DroppedFull.Should().Be(batch);
+                policy.GetReadBufferStatistics().Queued.Should().Be(0);
             }
 
             policy.Dispose();
-            await Assert.That(policy.GetReadBufferStatistics().DroppedFull).IsEqualTo(2);
-            await Assert.That(policy.GetReadBufferStatistics().DroppedFailed).IsEqualTo(0);
+            policy.GetReadBufferStatistics().DroppedFull.Should().Be(2);
+            policy.GetReadBufferStatistics().DroppedFailed.Should().Be(0);
         }
         finally
         {
@@ -174,37 +175,35 @@ public sealed class ReadBufferDiagnosticsTests
     }
 
     [Test]
-    public async Task DisabledCountersPreserveReservationsGaugesDrainingAndShutdown()
+    public void DisabledCountersPreserveReservationsGaugesDrainingAndShutdown()
     {
         StripedReadBuffer<int> buffer = new(1, 4, recordStatistics: false);
         try
         {
-            await Assert.That(buffer.TryOffer(1)).IsEqualTo(ReadBufferOfferResult.Success);
+            buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Success);
             buffer.SetForcedCasFailuresForTesting(3);
-            await Assert.That(buffer.TryOffer(2)).IsEqualTo(ReadBufferOfferResult.Failed);
+            buffer.TryOffer(2).Should().Be(ReadBufferOfferResult.Failed);
             buffer.SetForcedCasFailuresForTesting(0);
-            await Assert.That(buffer.TryOffer(2)).IsEqualTo(ReadBufferOfferResult.Success);
-            await Assert.That(buffer.HasPublished).IsTrue();
-            await Assert.That(buffer.GetStatistics().Queued).IsEqualTo(2);
+            buffer.TryOffer(2).Should().Be(ReadBufferOfferResult.Success);
+            buffer.HasPublished.Should().BeTrue();
+            buffer.GetStatistics().Queued.Should().Be(2);
             List<int> observed = [];
-            await Assert.That(buffer.DrainTo(observed.Add, 1)).IsEqualTo(1);
-            await Assert
-                .That(observed)
-                .IsEquivalentTo([1], TUnit.Assertions.Enums.CollectionOrdering.Matching);
-            await Assert.That(buffer.GetStatistics().Queued).IsEqualTo(1);
+            buffer.DrainTo(observed.Add, 1).Should().Be(1);
+            observed.Should().Equal(1);
+            buffer.GetStatistics().Queued.Should().Be(1);
             for (int value = 3; value <= 5; value++)
             {
-                await Assert.That(buffer.TryOffer(value)).IsEqualTo(ReadBufferOfferResult.Success);
+                buffer.TryOffer(value).Should().Be(ReadBufferOfferResult.Success);
             }
 
-            await Assert.That(buffer.TryOffer(6)).IsEqualTo(ReadBufferOfferResult.Full);
-            await Assert.That(buffer.GetStatistics().Queued).IsEqualTo(4);
+            buffer.TryOffer(6).Should().Be(ReadBufferOfferResult.Full);
+            buffer.GetStatistics().Queued.Should().Be(4);
             AssertDisabledCounters(buffer.GetStatistics());
             buffer.Dispose();
-            await Assert.That(buffer.TryOffer(7)).IsEqualTo(ReadBufferOfferResult.Shutdown);
-            await Assert.That(buffer.HasPublished).IsFalse();
-            await Assert.That(buffer.GetStatistics().Queued).IsEqualTo(0);
-            await Assert.That(buffer.GetStatistics().IsDisposed).IsTrue();
+            buffer.TryOffer(7).Should().Be(ReadBufferOfferResult.Shutdown);
+            buffer.HasPublished.Should().BeFalse();
+            buffer.GetStatistics().Queued.Should().Be(0);
+            buffer.GetStatistics().IsDisposed.Should().BeTrue();
             AssertDisabledCounters(buffer.GetStatistics());
         }
         finally
@@ -217,7 +216,7 @@ public sealed class ReadBufferDiagnosticsTests
     [Arguments(false, false)]
     [Arguments(true, false)]
     [Arguments(false, true)]
-    public async Task EngineRecordsReadCountersOnlyForStatisticsOrMetricsAndAlwaysSchedulesMaintenance(
+    public void EngineRecordsReadCountersOnlyForStatisticsOrMetricsAndAlwaysSchedulesMaintenance(
         bool recordStatistics,
         bool enableMetrics
     )
@@ -241,30 +240,28 @@ public sealed class ReadBufferDiagnosticsTests
         {
             cache.Put(1, 1);
             scheduler.RunAll();
-            await Assert.That(cache.TryGet(1, out int value)).IsTrue();
-            await Assert.That(value).IsEqualTo(1);
-            await Assert.That(scheduler.Pending).IsEqualTo(0);
-            await Assert.That(cache.Statistics.MaintenanceBacklog).IsEqualTo(1);
-            await Assert.That(cache.TryGet(1, out _)).IsTrue();
-            await Assert.That(scheduler.Pending).IsEqualTo(1);
+            cache.TryGet(1, out int value).Should().BeTrue();
+            value.Should().Be(1);
+            scheduler.Pending.Should().Be(0);
+            cache.Statistics.MaintenanceBacklog.Should().Be(1);
+            cache.TryGet(1, out _).Should().BeTrue();
+            scheduler.Pending.Should().Be(1);
             long recorded = recordStatistics || enableMetrics ? 1 : 0;
             ReadBufferStatistics queued = engine.GetPolicyReadBufferStatistics();
-            await Assert.That(queued.Queued).IsEqualTo(1);
-            await Assert.That(queued.Enqueued).IsEqualTo(recorded);
-            await Assert.That(queued.DroppedFull).IsEqualTo(recorded);
-            await Assert
-                .That(cache.Statistics.DroppedReadEvents)
-                .IsEqualTo(recordStatistics ? 1 : 0);
+            queued.Queued.Should().Be(1);
+            queued.Enqueued.Should().Be(recorded);
+            queued.DroppedFull.Should().Be(recorded);
+            cache.Statistics.DroppedReadEvents.Should().Be(recordStatistics ? 1 : 0);
             scheduler.RunAll();
-            await Assert.That(cache.Statistics.MaintenanceBacklog).IsEqualTo(0);
-            await Assert.That(engine.GetPolicyReadBufferStatistics().Dequeued).IsEqualTo(recorded);
-            await Assert.That(cache.TryGet(1, out _)).IsTrue();
+            cache.Statistics.MaintenanceBacklog.Should().Be(0);
+            engine.GetPolicyReadBufferStatistics().Dequeued.Should().Be(recorded);
+            cache.TryGet(1, out _).Should().BeTrue();
             cache.Dispose();
             ReadBufferStatistics disposed = engine.GetPolicyReadBufferStatistics();
-            await Assert.That(disposed.IsDisposed).IsTrue();
-            await Assert.That(disposed.Queued).IsEqualTo(0);
-            await Assert.That(disposed.Dequeued).IsEqualTo(2 * recorded);
-            await Assert.That(disposed.DroppedShutdown).IsEqualTo(0);
+            disposed.IsDisposed.Should().BeTrue();
+            disposed.Queued.Should().Be(0);
+            disposed.Dequeued.Should().Be(2 * recorded);
+            disposed.DroppedShutdown.Should().Be(0);
         }
         finally
         {
@@ -273,7 +270,7 @@ public sealed class ReadBufferDiagnosticsTests
     }
 
     [Test]
-    public async Task PublicDroppedReadEventsIncludesForcedReservationFailures()
+    public void PublicDroppedReadEventsIncludesForcedReservationFailures()
     {
         StripedReadBuffer<int> buffer = new(1, 2);
         try
@@ -289,26 +286,26 @@ public sealed class ReadBufferDiagnosticsTests
                     }
                 )
             );
-            await Assert.That(buffer.TryOffer(1)).IsEqualTo(ReadBufferOfferResult.Success);
+            buffer.TryOffer(1).Should().Be(ReadBufferOfferResult.Success);
             buffer.SetForcedCasFailuresForTesting(3);
-            await Assert.That(buffer.TryOffer(2)).IsEqualTo(ReadBufferOfferResult.Failed);
+            buffer.TryOffer(2).Should().Be(ReadBufferOfferResult.Failed);
             ReadBufferStatistics transport = buffer.GetStatistics();
-            await Assert.That(transport.Enqueued).IsEqualTo(1);
-            await Assert.That(transport.DroppedFailed).IsEqualTo(1);
-            await Assert.That(transport.DroppedFull).IsEqualTo(0);
-            await Assert.That(transport.DroppedShutdown).IsEqualTo(0);
-            await Assert.That(cache.Statistics.DroppedReadEvents).IsEqualTo(1);
-            await Assert.That(cache.Statistics.MaintenanceBacklog).IsEqualTo(1);
+            transport.Enqueued.Should().Be(1);
+            transport.DroppedFailed.Should().Be(1);
+            transport.DroppedFull.Should().Be(0);
+            transport.DroppedShutdown.Should().Be(0);
+            cache.Statistics.DroppedReadEvents.Should().Be(1);
+            cache.Statistics.MaintenanceBacklog.Should().Be(1);
             buffer.SetForcedCasFailuresForTesting(0);
-            await Assert.That(buffer.TryOffer(2)).IsEqualTo(ReadBufferOfferResult.Success);
-            await Assert.That(buffer.TryOffer(3)).IsEqualTo(ReadBufferOfferResult.Full);
-            await Assert.That(buffer.GetStatistics().DroppedFull).IsEqualTo(1);
-            await Assert.That(cache.Statistics.DroppedReadEvents).IsEqualTo(2);
+            buffer.TryOffer(2).Should().Be(ReadBufferOfferResult.Success);
+            buffer.TryOffer(3).Should().Be(ReadBufferOfferResult.Full);
+            buffer.GetStatistics().DroppedFull.Should().Be(1);
+            cache.Statistics.DroppedReadEvents.Should().Be(2);
             buffer.Dispose();
-            await Assert.That(cache.Statistics.DroppedReadEvents).IsEqualTo(4);
-            await Assert.That(cache.Statistics.MaintenanceBacklog).IsEqualTo(0);
+            cache.Statistics.DroppedReadEvents.Should().Be(4);
+            cache.Statistics.MaintenanceBacklog.Should().Be(0);
             buffer.AddStatisticsForTesting(0, droppedFull: long.MaxValue);
-            await Assert.That(cache.Statistics.DroppedReadEvents).IsEqualTo(long.MaxValue);
+            cache.Statistics.DroppedReadEvents.Should().Be(long.MaxValue);
         }
         finally
         {
@@ -318,18 +315,12 @@ public sealed class ReadBufferDiagnosticsTests
 
     private static void AssertDisabledCounters(ReadBufferStatistics statistics)
     {
-        if ((statistics.Enqueued) != (0))
-            Assert.Fail("Expected statistics.Enqueued to equal (0).");
-        if ((statistics.Dequeued) != (0))
-            Assert.Fail("Expected statistics.Dequeued to equal (0).");
-        if ((statistics.DroppedFull) != (0))
-            Assert.Fail("Expected statistics.DroppedFull to equal (0).");
-        if ((statistics.DroppedFailed) != (0))
-            Assert.Fail("Expected statistics.DroppedFailed to equal (0).");
-        if ((statistics.DroppedShutdown) != (0))
-            Assert.Fail("Expected statistics.DroppedShutdown to equal (0).");
-        if ((statistics.Dropped) != (0))
-            Assert.Fail("Expected statistics.Dropped to equal (0).");
+        statistics.Enqueued.Should().Be(0);
+        statistics.Dequeued.Should().Be(0);
+        statistics.DroppedFull.Should().Be(0);
+        statistics.DroppedFailed.Should().Be(0);
+        statistics.DroppedShutdown.Should().Be(0);
+        statistics.Dropped.Should().Be(0);
     }
 
     private sealed class ManualScheduler : IMaintenanceScheduler

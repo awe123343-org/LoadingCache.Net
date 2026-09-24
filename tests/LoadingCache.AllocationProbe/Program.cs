@@ -1,4 +1,5 @@
 using System.Text.Json;
+using FluentAssertions;
 
 namespace LoadingCache.AllocationProbe;
 
@@ -28,10 +29,10 @@ public static class Program
                 switch (scenario)
                 {
                     case "counter":
-                        await AllocationScenarios.HotCounterUpdatesDoNotAllocatePerEvent();
+                        AllocationScenarios.HotCounterUpdatesDoNotAllocatePerEvent();
                         break;
                     case "weak-comparer":
-                        await AllocationScenarios.WeakKeyObjectComparerDoesNotAllocateDuringRawLookupComparison();
+                        AllocationScenarios.WeakKeyObjectComparerDoesNotAllocateDuringRawLookupComparison();
                         break;
                     case "weak-hit":
                         await AllocationScenarios.WeakKeyResidentHitDoesNotAllocateLookupProbe();
@@ -41,19 +42,16 @@ public static class Program
                         byte[] value = new byte[1_024];
                         long delta = GC.GetAllocatedBytesForCurrentThread() - before;
                         GC.KeepAlive(value);
-                        await Assert
-                            .That(delta)
-                            .IsEqualTo(0)
-                            .Because("the negative control must reject a real allocation");
+                        delta.Should().Be(0, "the negative control must reject a real allocation");
                         break;
                     case "estimated-count":
-                        await AllocationScenarios.EstimatedCountDoesNotAllocateAValuesSnapshotPerEntry();
+                        AllocationScenarios.EstimatedCountDoesNotAllocateAValuesSnapshotPerEntry();
                         break;
                     case "resident-put":
-                        await AllocationScenarios.RepeatedResidentPutHasBoundedAllocation();
+                        AllocationScenarios.RepeatedResidentPutHasBoundedAllocation();
                         break;
                     case "allocating-comparer":
-                        await AllocationScenarios.RawComparisonMeasurementDetectsAllocatingComparer();
+                        AllocationScenarios.RawComparisonMeasurementDetectsAllocatingComparer();
                         break;
                     case "forced-collection":
                         GC.Collect(2, GCCollectionMode.Forced, blocking: true);
@@ -68,7 +66,7 @@ public static class Program
                 GC.EndNoGCRegion();
             }
 
-            reportOutput.WriteLine(
+            await reportOutput.WriteLineAsync(
                 JsonSerializer.Serialize(new Report(scenario, Environment.Version.ToString(), true))
             );
             return 0;
@@ -76,7 +74,7 @@ public static class Program
         catch (Exception exception)
         {
             await Console.Error.WriteLineAsync(exception.ToString());
-            reportOutput.WriteLine(
+            await reportOutput.WriteLineAsync(
                 JsonSerializer.Serialize(
                     new Report(scenario, Environment.Version.ToString(), false)
                 )

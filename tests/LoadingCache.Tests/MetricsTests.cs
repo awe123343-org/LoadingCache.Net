@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
+using FluentAssertions;
 
 namespace LoadingCache.Tests;
 
@@ -56,22 +57,22 @@ public sealed class MetricsTests
             .MaxConcurrentLoads(4)
             .EnableMetrics(cacheName)
             .BuildAsyncLoading((key, _) => Task.FromResult($"value-{key}"));
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("value-1");
-        await Assert.That(cache.Statistics.LoadsStarted).IsEqualTo(0);
+        (await cache.GetAsync(1)).Should().Be("value-1");
+        cache.Statistics.LoadsStarted.Should().Be(0);
         listener.RecordObservableInstruments();
-        await Assert
-            .That(measurements)
-            .Contains(item =>
+        measurements
+            .Should()
+            .Contain(item =>
                 item.Name == "loadingcache.loads" && item.Outcome == "started" && item.Value >= 1
             );
-        await Assert
-            .That(measurements)
-            .Contains(item =>
+        measurements
+            .Should()
+            .Contain(item =>
                 item.Name == "loadingcache.loads" && item.Outcome == "success" && item.Value >= 1
             );
-        await Assert
-            .That(measurements)
-            .Contains(item =>
+        measurements
+            .Should()
+            .Contain(item =>
                 item.Name == "loadingcache.inflight"
                 && item.Outcome == null
                 && item.Cause == null
@@ -80,7 +81,7 @@ public sealed class MetricsTests
     }
 
     [Test]
-    public async Task InstrumentPublicationCanSynchronouslyRecordWithoutHalfInitializedEngine()
+    public void InstrumentPublicationCanSynchronouslyRecordWithoutHalfInitializedEngine()
     {
         Exception? publicationError = null;
         int recording = 0;
@@ -117,12 +118,12 @@ public sealed class MetricsTests
                 .EnableMetrics($"construction-{Guid.NewGuid():N}")
                 .Build();
         };
-        await Assert.That(build).ThrowsNothing();
-        await Assert.That((publicationError) is null).IsTrue();
+        build.Should().NotThrow();
+        publicationError.Should().BeNull();
     }
 
     [Test]
-    public async Task ThrowingInstrumentPublicationDoesNotLeavePartialMetricsRegistration()
+    public void ThrowingInstrumentPublicationDoesNotLeavePartialMetricsRegistration()
     {
         var throwDuringBuild = new AsyncLocal<bool>();
         int published = 0;
@@ -150,7 +151,7 @@ public sealed class MetricsTests
                 .EnableMetrics($"throwing-{Guid.NewGuid():N}")
                 .Build();
         };
-        await Assert.That(build).Throws<InvalidOperationException>();
+        build.Should().Throw<InvalidOperationException>();
         throwDuringBuild.Value = false;
         Action secondBuild = () =>
         {
@@ -161,11 +162,11 @@ public sealed class MetricsTests
                 .EnableMetrics($"after-throw-{Guid.NewGuid():N}")
                 .Build();
         };
-        await Assert.That(secondBuild).ThrowsNothing();
+        secondBuild.Should().NotThrow();
     }
 
     [Test]
-    public async Task DisposedMetricsCacheIsNotRetainedByMeterListener()
+    public void DisposedMetricsCacheIsNotRetainedByMeterListener()
     {
         using MeterListener listener = new();
         listener.InstrumentPublished = static (instrument, meterListener) =>
@@ -178,7 +179,7 @@ public sealed class MetricsTests
         listener.Start();
         WeakReference reference = CreateDisposedMetricsCache();
         ForceCollection(reference);
-        await Assert.That(reference.IsAlive).IsFalse();
+        reference.IsAlive.Should().BeFalse();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

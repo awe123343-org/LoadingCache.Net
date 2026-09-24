@@ -1,3 +1,4 @@
+using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
 
 namespace LoadingCache.Tests;
@@ -40,10 +41,7 @@ public sealed class RuntimePolicyTests
                                 current.Invalidate(key);
                                 break;
                             default:
-                                if ((policy.Hottest(8).Count) > (8))
-                                    Assert.Fail(
-                                        "Expected policy.Hottest(8).Count to be at most (8)."
-                                    );
+                                policy.Hottest(8).Count.Should().BeLessThanOrEqualTo(8);
                                 break;
                         }
                     }
@@ -58,13 +56,13 @@ public sealed class RuntimePolicyTests
         await Task.WhenAll(workers).WaitAsync(TimeSpan.FromSeconds(30), CancellationToken.None);
         eviction.SetMaximum(4);
         cache.CleanUp();
-        await Assert.That(cache.EstimatedCount).IsLessThanOrEqualTo(4);
-        await Assert.That(eviction.WeightedSize).IsEqualTo(cache.EstimatedCount);
+        cache.EstimatedCount.Should().BeLessThanOrEqualTo(4);
+        eviction.WeightedSize.Should().Be(cache.EstimatedCount);
         ((Cache<int, int>)cache).AssertInvariants();
     }
 
     [Test]
-    public async Task SizeMaximumCanShrinkAndGrowWithoutKeepingTheOriginalCountCap()
+    public void SizeMaximumCanShrinkAndGrowWithoutKeepingTheOriginalCountCap()
     {
         using var cache = CacheBuilder
             .Create<int, int>()
@@ -76,20 +74,20 @@ public sealed class RuntimePolicyTests
         var eviction = cache.Policy.Eviction!;
         eviction.SetMaximum(1);
         cache.CleanUp();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
-        await Assert.That(eviction.Maximum).IsEqualTo(1);
+        cache.EstimatedCount.Should().Be(1);
+        eviction.Maximum.Should().Be(1);
         eviction.SetMaximum(8);
         cache.Clear();
         for (int key = 0; key < 8; key++)
             cache.Put(key, key);
         cache.CleanUp();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(8);
-        await Assert.That(eviction.WeightedSize).IsEqualTo(8);
+        cache.EstimatedCount.Should().Be(8);
+        eviction.WeightedSize.Should().Be(8);
         ((Cache<int, int>)cache).AssertInvariants();
     }
 
     [Test]
-    public async Task WeightedMaximumPreservesTheIndependentZeroWeightCountBound()
+    public void WeightedMaximumPreservesTheIndependentZeroWeightCountBound()
     {
         using var cache = CacheBuilder
             .Create<int, long>()
@@ -102,14 +100,14 @@ public sealed class RuntimePolicyTests
         cache.Put(2, 10);
         cache.Policy.Eviction!.SetMaximum(5);
         cache.CleanUp();
-        await Assert.That(cache.Policy.Eviction.WeightedSize).IsLessThanOrEqualTo(5);
+        cache.Policy.Eviction.WeightedSize.Should().BeLessThanOrEqualTo(5);
         cache.Policy.Eviction.SetMaximum(long.MaxValue);
         cache.Clear();
         for (int key = 0; key < 10; key++)
             cache.Put(key, 0);
         cache.CleanUp();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(3);
-        await Assert.That(cache.Policy.Eviction.WeightedSize).IsEqualTo(0);
+        cache.EstimatedCount.Should().Be(3);
+        cache.Policy.Eviction.WeightedSize.Should().Be(0);
     }
 
     [Test]
@@ -127,13 +125,13 @@ public sealed class RuntimePolicyTests
         cache.Policy.Eviction!.SetMaximum(1);
         Task<int> joined = cache.GetAsync(1).AsTask();
         completion.SetResult(42);
-        await Assert.That((await first)).IsEqualTo(42);
-        await Assert.That((await joined)).IsEqualTo(42);
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
+        (await first).Should().Be(42);
+        (await joined).Should().Be(42);
+        cache.EstimatedCount.Should().Be(1);
     }
 
     [Test]
-    public async Task QuietLookupAndSnapshotsDoNotExtendAccessExpirationOrCountHits()
+    public void QuietLookupAndSnapshotsDoNotExtendAccessExpirationOrCountHits()
     {
         var time = new FakeTimeProvider();
         using var cache = CacheBuilder
@@ -146,20 +144,20 @@ public sealed class RuntimePolicyTests
             .Build();
         cache.Put(1, 0);
         time.Advance(TimeSpan.FromSeconds(9));
-        await Assert.That(cache.Policy.TryGetQuietly(1, out int value)).IsTrue();
-        await Assert.That(value).IsEqualTo(0);
+        cache.Policy.TryGetQuietly(1, out int value).Should().BeTrue();
+        value.Should().Be(0);
         var snapshot = cache.Policy.Eviction!.Hottest(4);
-        await Assert.That(snapshot).HasSingleItem();
-        await Assert.That(cache.Statistics.Hits).IsEqualTo(0);
+        snapshot.Should().ContainSingle();
+        cache.Statistics.Hits.Should().Be(0);
         time.Advance(TimeSpan.FromSeconds(1));
-        await Assert.That(cache.Policy.TryGetQuietly(1, out _)).IsFalse();
-        await Assert.That(cache.Policy.Eviction.Coldest(4)).IsEmpty();
-        await Assert.That(snapshot).HasSingleItem();
-        await Assert.That(cache.Statistics.Misses).IsEqualTo(0);
+        cache.Policy.TryGetQuietly(1, out _).Should().BeFalse();
+        cache.Policy.Eviction.Coldest(4).Should().BeEmpty();
+        snapshot.Should().ContainSingle();
+        cache.Statistics.Misses.Should().Be(0);
     }
 
     [Test]
-    public async Task OrderedSnapshotsAreBoundedAndDoNotExposeMutableCacheState()
+    public void OrderedSnapshotsAreBoundedAndDoNotExposeMutableCacheState()
     {
         using var cache = CacheBuilder
             .Create<int, int>()
@@ -170,21 +168,16 @@ public sealed class RuntimePolicyTests
             cache.Put(key, key);
         var cold = cache.Policy.Eviction!.Coldest(8);
         var hot = cache.Policy.Eviction.Hottest(8);
-        await Assert
-            .That(hot.Select(pair => pair.Key))
-            .IsEquivalentTo(
-                cold.Reverse().Select(pair => pair.Key),
-                TUnit.Assertions.Enums.CollectionOrdering.Matching
-            );
-        await Assert.That(cache.Policy.Eviction.Hottest(2).Count).IsEqualTo(2);
-        await Assert.That(cache.Policy.Eviction.Coldest(0)).IsEmpty();
+        hot.Select(pair => pair.Key).Should().Equal(cold.Reverse().Select(pair => pair.Key));
+        cache.Policy.Eviction.Hottest(2).Should().HaveCount(2);
+        cache.Policy.Eviction.Coldest(0).Should().BeEmpty();
         cache.Clear();
-        await Assert.That(cold.Count).IsEqualTo(8);
-        await Assert.That(cache.Policy.Eviction.Hottest(int.MaxValue)).IsEmpty();
+        cold.Should().HaveCount(8);
+        cache.Policy.Eviction.Hottest(int.MaxValue).Should().BeEmpty();
     }
 
     [Test]
-    public async Task InvalidLimitsAndSavedViewsAfterDisposalFail()
+    public void InvalidLimitsAndSavedViewsAfterDisposalFail()
     {
         var cache = CacheBuilder.Create<int, int>().MaximumSize(4).MaxConcurrentLoads(1).Build();
         var policy = cache.Policy;
@@ -192,15 +185,15 @@ public sealed class RuntimePolicyTests
         Action zero = () => eviction.SetMaximum(0);
         Action tooLarge = () => eviction.SetMaximum((long)int.MaxValue + 1);
         Action negative = () => eviction.Coldest(-1);
-        await Assert.That(zero).Throws<ArgumentOutOfRangeException>();
-        await Assert.That(tooLarge).Throws<ArgumentOutOfRangeException>();
-        await Assert.That(negative).Throws<ArgumentOutOfRangeException>();
+        zero.Should().Throw<ArgumentOutOfRangeException>();
+        tooLarge.Should().Throw<ArgumentOutOfRangeException>();
+        negative.Should().Throw<ArgumentOutOfRangeException>();
         cache.Dispose();
         Action resize = () => eviction.SetMaximum(1);
         Action snapshot = () => eviction.Hottest(1);
         Action quiet = () => policy.TryGetQuietly(1, out _);
-        await Assert.That(resize).Throws<ObjectDisposedException>();
-        await Assert.That(snapshot).Throws<ObjectDisposedException>();
-        await Assert.That(quiet).Throws<ObjectDisposedException>();
+        resize.Should().Throw<ObjectDisposedException>();
+        snapshot.Should().Throw<ObjectDisposedException>();
+        quiet.Should().Throw<ObjectDisposedException>();
     }
 }

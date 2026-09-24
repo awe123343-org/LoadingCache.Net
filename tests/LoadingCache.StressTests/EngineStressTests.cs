@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using FluentAssertions;
 
 namespace LoadingCache.StressTests;
 
@@ -66,10 +67,8 @@ public sealed class EngineStressTests
                                 {
                                     case < 60:
                                         Payload loaded = await cache.GetAsync(key);
-                                        await Assert.That(loaded.Key).IsEqualTo(key);
-                                        await Assert
-                                            .That((loaded.Origin is "loader" or "set"))
-                                            .IsTrue();
+                                        loaded.Key.Should().Be(key);
+                                        (loaded.Origin is "loader" or "set").Should().BeTrue();
                                         break;
                                     case < 78:
                                         cache.Set(key, new Payload(key, "set"));
@@ -80,10 +79,8 @@ public sealed class EngineStressTests
                                     case < 95:
                                         if (cache.TryGet(key, out Payload? value))
                                         {
-                                            await Assert.That(value.Key).IsEqualTo(key);
-                                            await Assert
-                                                .That((value.Origin is "loader" or "set"))
-                                                .IsTrue();
+                                            value.Key.Should().Be(key);
+                                            (value.Origin is "loader" or "set").Should().BeTrue();
                                         }
 
                                         break;
@@ -102,10 +99,10 @@ public sealed class EngineStressTests
             await Task.WhenAll(jobs).WaitAsync(TimeSpan.FromSeconds(60));
             cache.CleanUp();
             cache.AssertInvariants();
-            await Assert.That(cache.EstimatedCount).IsLessThanOrEqualTo(maximum);
-            await Assert.That(cache.GetStatistics().InFlightLoads).IsEqualTo(0);
-            await Assert.That(active).IsEqualTo(0);
-            await Assert.That(peak).IsLessThanOrEqualTo(workers * 2);
+            cache.EstimatedCount.Should().BeLessThanOrEqualTo(maximum);
+            cache.GetStatistics().InFlightLoads.Should().Be(0);
+            active.Should().Be(0);
+            peak.Should().BeLessThanOrEqualTo(workers * 2);
         }
         catch
         {
@@ -117,7 +114,7 @@ public sealed class EngineStressTests
             for (int worker = 0; worker < workers; worker++)
             {
                 await TestContext
-                    .Current!.ErrorOutputWriter.WriteLineAsync(
+                    .Current.ErrorOutputWriter.WriteLineAsync(
                         $"worker {worker}: {string.Join(',', traces[worker])}"
                     )
                     .ConfigureAwait(false);
@@ -172,8 +169,8 @@ public sealed class EngineStressTests
             await RunWeightedWorkersAsync(cache, seed, workers).ConfigureAwait(false);
             cache.CleanUp();
             cache.AssertInvariants();
-            await Assert.That(cache.Policy.Eviction!.WeightedSize).IsLessThanOrEqualTo(256);
-            await Assert.That(cache.EstimatedCount).IsLessThanOrEqualTo(maximumCount);
+            cache.Policy.Eviction!.WeightedSize.Should().BeLessThanOrEqualTo(256);
+            cache.EstimatedCount.Should().BeLessThanOrEqualTo(maximumCount);
         }
         finally
         {

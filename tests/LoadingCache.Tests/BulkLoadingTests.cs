@@ -1,3 +1,4 @@
+using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
 
 namespace LoadingCache.Tests;
@@ -7,7 +8,7 @@ public sealed class BulkLoadingTests
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(10);
 
     [Test]
-    public async Task SyncBulkLoaderUsesOneBackendCallAndAdmitsPrefetchedValues()
+    public void SyncBulkLoaderUsesOneBackendCallAndAdmitsPrefetchedValues()
     {
         var loader = new SyncLoader();
         using ILoadingCache<int, int> cache = CacheBuilder
@@ -17,20 +18,15 @@ public sealed class BulkLoadingTests
             .MaximumBulkKeys(4)
             .BuildLoading(loader);
         IReadOnlyDictionary<int, int> result = cache.GetAll([1, 2, 1]);
-        await Assert
-            .That(result)
-            .IsEquivalentTo(
-                new Dictionary<int, int> { [1] = 10, [2] = 20 },
-                TUnit.Assertions.Enums.CollectionOrdering.Matching
-            );
-        await Assert.That(loader.BulkCalls).IsEqualTo(1);
-        await Assert.That(loader.SingleCalls).IsEqualTo(0);
-        await Assert.That(cache.TryGet(99, out int prefetched)).IsTrue();
-        await Assert.That(prefetched).IsEqualTo(990);
+        result.Should().Equal(new Dictionary<int, int> { [1] = 10, [2] = 20 });
+        loader.BulkCalls.Should().Be(1);
+        loader.SingleCalls.Should().Be(0);
+        cache.TryGet(99, out int prefetched).Should().BeTrue();
+        prefetched.Should().Be(990);
     }
 
     [Test]
-    public async Task SyncBulkLoaderDeduplicatesComparerEquivalentKeys()
+    public void SyncBulkLoaderDeduplicatesComparerEquivalentKeys()
     {
         var loader = new StringSyncLoader();
         using ILoadingCache<string, string> cache = CacheBuilder
@@ -42,15 +38,13 @@ public sealed class BulkLoadingTests
             .Comparer(StringComparer.OrdinalIgnoreCase)
             .BuildLoading(loader);
         IReadOnlyDictionary<string, string> result = cache.GetAll(["alpha", "ALPHA"]);
-        await Assert.That(result.Count).IsEqualTo(1);
-        await Assert.That(result.Values.Single()).IsEqualTo("ALPHA");
-        await Assert
-            .That(loader.Keys)
-            .IsEquivalentTo(["alpha"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        result.Should().HaveCount(1);
+        result.Values.Single().Should().Be("ALPHA");
+        loader.Keys.Should().Equal("alpha");
     }
 
     [Test]
-    public async Task InvalidSyncBulkResultDoesNotPublishAndCanRetry()
+    public void InvalidSyncBulkResultDoesNotPublishAndCanRetry()
     {
         var loader = new SyncLoader { ReturnMissingKeyOnce = true };
         using ILoadingCache<int, int> cache = CacheBuilder
@@ -60,18 +54,18 @@ public sealed class BulkLoadingTests
             .MaxPendingLoadKeys(4)
             .MaximumBulkKeys(4)
             .BuildLoading(loader);
-        Action first = () =>
+        Action first = cache.Invoking(static current =>
         {
-            cache.GetAll([1, 2]);
-        };
-        await Assert.That(first).Throws<InvalidOperationException>();
-        await Assert.That(cache.TryGet(1, out _)).IsFalse();
-        await Assert.That(cache.GetAll([1, 2]).Count).IsEqualTo(2);
-        await Assert.That(loader.BulkCalls).IsEqualTo(2);
+            current.GetAll([1, 2]);
+        });
+        first.Should().Throw<InvalidOperationException>();
+        cache.TryGet(1, out _).Should().BeFalse();
+        cache.GetAll([1, 2]).Should().HaveCount(2);
+        loader.BulkCalls.Should().Be(2);
     }
 
     [Test]
-    public async Task FallbackGetAllHonorsAnExplicitMaximumBulkKeysBound()
+    public void FallbackGetAllHonorsAnExplicitMaximumBulkKeysBound()
     {
         using ILoadingCache<int, int> cache = CacheBuilder
             .Create<int, int>()
@@ -79,11 +73,11 @@ public sealed class BulkLoadingTests
             .MaxConcurrentLoads(1)
             .MaximumBulkKeys(2)
             .BuildLoading(static key => key * 10);
-        Action operation = () =>
+        Action operation = cache.Invoking(static current =>
         {
-            cache.GetAll([1, 2, 3]);
-        };
-        await Assert.That(operation).ThrowsExactly<ArgumentOutOfRangeException>();
+            current.GetAll([1, 2, 3]);
+        });
+        operation.Should().ThrowExactly<ArgumentOutOfRangeException>();
     }
 
     [Test]
@@ -99,23 +93,13 @@ public sealed class BulkLoadingTests
             .RefreshAfterWrite(TimeSpan.FromSeconds(1))
             .TimeProvider(clock)
             .BuildLoading(loader);
-        await Assert
-            .That(cache.GetAll([1]))
-            .IsEquivalentTo(
-                new Dictionary<int, int> { [1] = 10 },
-                TUnit.Assertions.Enums.CollectionOrdering.Matching
-            );
+        cache.GetAll([1]).Should().Equal(new Dictionary<int, int> { [1] = 10 });
         clock.Advance(TimeSpan.FromSeconds(2));
-        await Assert
-            .That(cache.GetAll([1]))
-            .IsEquivalentTo(
-                new Dictionary<int, int> { [1] = 10 },
-                TUnit.Assertions.Enums.CollectionOrdering.Matching
-            );
+        cache.GetAll([1]).Should().Equal(new Dictionary<int, int> { [1] = 10 });
         await loader.ReloadStarted.Task.WaitAsync(TestTimeout);
         loader.Release.TrySetResult(11);
         await loader.ReloadCompleted.Task.WaitAsync(TestTimeout);
-        await Assert.That(loader.ReloadCalls).IsEqualTo(1);
+        loader.ReloadCalls.Should().Be(1);
     }
 
     [Test]
@@ -141,16 +125,13 @@ public sealed class BulkLoadingTests
             await loader.Started.Task.WaitAsync(TestTimeout);
             keyTwo = cache.GetAsync(2).AsTask();
             loader.Release.TrySetResult(values);
-            await Assert
-                .That((await all.WaitAsync(TestTimeout)))
-                .IsEquivalentTo(
-                    new Dictionary<int, int> { [1] = 10, [2] = 20 },
-                    TUnit.Assertions.Enums.CollectionOrdering.Matching
-                );
-            await Assert.That((await keyTwo.WaitAsync(TestTimeout))).IsEqualTo(20);
-            await Assert.That(loader.BulkCalls).IsEqualTo(1);
-            await Assert.That(cache.TryGet(99, out int prefetched)).IsTrue();
-            await Assert.That(prefetched).IsEqualTo(990);
+            (await all.WaitAsync(TestTimeout))
+                .Should()
+                .Equal(new Dictionary<int, int> { [1] = 10, [2] = 20 });
+            (await keyTwo.WaitAsync(TestTimeout)).Should().Be(20);
+            loader.BulkCalls.Should().Be(1);
+            cache.TryGet(99, out int prefetched).Should().BeTrue();
+            prefetched.Should().Be(990);
         }
         finally
         {
@@ -178,10 +159,10 @@ public sealed class BulkLoadingTests
         Task<int> surviving = cache.GetAsync(2, CancellationToken.None).AsTask();
         await cancellation.CancelAsync();
         Func<Task> waitCanceled = async () => await canceled;
-        await Assert.That(waitCanceled).Throws<OperationCanceledException>();
+        await waitCanceled.Should().ThrowAsync<OperationCanceledException>();
         loader.Release.TrySetResult(new Dictionary<int, int> { [1] = 10, [2] = 20 });
-        await Assert.That((await surviving)).IsEqualTo(20);
-        await Assert.That(loader.BulkCalls).IsEqualTo(1);
+        (await surviving).Should().Be(20);
+        loader.BulkCalls.Should().Be(1);
     }
 
     [Test]
@@ -197,10 +178,10 @@ public sealed class BulkLoadingTests
             .BuildAsyncLoading(loader);
         Task<int> single = cache.GetAsync(99).AsTask();
         await loader.Started.Task.WaitAsync(TestTimeout);
-        Func<Task> bulk = () => cache.GetAllAsync([1, 2, 3]).AsTask();
-        await Assert.That(bulk).Throws<CacheLoadRejectedException>();
+        Func<Task> bulk = cache.Awaiting(static current => current.GetAllAsync([1, 2, 3]).AsTask());
+        await bulk.Should().ThrowAsync<CacheLoadRejectedException>();
         loader.Release.TrySetResult(new Dictionary<int, int> { [99] = 990 });
-        await Assert.That((await single)).IsEqualTo(990);
+        (await single).Should().Be(990);
     }
 
     private sealed class SyncLoader : IBulkSyncCacheLoader<int, int>

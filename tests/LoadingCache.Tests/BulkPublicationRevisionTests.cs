@@ -1,3 +1,4 @@
+using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
 
 namespace LoadingCache.Tests;
@@ -21,7 +22,7 @@ public sealed class BulkPublicationRevisionTests
     [Arguments(false, 2)]
     [Arguments(true, 1)]
     [Arguments(true, 2)]
-    public async Task PartialBulkPublicationFailureCleansReadyAndPendingEntries(
+    public void PartialBulkPublicationFailureCleansReadyAndPendingEntries(
         bool recordStatistics,
         int failedPublication
     )
@@ -45,24 +46,26 @@ public sealed class BulkPublicationRevisionTests
         );
         // The failing entry has already cleared Flight but has not published
         // IsReady. An earlier key may be ready and a later key still pending.
-        await Assert
-            .That(() => cache.GetAll([1, 2]))
-            .ThrowsExactly<ControlledReadyPublicationFailure>();
-        await Assert.That(publication.Calls).IsEqualTo(failedPublication);
-        await Assert.That(cache.TryGet(1, out _)).IsFalse();
-        await Assert.That(cache.TryGet(2, out _)).IsFalse();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
-        await Assert.That(cache.Statistics.InFlightLoads).IsEqualTo(0);
+        cache
+            .Invoking(static current => current.GetAll([1, 2]))
+            .Should()
+            .ThrowExactly<ControlledReadyPublicationFailure>();
+        publication.Calls.Should().Be(failedPublication);
+        cache.TryGet(1, out _).Should().BeFalse();
+        cache.TryGet(2, out _).Should().BeFalse();
+        cache.EstimatedCount.Should().Be(0);
+        cache.Statistics.InFlightLoads.Should().Be(0);
         engine.AssertInvariants();
         // Retrying the same keys proves neither a partially initialized entry
         // nor an unprocessed pending key survived the failed publication.
-        await Assert
-            .That(cache.GetAll([1, 2]))
-            .IsEquivalentTo(new Dictionary<int, string> { [1] = "bulk-1", [2] = "bulk-2" });
-        await Assert.That(cache.TryGet(1, out string? first)).IsTrue();
-        await Assert.That(first).IsEqualTo("bulk-1");
-        await Assert.That(cache.TryGet(2, out string? second)).IsTrue();
-        await Assert.That(second).IsEqualTo("bulk-2");
+        cache
+            .GetAll([1, 2])
+            .Should()
+            .BeEquivalentTo(new Dictionary<int, string> { [1] = "bulk-1", [2] = "bulk-2" });
+        cache.TryGet(1, out string? first).Should().BeTrue();
+        first.Should().Be("bulk-1");
+        cache.TryGet(2, out string? second).Should().BeTrue();
+        second.Should().Be("bulk-2");
         engine.AssertInvariants();
     }
 
@@ -111,10 +114,9 @@ public sealed class BulkPublicationRevisionTests
             // Both requested values are ready, but bulk completion still owns
             // its promises and pauses outside the engine and entry locks.
             await timerArm.Entered.WaitAsync(Watchdog);
-            await Assert.That(bulk.IsCompleted).IsFalse();
-            await Assert.That(cache.TryGetTask(1, out Task<string>? originalTask)).IsTrue();
-            Assert.NotNull(originalTask);
-            await Assert.That((await originalTask!)).IsEqualTo("bulk-1");
+            bulk.IsCompleted.Should().BeFalse();
+            cache.TryGetTask(1, out Task<string>? originalTask).Should().BeTrue();
+            (await originalTask!).Should().Be("bulk-1");
             refresh = Task
                 .Factory.StartNew(
                     static state =>
@@ -126,24 +128,23 @@ public sealed class BulkPublicationRevisionTests
                 )
                 .Unwrap();
             await refreshPublished.Entered.WaitAsync(Watchdog);
-            await Assert.That(cache.TryGetTask(1, out publishedTask)).IsTrue();
-            Assert.NotNull(publishedTask);
-            await Assert.That(ReferenceEquals(publishedTask, originalTask)).IsFalse();
-            await Assert.That((await publishedTask)).IsEqualTo("refreshed");
-            await Assert.That(refresh.IsCompleted).IsFalse();
+            cache.TryGetTask(1, out publishedTask).Should().BeTrue();
+            publishedTask.Should().NotBeSameAs(originalTask);
+            (await publishedTask).Should().Be("refreshed");
+            refresh.IsCompleted.Should().BeFalse();
             // The old bulk outcome can remove its unchanged key 2, but its
             // epoch/generation is not authority over key 1's newer revision.
             timerArm.Release();
-            await Assert
-                .That((Func<Task>)(() => bulk.WaitAsync(Watchdog)))
-                .ThrowsExactly<ControlledTimerArmFailure>();
-            await Assert.That(cache.TryGet(1, out string? current)).IsTrue();
-            await Assert.That(current).IsEqualTo("refreshed");
-            await Assert.That(cache.TryGetTask(1, out Task<string>? currentTask)).IsTrue();
-            Assert.NotNull(currentTask);
-            await Assert.That(ReferenceEquals(currentTask, publishedTask)).IsTrue();
-            await Assert.That((await originalTask)).IsEqualTo("bulk-1");
-            await Assert.That(cache.TryGet(2, out _)).IsFalse();
+            await FluentActions
+                .Awaiting(() => bulk.WaitAsync(Watchdog))
+                .Should()
+                .ThrowExactlyAsync<ControlledTimerArmFailure>();
+            cache.TryGet(1, out string? current).Should().BeTrue();
+            current.Should().Be("refreshed");
+            cache.TryGetTask(1, out Task<string>? currentTask).Should().BeTrue();
+            currentTask.Should().BeSameAs(publishedTask);
+            (await originalTask).Should().Be("bulk-1");
+            cache.TryGet(2, out _).Should().BeFalse();
         }
         finally
         {
@@ -165,13 +166,12 @@ public sealed class BulkPublicationRevisionTests
             }
         }
 
-        await Assert.That((await refresh)).IsEqualTo("refreshed");
-        await Assert.That(cache.TryGetTask(1, out Task<string>? finalTask)).IsTrue();
-        Assert.NotNull(finalTask);
-        await Assert.That(ReferenceEquals(finalTask, publishedTask)).IsTrue();
-        await Assert.That(loader.ReloadCalls).IsEqualTo(1);
-        await Assert.That(timerArm.TimedOut).IsFalse();
-        await Assert.That(refreshPublished.TimedOut).IsFalse();
+        (await refresh).Should().Be("refreshed");
+        cache.TryGetTask(1, out Task<string>? finalTask).Should().BeTrue();
+        finalTask.Should().BeSameAs(publishedTask);
+        loader.ReloadCalls.Should().Be(1);
+        timerArm.TimedOut.Should().BeFalse();
+        refreshPublished.TimedOut.Should().BeFalse();
         engine.AssertInvariants();
     }
 
@@ -236,10 +236,8 @@ public sealed class BulkPublicationRevisionTests
             CancellationToken cancellationToken
         )
         {
-            if ((key) != (1))
-                Assert.Fail("Expected key to equal (1).");
-            if ((oldValue) != ("bulk-1"))
-                Assert.Fail("Expected oldValue to equal (\"bulk-1\").");
+            key.Should().Be(1);
+            oldValue.Should().Be("bulk-1");
             Interlocked.Increment(ref _reloadCalls);
             return Task.FromResult("refreshed");
         }
@@ -249,8 +247,7 @@ public sealed class BulkPublicationRevisionTests
             CancellationToken cancellationToken
         )
         {
-            if (keys.Count != 2 || !keys.Order().SequenceEqual([1, 2]))
-                Assert.Fail("Expected exactly keys 1 and 2.");
+            keys.Should().BeEquivalentTo([1, 2]);
             Started.TrySetResult();
             return Result.Task;
         }

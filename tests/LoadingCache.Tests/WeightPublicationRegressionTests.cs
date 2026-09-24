@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using FluentAssertions;
 using LoadingCache.Maintenance;
 using Microsoft.Extensions.Time.Testing;
 
@@ -58,7 +59,7 @@ public sealed class WeightPublicationRegressionTests
         {
             cache.Set(1, new WeightedPayload(3));
             cache.CleanUp();
-            await Assert.That(engine.HasActiveFlights).IsFalse();
+            engine.HasActiveFlights.Should().BeFalse();
             clock.Advance(TimeSpan.FromMilliseconds(60));
             Task<WeightedPayload> read;
             object gate = typeof(CacheEngine<int, WeightedPayload>)
@@ -69,45 +70,32 @@ public sealed class WeightPublicationRegressionTests
                 // Reservation is synchronous, but the thread-pool callback cannot enter the
                 // gate to count or execute its loader until this owner releases it.
                 read = cache.GetAsync(1).AsTask();
-                if (!(read.IsCompletedSuccessfully))
-                    Assert.Fail("Expected under lock: read.IsCompletedSuccessfully");
+                read.IsCompletedSuccessfully.Should().BeTrue();
                 cache.CleanUp();
                 CacheStatistics observed = cache.GetStatistics();
-                if ((Volatile.Read(ref active.Value)) != (0))
-                    Assert.Fail("Expected under lock: (Volatile.Read(ref active.Value)) == (0)");
-                if ((observed.InFlightLoads) != (0))
-                    Assert.Fail("Expected under lock: (observed.InFlightLoads) == (0)");
-                if ((observed.MaintenanceBacklog) != (0))
-                    Assert.Fail("Expected under lock: (observed.MaintenanceBacklog) == (0)");
-                if ((observed.WriteBufferBacklog) != (0))
-                    Assert.Fail("Expected under lock: (observed.WriteBufferBacklog) == (0)");
-                if (!(engine.HasActiveFlights))
-                    Assert.Fail("Expected under lock: engine.HasActiveFlights");
-                if ((cache.Policy.Eviction!.WeightedSize) != (3))
-                    Assert.Fail(
-                        "Expected under lock: (cache.Policy.Eviction!.WeightedSize) == (3)"
-                    );
+                Volatile.Read(ref active.Value).Should().Be(0);
+                observed.InFlightLoads.Should().Be(0);
+                observed.MaintenanceBacklog.Should().Be(0);
+                observed.WriteBufferBacklog.Should().Be(0);
+                engine.HasActiveFlights.Should().BeTrue();
+                cache.Policy.Eviction!.WeightedSize.Should().Be(3);
                 if (clear)
                 {
                     cache.Clear();
                     cache.Set(1, new WeightedPayload(9));
                     cache.CleanUp();
-                    if (!(engine.HasActiveFlights))
-                        Assert.Fail("Expected under lock: engine.HasActiveFlights");
-                    if ((cache.Policy.Eviction.WeightedSize) != (9))
-                        Assert.Fail(
-                            "Expected under lock: (cache.Policy.Eviction.WeightedSize) == (9)"
-                        );
+                    engine.HasActiveFlights.Should().BeTrue();
+                    cache.Policy.Eviction.WeightedSize.Should().Be(9);
                 }
 
                 engine.AssertInvariants();
             }
 
-            await Assert.That((await read.WaitAsync(Watchdog)).Weight).IsEqualTo(3);
+            (await read.WaitAsync(Watchdog)).Weight.Should().Be(3);
             await started.Task.WaitAsync(Watchdog);
-            await Assert.That(Volatile.Read(ref active.Value)).IsEqualTo(1);
-            await Assert.That(cache.GetStatistics().InFlightLoads).IsEqualTo(1);
-            await Assert.That(engine.HasActiveFlights).IsTrue();
+            Volatile.Read(ref active.Value).Should().Be(1);
+            cache.GetStatistics().InFlightLoads.Should().Be(1);
+            engine.HasActiveFlights.Should().BeTrue();
             release.TrySetResult(new WeightedPayload(16));
             var retirementWatchdog = Stopwatch.StartNew();
             while (engine.HasActiveFlights)
@@ -120,16 +108,16 @@ public sealed class WeightPublicationRegressionTests
                 await Task.Yield();
             }
 
-            await Assert.That(Volatile.Read(ref active.Value)).IsEqualTo(0);
-            await Assert.That(engine.HasActiveFlights).IsFalse();
+            Volatile.Read(ref active.Value).Should().Be(0);
+            engine.HasActiveFlights.Should().BeFalse();
             // Drain only after queued, running and revoked publishers are all retired.
             cache.CleanUp();
             engine.AssertInvariants();
             long weight = cache.Policy.Eviction!.WeightedSize;
             KeyValuePair<int, WeightedPayload>[] residents = engine.DictionarySnapshot();
-            await Assert.That(residents).HasSingleItem();
-            await Assert.That(residents[0].Value.Weight).IsEqualTo(clear ? 9 : 16);
-            await Assert.That(weight).IsEqualTo(residents.Sum(pair => (long)pair.Value.Weight));
+            residents.Should().ContainSingle();
+            residents[0].Value.Weight.Should().Be(clear ? 9 : 16);
+            weight.Should().Be(residents.Sum(pair => (long)pair.Value.Weight));
         }
         finally
         {

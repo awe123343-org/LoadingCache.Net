@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using FluentAssertions;
 using LoadingCache.Maintenance;
 using Microsoft.Extensions.Time.Testing;
 
@@ -7,7 +8,7 @@ namespace LoadingCache.Tests;
 public sealed class OwnedCacheTests
 {
     [Test]
-    public async Task WeigherFailureAfterTransferDisposesNewValueAndPreservesOldValue()
+    public void WeigherFailureAfterTransferDisposesNewValueAndPreservesOldValue()
     {
         var oldValue = new DisposableValue();
         var rejected = new DisposableValue();
@@ -25,13 +26,16 @@ public sealed class OwnedCacheTests
             static value => value.Dispose()
         );
         cache.Put(1, oldValue);
-        await Assert.That(() => cache.Put(1, rejected)).ThrowsExactly<InvalidOperationException>();
+        cache
+            .Invoking(current => current.Put(1, rejected))
+            .Should()
+            .ThrowExactly<InvalidOperationException>();
         WaitForDisposal(rejected);
-        await Assert.That(cache.TryGet(1, out var lease)).IsTrue();
+        cache.TryGet(1, out var lease).Should().BeTrue();
         using (lease)
         {
-            await Assert.That(ReferenceEquals(lease!.Value, oldValue)).IsTrue();
-            await Assert.That(oldValue.DisposeCount).IsEqualTo(0);
+            lease!.Value.Should().BeSameAs(oldValue);
+            oldValue.DisposeCount.Should().Be(0);
         }
     }
 
@@ -50,14 +54,12 @@ public sealed class OwnedCacheTests
             context.Value = "request";
             cache.Put(1, new DisposableValue());
             cache.Invalidate(1);
-            await Assert
-                .That(((await observed.Task.WaitAsync(TimeSpan.FromSeconds(5)))) is null)
-                .IsTrue();
+            (await observed.Task.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeNull();
         }
     }
 
     [Test]
-    public async Task CompletedValuesAreNotRootedByOwnershipHistory()
+    public void CompletedValuesAreNotRootedByOwnershipHistory()
     {
         using var cache = OwnedCache.Create(CreateOptions(64, 128), static item => item.Dispose());
         WeakReference[] values = PopulateOwnedValues(cache);
@@ -70,7 +72,7 @@ public sealed class OwnedCacheTests
             GC.WaitForPendingFinalizers();
         }
 
-        await Assert.That(values).All(static item => !item.IsAlive);
+        values.Should().OnlyContain(static item => !item.IsAlive);
         GC.KeepAlive(cache);
     }
 
@@ -106,13 +108,13 @@ public sealed class OwnedCacheTests
             }
         );
         CacheLease<DisposableValue> lease = cache.PutAndLease(1, value);
-        await Assert.That(cache.Invalidate(1)).IsTrue();
-        await Assert.That(disposed.Task.IsCompleted).IsFalse();
-        await Assert.That(ReferenceEquals(lease.Value, value)).IsTrue();
+        cache.Invalidate(1).Should().BeTrue();
+        disposed.Task.IsCompleted.Should().BeFalse();
+        lease.Value.Should().BeSameAs(value);
         // ReSharper disable once MethodHasAsyncOverload -- Verify synchronous lease release queues disposal without waiting.
         lease.Dispose();
         await disposed.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        await Assert.That(value.DisposeCount).IsEqualTo(1);
+        value.DisposeCount.Should().Be(1);
     }
 
     [Test]
@@ -131,9 +133,9 @@ public sealed class OwnedCacheTests
             }
         );
         cache.Put(1, value);
-        await Assert.That(cache.Invalidate(1)).IsTrue();
+        cache.Invalidate(1).Should().BeTrue();
         await disposed.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        await Assert.That(value.DisposeCount).IsEqualTo(1);
+        value.DisposeCount.Should().Be(1);
     }
 
     [Test]
@@ -152,14 +154,14 @@ public sealed class OwnedCacheTests
             }
         );
         cache.Put(1, value);
-        await Assert.That(cache.TryGet(1, out CacheLease<DisposableValue>? lease)).IsTrue();
-        Assert.NotNull(lease);
-        await Assert.That(cache.Invalidate(1)).IsTrue();
-        await Assert.That(disposed.Task.IsCompleted).IsFalse();
+        cache.TryGet(1, out CacheLease<DisposableValue>? lease).Should().BeTrue();
+        lease.Should().NotBeNull();
+        cache.Invalidate(1).Should().BeTrue();
+        disposed.Task.IsCompleted.Should().BeFalse();
         // ReSharper disable once MethodHasAsyncOverload -- Verify synchronous lease release queues disposal without waiting.
         lease.Dispose();
         await disposed.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        await Assert.That(value.DisposeCount).IsEqualTo(1);
+        value.DisposeCount.Should().Be(1);
     }
 
     [Test]
@@ -179,15 +181,15 @@ public sealed class OwnedCacheTests
         );
         cache.Put(1, value);
         cache.Put(2, value);
-        await Assert.That(cache.Invalidate(1)).IsTrue();
-        await Assert.That(disposed.Task.IsCompleted).IsFalse();
-        await Assert.That(cache.Invalidate(2)).IsTrue();
+        cache.Invalidate(1).Should().BeTrue();
+        disposed.Task.IsCompleted.Should().BeFalse();
+        cache.Invalidate(2).Should().BeTrue();
         await disposed.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        await Assert.That(value.DisposeCount).IsEqualTo(1);
+        value.DisposeCount.Should().Be(1);
     }
 
     [Test]
-    public async Task SizeEvictionRetiresValuesAfterMaintenance()
+    public void SizeEvictionRetiresValuesAfterMaintenance()
     {
         var first = new DisposableValue();
         var second = new DisposableValue();
@@ -208,35 +210,35 @@ public sealed class OwnedCacheTests
         {
             cache.Put(1, first);
             cache.Put(2, second);
-            await Assert.That(maintenance.Pending).IsPositive();
-            await Assert.That(disposals).IsEmpty();
-            await Assert.That(first.DisposeCount).IsEqualTo(0);
-            await Assert.That(second.DisposeCount).IsEqualTo(0);
+            maintenance.Pending.Should().BePositive();
+            disposals.Should().BeEmpty();
+            first.DisposeCount.Should().Be(0);
+            second.DisposeCount.Should().Be(0);
             cache.CleanUp();
             maintenance.RunAll();
-            await Assert.That(cache.EstimatedCount).IsEqualTo(1);
-            await Assert.That(disposals).HasSingleItem();
-            await Assert.That(cache.GetDisposalStatistics().PendingDisposals).IsEqualTo(1);
-            await Assert.That(first.DisposeCount).IsEqualTo(0);
-            await Assert.That(second.DisposeCount).IsEqualTo(0);
-            await Assert.That(disposals.TryDequeue(out Action? disposeEvicted)).IsTrue();
+            cache.EstimatedCount.Should().Be(1);
+            disposals.Should().ContainSingle();
+            cache.GetDisposalStatistics().PendingDisposals.Should().Be(1);
+            first.DisposeCount.Should().Be(0);
+            second.DisposeCount.Should().Be(0);
+            disposals.TryDequeue(out Action? disposeEvicted).Should().BeTrue();
             disposeEvicted!();
-            await Assert.That((first.DisposeCount + second.DisposeCount)).IsEqualTo(1);
-            await Assert.That(cache.GetDisposalStatistics().PendingDisposals).IsEqualTo(0);
-            await Assert.That(cache.GetDisposalStatistics().ActiveValueCount).IsEqualTo(1);
-            await Assert.That(disposals).IsEmpty();
+            (first.DisposeCount + second.DisposeCount).Should().Be(1);
+            cache.GetDisposalStatistics().PendingDisposals.Should().Be(0);
+            cache.GetDisposalStatistics().ActiveValueCount.Should().Be(1);
+            disposals.Should().BeEmpty();
             cache.Dispose();
             maintenance.RunAll();
-            await Assert.That(disposals).HasSingleItem();
-            await Assert.That(cache.GetDisposalStatistics().PendingDisposals).IsEqualTo(1);
-            await Assert.That((first.DisposeCount + second.DisposeCount)).IsEqualTo(1);
-            await Assert.That(disposals.TryDequeue(out Action? disposeRemaining)).IsTrue();
+            disposals.Should().ContainSingle();
+            cache.GetDisposalStatistics().PendingDisposals.Should().Be(1);
+            (first.DisposeCount + second.DisposeCount).Should().Be(1);
+            disposals.TryDequeue(out Action? disposeRemaining).Should().BeTrue();
             disposeRemaining!();
-            await Assert.That(first.DisposeCount).IsEqualTo(1);
-            await Assert.That(second.DisposeCount).IsEqualTo(1);
-            await Assert.That(cache.GetDisposalStatistics().PendingDisposals).IsEqualTo(0);
-            await Assert.That(cache.GetDisposalStatistics().ActiveValueCount).IsEqualTo(0);
-            await Assert.That(disposals).IsEmpty();
+            first.DisposeCount.Should().Be(1);
+            second.DisposeCount.Should().Be(1);
+            cache.GetDisposalStatistics().PendingDisposals.Should().Be(0);
+            cache.GetDisposalStatistics().ActiveValueCount.Should().Be(0);
+            disposals.Should().BeEmpty();
         }
         finally
         {
@@ -250,7 +252,7 @@ public sealed class OwnedCacheTests
     }
 
     [Test]
-    public async Task ExpirationRetiresValueWithoutWallClockSleep()
+    public void ExpirationRetiresValueWithoutWallClockSleep()
     {
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
         var value = new DisposableValue();
@@ -266,13 +268,13 @@ public sealed class OwnedCacheTests
         );
         cache.Put(1, value);
         clock.Advance(TimeSpan.FromSeconds(1));
-        await Assert.That(cache.TryGet(1, out CacheLease<DisposableValue>? lease)).IsFalse();
-        await Assert.That((lease) is null).IsTrue();
+        cache.TryGet(1, out CacheLease<DisposableValue>? lease).Should().BeFalse();
+        lease.Should().BeNull();
         WaitUntil(() => value.DisposeCount == 1, TimeSpan.FromSeconds(2));
     }
 
     [Test]
-    public async Task ClearRetiresValueButHonoursLease()
+    public void ClearRetiresValueButHonoursLease()
     {
         var value = new DisposableValue();
         using var cache = OwnedCache.Create(
@@ -280,10 +282,10 @@ public sealed class OwnedCacheTests
             item => item.Dispose()
         );
         cache.Put(1, value);
-        await Assert.That(cache.TryGet(1, out CacheLease<DisposableValue>? lease)).IsTrue();
+        cache.TryGet(1, out CacheLease<DisposableValue>? lease).Should().BeTrue();
         cache.Clear();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
-        await Assert.That(value.DisposeCount).IsEqualTo(0);
+        cache.EstimatedCount.Should().Be(0);
+        value.DisposeCount.Should().Be(0);
         lease!.Dispose();
         WaitUntil(() => value.DisposeCount == 1, TimeSpan.FromSeconds(2));
     }
@@ -335,10 +337,10 @@ public sealed class OwnedCacheTests
                 await weigherEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
                 // ReSharper disable once MethodHasAsyncOverload -- Exercise synchronous disposal while the weigher is blocked; cleanup uses the same contract.
                 cache.Dispose();
-                await Assert.That(value.DisposeCount).IsEqualTo(0);
+                value.DisposeCount.Should().Be(0);
                 releaseWeigher.SetResult(null);
                 Func<Task> awaitPut = async () => await put;
-                await Assert.That(awaitPut).Throws<ObjectDisposedException>();
+                await awaitPut.Should().ThrowAsync<ObjectDisposedException>();
                 WaitUntil(() => value.DisposeCount == 1, TimeSpan.FromSeconds(2));
             }
             finally
@@ -362,7 +364,7 @@ public sealed class OwnedCacheTests
     }
 
     [Test]
-    public async Task OverweightPutAndLeaseKeepsRejectedValueUsable()
+    public void OverweightPutAndLeaseKeepsRejectedValueUsable()
     {
         var value = new DisposableValue();
         ConcurrentQueue<Action> disposals = new();
@@ -386,19 +388,19 @@ public sealed class OwnedCacheTests
         try
         {
             cache.CleanUp();
-            await Assert.That(ReferenceEquals(lease.Value, value)).IsTrue();
-            await Assert.That(value.DisposeCount).IsEqualTo(0);
-            await Assert.That(disposals).IsEmpty();
+            lease.Value.Should().BeSameAs(value);
+            value.DisposeCount.Should().Be(0);
+            disposals.Should().BeEmpty();
             lease.Dispose();
-            await Assert.That(disposals).HasSingleItem();
-            await Assert.That(cache.GetDisposalStatistics().PendingDisposals).IsEqualTo(1);
-            await Assert.That(value.DisposeCount).IsEqualTo(0);
-            await Assert.That(disposals.TryDequeue(out Action? dispose)).IsTrue();
+            disposals.Should().ContainSingle();
+            cache.GetDisposalStatistics().PendingDisposals.Should().Be(1);
+            value.DisposeCount.Should().Be(0);
+            disposals.TryDequeue(out Action? dispose).Should().BeTrue();
             dispose!();
-            await Assert.That(value.DisposeCount).IsEqualTo(1);
-            await Assert.That(cache.GetDisposalStatistics().PendingDisposals).IsEqualTo(0);
-            await Assert.That(cache.GetDisposalStatistics().ActiveValueCount).IsEqualTo(0);
-            await Assert.That(disposals).IsEmpty();
+            value.DisposeCount.Should().Be(1);
+            cache.GetDisposalStatistics().PendingDisposals.Should().Be(0);
+            cache.GetDisposalStatistics().ActiveValueCount.Should().Be(0);
+            disposals.Should().BeEmpty();
         }
         finally
         {
@@ -423,22 +425,22 @@ public sealed class OwnedCacheTests
             }
         );
         CacheLease<DisposableValue> lease = cache.PutAndLease(1, first);
-        await Assert.That(cache.Invalidate(1)).IsTrue();
-        Action putWhileLeased = () => cache.Put(2, second);
-        await Assert.That(putWhileLeased).Throws<InvalidOperationException>();
-        await Assert.That(second.DisposeCount).IsEqualTo(0);
+        cache.Invalidate(1).Should().BeTrue();
+        Action putWhileLeased = cache.Invoking(current => current.Put(2, second));
+        putWhileLeased.Should().Throw<InvalidOperationException>();
+        second.DisposeCount.Should().Be(0);
         // ReSharper disable once MethodHasAsyncOverload -- Verify synchronous lease release queues disposal without waiting.
         lease.Dispose();
         await firstDisposed.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Func<OwnedCacheDisposalStatistics> readDisposalStatistics = cache.GetDisposalStatistics;
         WaitUntil(() => readDisposalStatistics().ActiveValueCount == 0, TimeSpan.FromSeconds(2));
         cache.Put(2, second);
-        await Assert.That(cache.Invalidate(2)).IsTrue();
+        cache.Invalidate(2).Should().BeTrue();
         WaitForDisposal(second);
     }
 
     [Test]
-    public async Task DisposedValueCannotBePublishedAgain()
+    public void DisposedValueCannotBePublishedAgain()
     {
         var value = new DisposableValue();
         using var cache = OwnedCache.Create(
@@ -446,13 +448,13 @@ public sealed class OwnedCacheTests
             item => item.Dispose()
         );
         cache.Put(1, value);
-        await Assert.That(cache.Invalidate(1)).IsTrue();
+        cache.Invalidate(1).Should().BeTrue();
         WaitForDisposal(value);
         Func<OwnedCacheDisposalStatistics> readDisposalStatistics = cache.GetDisposalStatistics;
         WaitUntil(() => readDisposalStatistics().ActiveValueCount == 0, TimeSpan.FromSeconds(2));
-        Action republish = () => cache.Put(2, value);
-        await Assert.That(republish).Throws<InvalidOperationException>();
-        await Assert.That(value.DisposeCount).IsEqualTo(1);
+        Action republish = cache.Invoking(current => current.Put(2, value));
+        republish.Should().Throw<InvalidOperationException>();
+        value.DisposeCount.Should().Be(1);
     }
 
     [Test]
@@ -479,13 +481,13 @@ public sealed class OwnedCacheTests
             }
         );
         cache.Put(1, value);
-        await Assert.That(cache.Invalidate(1)).IsTrue();
+        cache.Invalidate(1).Should().BeTrue();
         await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
         await cache.DisposeAsync();
-        await Assert.That(completed.Task.IsCompleted).IsFalse();
+        completed.Task.IsCompleted.Should().BeFalse();
         release.SetResult(null);
         await completed.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        await Assert.That(value.DisposeCount).IsEqualTo(1);
+        value.DisposeCount.Should().Be(1);
     }
 
     [Test]
@@ -522,18 +524,18 @@ public sealed class OwnedCacheTests
         try
         {
             cache.Put(1, first);
-            await Assert.That(disposals).IsEmpty();
-            await Assert.That(cache.Invalidate(1)).IsTrue();
-            await Assert.That(disposals).HasSingleItem();
-            await Assert.That(cache.GetDisposalStatistics().PendingDisposals).IsEqualTo(1);
-            await Assert.That(first.DisposeCount).IsEqualTo(0);
-            await Assert.That(started.Task.IsCompleted).IsFalse();
-            await Assert.That(disposals.TryDequeue(out Action? startDisposal)).IsTrue();
+            disposals.Should().BeEmpty();
+            cache.Invalidate(1).Should().BeTrue();
+            disposals.Should().ContainSingle();
+            cache.GetDisposalStatistics().PendingDisposals.Should().Be(1);
+            first.DisposeCount.Should().Be(0);
+            started.Task.IsCompleted.Should().BeFalse();
+            disposals.TryDequeue(out Action? startDisposal).Should().BeTrue();
             startDisposal!();
             await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
             Action putWhileDisposing = () => cache.Put(2, second);
-            await Assert.That(putWhileDisposing).Throws<InvalidOperationException>();
-            await Assert.That(second.DisposeCount).IsEqualTo(0);
+            putWhileDisposing.Should().Throw<InvalidOperationException>();
+            second.DisposeCount.Should().Be(0);
             release.SetResult(null);
             await completed.Task.WaitAsync(TimeSpan.FromSeconds(2));
             WaitUntil(
@@ -541,14 +543,14 @@ public sealed class OwnedCacheTests
                 TimeSpan.FromSeconds(2)
             );
             cache.Put(2, second);
-            await Assert.That(cache.Invalidate(2)).IsTrue();
-            await Assert.That(disposals).HasSingleItem();
-            await Assert.That(second.DisposeCount).IsEqualTo(0);
-            await Assert.That(disposals.TryDequeue(out Action? disposeSecond)).IsTrue();
+            cache.Invalidate(2).Should().BeTrue();
+            disposals.Should().ContainSingle();
+            second.DisposeCount.Should().Be(0);
+            disposals.TryDequeue(out Action? disposeSecond).Should().BeTrue();
             disposeSecond!();
-            await Assert.That(second.DisposeCount).IsEqualTo(1);
-            await Assert.That(cache.GetDisposalStatistics().PendingDisposals).IsEqualTo(0);
-            await Assert.That(disposals).IsEmpty();
+            second.DisposeCount.Should().Be(1);
+            cache.GetDisposalStatistics().PendingDisposals.Should().Be(0);
+            disposals.Should().BeEmpty();
         }
         finally
         {
@@ -562,7 +564,7 @@ public sealed class OwnedCacheTests
     }
 
     [Test]
-    public async Task DisposerFailureIsVisibleInDiagnostics()
+    public void DisposerFailureIsVisibleInDiagnostics()
     {
         var value = new DisposableValue();
         using var cache = OwnedCache.Create(
@@ -574,13 +576,14 @@ public sealed class OwnedCacheTests
             }
         );
         cache.Put(1, value);
-        await Assert.That(cache.Invalidate(1)).IsTrue();
+        cache.Invalidate(1).Should().BeTrue();
         Func<OwnedCacheDisposalStatistics> readDisposalStatistics = cache.GetDisposalStatistics;
         WaitUntil(() => readDisposalStatistics().PendingDisposals == 0, TimeSpan.FromSeconds(2));
-        await Assert
-            .That<object>(cache.GetDisposalStatistics().LastDisposalError!)
-            .IsTypeOf<InvalidOperationException>();
-        await Assert.That(value.DisposeCount).IsEqualTo(1);
+        cache
+            .GetDisposalStatistics()
+            .LastDisposalError.Should()
+            .BeOfType<InvalidOperationException>();
+        value.DisposeCount.Should().Be(1);
     }
 
     private static OwnedCacheOptions<int, DisposableValue> CreateOptions(
@@ -595,8 +598,7 @@ public sealed class OwnedCacheTests
 
     private static void WaitUntil(Func<bool> condition, TimeSpan timeout)
     {
-        if (!(SpinWait.SpinUntil(condition, timeout)))
-            Assert.Fail("Expected SpinWait.SpinUntil(condition, timeout) to be true ().");
+        SpinWait.SpinUntil(condition, timeout).Should().BeTrue();
     }
 
     private sealed class ManualMaintenanceScheduler : IMaintenanceScheduler

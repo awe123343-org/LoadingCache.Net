@@ -1,4 +1,4 @@
-using LoadingCache.Maintenance;
+using FluentAssertions;
 
 namespace LoadingCache.Tests;
 
@@ -22,20 +22,20 @@ public sealed class EstimatedCountTests
             );
         Task<string> pending = cache.GetAsync(1).AsTask();
         await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
+        cache.EstimatedCount.Should().Be(0);
         release.SetResult("ready");
-        await Assert.That((await pending.WaitAsync(TimeSpan.FromSeconds(5)))).IsEqualTo("ready");
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
-        await Assert.That(cache.Invalidate(1)).IsTrue();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
+        (await pending.WaitAsync(TimeSpan.FromSeconds(5))).Should().Be("ready");
+        cache.EstimatedCount.Should().Be(1);
+        cache.Invalidate(1).Should().BeTrue();
+        cache.EstimatedCount.Should().Be(0);
         cache.Set(2, "two");
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
+        cache.EstimatedCount.Should().Be(1);
         cache.Clear();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
+        cache.EstimatedCount.Should().Be(0);
     }
 
     [Test]
-    public async Task EstimatedCountUsesTheWeakEntryDictionaryPath()
+    public void EstimatedCountUsesTheWeakEntryDictionaryPath()
     {
         using ICache<object, object> cache = CacheBuilder
             .Create<object, object>()
@@ -48,10 +48,10 @@ public sealed class EstimatedCountTests
         object value = new();
         cache.Put(key, value);
         GC.KeepAlive(value);
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
-        await Assert.That(cache.Invalidate(key)).IsTrue();
+        cache.EstimatedCount.Should().Be(1);
+        cache.Invalidate(key).Should().BeTrue();
         GC.KeepAlive(value);
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
+        cache.EstimatedCount.Should().Be(0);
     }
 
     [Test]
@@ -62,9 +62,4 @@ public sealed class EstimatedCountTests
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private static TaskCompletionSource<bool> NewSignal() => NewSignal<bool>();
-
-    private sealed class RejectingScheduler : IMaintenanceScheduler
-    {
-        public bool TrySchedule(Action callback) => false;
-    }
 }

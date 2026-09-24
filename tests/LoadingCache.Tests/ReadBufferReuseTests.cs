@@ -1,3 +1,4 @@
+using FluentAssertions;
 using LoadingCache.Maintenance;
 
 namespace LoadingCache.Tests;
@@ -29,8 +30,8 @@ public sealed class ReadBufferReuseTests
         const int eventsPerProducer = 2048;
         const int eventCount = producerCount * eventsPerProducer;
         using StripedReadBuffer<ReadPayload> buffer = new(1, capacity, recordStatistics);
-        await Assert.That(buffer.TryOffer(default)).IsEqualTo(ReadBufferOfferResult.Success);
-        await Assert.That(buffer.TryRead(out _)).IsTrue();
+        buffer.TryOffer(default).Should().Be(ReadBufferOfferResult.Success);
+        buffer.TryRead(out _).Should().BeTrue();
         buffer.SetCounterForTesting(initialCounter);
         ReadPayload[] expected = new ReadPayload[eventCount];
         for (int id = 0; id < expected.Length; id++)
@@ -153,18 +154,16 @@ public sealed class ReadBufferReuseTests
         try
         {
             await Task.WhenAll(workers).WaitAsync(TestTimeout, CancellationToken.None);
-            await Assert.That(accepted).All(static value => value);
-            await Assert.That(observed).All(static count => count == 1);
-            await Assert.That(buffer.HasPublished).IsFalse();
+            accepted.Should().OnlyContain(static value => value);
+            observed.Should().OnlyContain(static count => count == 1);
+            buffer.HasPublished.Should().BeFalse();
             ReadBufferStatistics statistics = buffer.GetStatistics();
-            await Assert.That(statistics.Queued).IsEqualTo(0);
-            await Assert.That(statistics.Enqueued).IsEqualTo(recordStatistics ? eventCount : 0);
-            await Assert.That(statistics.Dequeued).IsEqualTo(recordStatistics ? eventCount : 0);
-            await Assert.That(statistics.DroppedFull).IsEqualTo(recordStatistics ? full.Sum() : 0);
-            await Assert
-                .That(statistics.DroppedFailed)
-                .IsEqualTo(recordStatistics ? failed.Sum() : 0);
-            await Assert.That(statistics.DroppedShutdown).IsEqualTo(0);
+            statistics.Queued.Should().Be(0);
+            statistics.Enqueued.Should().Be(recordStatistics ? eventCount : 0);
+            statistics.Dequeued.Should().Be(recordStatistics ? eventCount : 0);
+            statistics.DroppedFull.Should().Be(recordStatistics ? full.Sum() : 0);
+            statistics.DroppedFailed.Should().Be(recordStatistics ? failed.Sum() : 0);
+            statistics.DroppedShutdown.Should().Be(0);
         }
         finally
         {

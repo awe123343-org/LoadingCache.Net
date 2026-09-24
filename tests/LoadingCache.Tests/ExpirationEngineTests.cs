@@ -1,3 +1,4 @@
+using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
 
 namespace LoadingCache.Tests;
@@ -17,27 +18,21 @@ public sealed class ExpirationEngineTests
             ReadDuration = TimeSpan.FromSeconds(30),
         };
         await using IAsyncLoadingCache<int, string> cache = CreateVariableCache(clock, expiry);
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("1");
-        await Assert.That(expiry.CreateCalls).IsEqualTo(1);
-        await Assert
-            .That(cache.Policy.VariableExpiration!.GetExpiresAfter(1))
-            .IsEqualTo(TimeSpan.FromSeconds(10));
+        (await cache.GetAsync(1)).Should().Be("1");
+        expiry.CreateCalls.Should().Be(1);
+        cache.Policy.VariableExpiration!.GetExpiresAfter(1).Should().Be(TimeSpan.FromSeconds(10));
         clock.Advance(TimeSpan.FromSeconds(2));
-        await Assert.That(cache.TryGet(1, out string? readValue)).IsTrue();
-        await Assert.That(readValue).IsEqualTo("1");
-        await Assert.That(expiry.ReadCalls).IsEqualTo(1);
-        await Assert
-            .That(cache.Policy.VariableExpiration.GetExpiresAfter(1))
-            .IsEqualTo(TimeSpan.FromSeconds(30));
+        cache.TryGet(1, out string? readValue).Should().BeTrue();
+        readValue.Should().Be("1");
+        expiry.ReadCalls.Should().Be(1);
+        cache.Policy.VariableExpiration.GetExpiresAfter(1).Should().Be(TimeSpan.FromSeconds(30));
         cache.Set(1, "updated");
-        await Assert.That(expiry.UpdateCalls).IsEqualTo(1);
-        await Assert
-            .That(cache.Policy.VariableExpiration.GetExpiresAfter(1))
-            .IsEqualTo(TimeSpan.FromSeconds(20));
+        expiry.UpdateCalls.Should().Be(1);
+        cache.Policy.VariableExpiration.GetExpiresAfter(1).Should().Be(TimeSpan.FromSeconds(20));
     }
 
     [Test]
-    public async Task VariableAndFixedExpirationAreMutuallyExclusive()
+    public void VariableAndFixedExpirationAreMutuallyExclusive()
     {
         Action action = () =>
             CacheBuilder
@@ -47,7 +42,7 @@ public sealed class ExpirationEngineTests
                 .ExpireAfterWrite(TimeSpan.FromSeconds(1))
                 .ExpireAfter(new TestExpiry())
                 .Build();
-        await Assert.That(action).ThrowsExactly<InvalidOperationException>();
+        action.Should().ThrowExactly<InvalidOperationException>();
     }
 
     [Test]
@@ -58,17 +53,15 @@ public sealed class ExpirationEngineTests
             clock,
             new TestExpiry { CreateDuration = TimeSpan.MaxValue }
         );
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("1");
-        await Assert
-            .That(cache.Policy.VariableExpiration!.SetExpiresAfter(1, TimeSpan.Zero))
-            .IsTrue();
-        await Assert.That(cache.TryGet(1, out _)).IsFalse();
+        (await cache.GetAsync(1)).Should().Be("1");
+        cache.Policy.VariableExpiration!.SetExpiresAfter(1, TimeSpan.Zero).Should().BeTrue();
+        cache.TryGet(1, out _).Should().BeFalse();
         cache.Put(2, "negative", TimeSpan.FromTicks(-1));
-        await Assert.That(cache.TryGet(2, out _)).IsFalse();
+        cache.TryGet(2, out _).Should().BeFalse();
         cache.Put(3, "long", TimeSpan.MaxValue);
         clock.Advance(TimeSpan.FromDays(365));
-        await Assert.That(cache.TryGet(3, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("long");
+        cache.TryGet(3, out string? value).Should().BeTrue();
+        value.Should().Be("long");
     }
 
     [Test]
@@ -84,13 +77,12 @@ public sealed class ExpirationEngineTests
         expiry.OnRead = () =>
         {
             Task probe = Task.Run(() => cache.Policy.VariableExpiration!.GetExpiresAfter(1));
-            if (!(probe.Wait(Watchdog)))
-                Assert.Fail("Expected probe.Wait(Watchdog) to be true ().");
+            probe.Wait(Watchdog).Should().BeTrue();
         };
         try
         {
-            await Assert.That((await cache.GetAsync(1))).IsEqualTo("1");
-            await Assert.That(cache.TryGet(1, out _)).IsTrue();
+            (await cache.GetAsync(1)).Should().Be("1");
+            cache.TryGet(1, out _).Should().BeTrue();
         }
         finally
         {
@@ -113,7 +105,7 @@ public sealed class ExpirationEngineTests
         Task<bool>? read = null;
         try
         {
-            await Assert.That((await cache.GetAsync(1))).IsEqualTo("1");
+            (await cache.GetAsync(1)).Should().Be("1");
             read = Task.Factory.StartNew(
                 static state => ((IAsyncLoadingCache<int, string>)state!).TryGet(1, out _),
                 cache,
@@ -122,14 +114,13 @@ public sealed class ExpirationEngineTests
                 TaskScheduler.Default
             );
             await callback.Entered.WaitAsync(Watchdog, CancellationToken.None);
-            await Assert
-                .That(cache.Policy.VariableExpiration!.SetExpiresAfter(1, TimeSpan.FromSeconds(7)))
-                .IsTrue();
+            cache
+                .Policy.VariableExpiration!.SetExpiresAfter(1, TimeSpan.FromSeconds(7))
+                .Should()
+                .BeTrue();
             callback.Release();
-            await Assert.That((await read.WaitAsync(Watchdog, CancellationToken.None))).IsTrue();
-            await Assert
-                .That(cache.Policy.VariableExpiration.GetExpiresAfter(1))
-                .IsEqualTo(TimeSpan.FromSeconds(7));
+            (await read.WaitAsync(Watchdog, CancellationToken.None)).Should().BeTrue();
+            cache.Policy.VariableExpiration.GetExpiresAfter(1).Should().Be(TimeSpan.FromSeconds(7));
         }
         finally
         {
@@ -159,8 +150,7 @@ public sealed class ExpirationEngineTests
             {
                 signalEntered();
                 Func<TimeSpan, bool> wait = call == 1 ? waitFirst : waitSecond;
-                if (!(wait(Watchdog)))
-                    Assert.Fail("Expected wait(Watchdog) to be true ().");
+                wait(Watchdog).Should().BeTrue();
                 return call == 1 ? TimeSpan.FromSeconds(2) : TimeSpan.FromSeconds(7);
             },
         };
@@ -183,7 +173,7 @@ public sealed class ExpirationEngineTests
             (key, _) =>
                 Task.FromResult(key.ToString(System.Globalization.CultureInfo.InvariantCulture))
         );
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("1");
+        (await cache.GetAsync(1)).Should().Be("1");
         Task<bool> first = Task.Factory.StartNew(
             static state => ((IAsyncLoadingCache<int, string>)state!).TryGet(1, out _),
             cache,
@@ -200,20 +190,19 @@ public sealed class ExpirationEngineTests
         );
         try
         {
-            await Assert.That(bothEntered.Wait(Watchdog)).IsTrue();
+            bothEntered.Wait(Watchdog).Should().BeTrue();
             // The second callback is released first.  The engine hook proves that
             // its revision was committed before the first callback is released.
             releaseSecond.Set();
             await committed.Task.WaitAsync(Watchdog);
             releaseFirst.Set();
-            await Assert
-                .That(
-                    (await Task.WhenAll(first, second).WaitAsync(Watchdog, CancellationToken.None))
-                )
-                .All(result => result);
-            await Assert
-                .That(cache.Policy.VariableExpiration!.GetExpiresAfter(1))
-                .IsEqualTo(TimeSpan.FromSeconds(7));
+            (await Task.WhenAll(first, second).WaitAsync(Watchdog, CancellationToken.None))
+                .Should()
+                .OnlyContain(result => result);
+            cache
+                .Policy.VariableExpiration!.GetExpiresAfter(1)
+                .Should()
+                .Be(TimeSpan.FromSeconds(7));
         }
         finally
         {
@@ -224,7 +213,7 @@ public sealed class ExpirationEngineTests
     }
 
     [Test]
-    public async Task ExpirationWheelKeepsExtendedAccessEntriesBoundedPerPass()
+    public void ExpirationWheelKeepsExtendedAccessEntriesBoundedPerPass()
     {
         const int entryCount = 256;
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
@@ -243,7 +232,7 @@ public sealed class ExpirationEngineTests
         clock.Advance(TimeSpan.FromMilliseconds(500));
         for (int key = 0; key < entryCount; key++)
         {
-            await Assert.That(cache.TryGet(key, out _)).IsTrue();
+            cache.TryGet(key, out _).Should().BeTrue();
         }
 
         // Every node is due at its original deadline, but each entry has a
@@ -252,15 +241,15 @@ public sealed class ExpirationEngineTests
         clock.Advance(TimeSpan.FromMilliseconds(500));
         cache.CleanUp();
         cache.CleanUp();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(entryCount);
+        cache.EstimatedCount.Should().Be(entryCount);
         clock.Advance(TimeSpan.FromMilliseconds(500));
         cache.CleanUp();
         cache.CleanUp();
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
+        cache.EstimatedCount.Should().Be(0);
     }
 
     [Test]
-    public async Task FixedPolicyExposesRuntimeDurationAndAge()
+    public void FixedPolicyExposesRuntimeDurationAndAge()
     {
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
         using ICache<int, string> cache = CacheBuilder
@@ -271,20 +260,16 @@ public sealed class ExpirationEngineTests
             .ExpireAfterWrite(TimeSpan.FromSeconds(10))
             .Build();
         cache.Put(1, "value");
-        await Assert
-            .That(cache.Policy.ExpireAfterWrite!.GetExpiresAfter(1))
-            .IsEqualTo(TimeSpan.FromSeconds(10));
-        await Assert.That(cache.Policy.ExpireAfterWrite.AgeOf(1)).IsEqualTo(TimeSpan.Zero);
+        cache.Policy.ExpireAfterWrite!.GetExpiresAfter(1).Should().Be(TimeSpan.FromSeconds(10));
+        cache.Policy.ExpireAfterWrite.AgeOf(1).Should().Be(TimeSpan.Zero);
         clock.Advance(TimeSpan.FromSeconds(2));
-        await Assert
-            .That(cache.Policy.ExpireAfterWrite.AgeOf(1))
-            .IsEqualTo(TimeSpan.FromSeconds(2));
+        cache.Policy.ExpireAfterWrite.AgeOf(1).Should().Be(TimeSpan.FromSeconds(2));
         cache.Policy.ExpireAfterWrite.SetDuration(TimeSpan.FromSeconds(1));
-        await Assert.That(cache.TryGet(1, out _)).IsFalse();
+        cache.TryGet(1, out _).Should().BeFalse();
     }
 
     [Test]
-    public async Task PromptExpirationSchedulerUsesConfiguredTimeProvider()
+    public void PromptExpirationSchedulerUsesConfiguredTimeProvider()
     {
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
         using ICache<int, string> cache = CacheBuilder
@@ -296,10 +281,10 @@ public sealed class ExpirationEngineTests
             .EnableExpirationScheduler()
             .Build();
         cache.Put(1, "value");
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
+        cache.EstimatedCount.Should().Be(1);
         clock.Advance(TimeSpan.FromSeconds(5));
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
-        await Assert.That(cache.TryGet(1, out _)).IsFalse();
+        cache.EstimatedCount.Should().Be(0);
+        cache.TryGet(1, out _).Should().BeFalse();
     }
 
     [Test]
@@ -320,8 +305,7 @@ public sealed class ExpirationEngineTests
                 }
 
                 armEntered.TrySetResult(true);
-                if (!(waitForArmRelease(Watchdog)))
-                    Assert.Fail("Expected waitForArmRelease(Watchdog) to be true ().");
+                waitForArmRelease(Watchdog).Should().BeTrue();
             },
         };
         var engine = new CacheEngine<int, string>(
@@ -344,20 +328,19 @@ public sealed class ExpirationEngineTests
         {
             await armEntered.Task.WaitAsync(Watchdog, CancellationToken.None);
             shorterArm = Task.Run(() => writeExpiry.SetDuration(TimeSpan.FromSeconds(1)));
-            await Assert
-                .That(
-                    SpinWait.SpinUntil(
-                        () => writeExpiry.GetExpiresAfter(1) == TimeSpan.FromSeconds(1),
-                        Watchdog
-                    )
+            SpinWait
+                .SpinUntil(
+                    () => writeExpiry.GetExpiresAfter(1) == TimeSpan.FromSeconds(1),
+                    Watchdog
                 )
-                .IsTrue();
+                .Should()
+                .BeTrue();
             releaseArm.Set();
             await Task.WhenAll(staleArm, shorterArm).WaitAsync(Watchdog, CancellationToken.None);
             // The wheel arms at the beginning of the containing bucket (currently
             // 960 ms for a one-second deadline); it must not restore the stale
             // ten-second delay computed by the paused request.
-            await Assert.That(timeProvider.LastDueTime).IsLessThan(TimeSpan.FromSeconds(2));
+            timeProvider.LastDueTime.Should().BeLessThan(TimeSpan.FromSeconds(2));
         }
         finally
         {
@@ -382,9 +365,9 @@ public sealed class ExpirationEngineTests
                 (key, _) =>
                     Task.FromResult(key.ToString(System.Globalization.CultureInfo.InvariantCulture))
             );
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("1");
+        (await cache.GetAsync(1)).Should().Be("1");
         clock.Advance(TimeSpan.FromSeconds(3));
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
+        cache.EstimatedCount.Should().Be(0);
     }
 
     [Test]
@@ -398,7 +381,7 @@ public sealed class ExpirationEngineTests
             ThrowOnRead = true,
         };
         await using IAsyncLoadingCache<int, string> cache = CreateVariableCache(clock, expiry);
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("1");
+        (await cache.GetAsync(1)).Should().Be("1");
         Exception? failure = null;
         try
         {
@@ -409,10 +392,10 @@ public sealed class ExpirationEngineTests
             failure = exception;
         }
 
-        await Assert.That<object>(failure!).IsTypeOf<InvalidOperationException>();
+        failure.Should().BeOfType<InvalidOperationException>();
         expiry.ThrowOnRead = false;
-        await Assert.That(cache.TryGet(1, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("1");
+        cache.TryGet(1, out string? value).Should().BeTrue();
+        value.Should().Be("1");
     }
 
     private static IAsyncLoadingCache<int, string> CreateVariableCache(

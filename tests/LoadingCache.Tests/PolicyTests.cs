@@ -1,3 +1,4 @@
+using FluentAssertions;
 using LoadingCache.Policy;
 
 namespace LoadingCache.Tests;
@@ -9,7 +10,7 @@ public sealed class PolicyTests
     [Arguments(2)]
     [Arguments(3)]
     [Arguments(17)]
-    public async Task TinyCapacitiesConvergeWithoutEmptySegmentFailures(int capacity)
+    public void TinyCapacitiesConvergeWithoutEmptySegmentFailures(int capacity)
     {
         WindowTinyLfuPolicy<int> policy = new(capacity, seed: 7, maximumCount: capacity);
         for (int i = 0; i < capacity * 4; i++)
@@ -19,68 +20,66 @@ public sealed class PolicyTests
         }
 
         policy.Maintain();
-        await Assert.That(policy.ResidentCount).IsLessThanOrEqualTo(capacity);
-        await Assert.That(policy.WeightedSize).IsLessThanOrEqualTo(capacity);
-        await Assert.That(policy.WindowMaximum).IsBetween(1, capacity);
-        await Assert.That(policy.MainMaximum).IsGreaterThanOrEqualTo(0);
-        await Assert.That(policy.ProtectedMaximum).IsLessThanOrEqualTo(policy.MainMaximum);
+        policy.ResidentCount.Should().BeLessThanOrEqualTo(capacity);
+        policy.WeightedSize.Should().BeLessThanOrEqualTo(capacity);
+        policy.WindowMaximum.Should().BeInRange(1, capacity);
+        policy.MainMaximum.Should().BeGreaterThanOrEqualTo(0);
+        policy.ProtectedMaximum.Should().BeLessThanOrEqualTo(policy.MainMaximum);
     }
 
     [Test]
-    public async Task NegativeWeightIsRejectedBeforeNodeCanEnterPolicy()
+    public void NegativeWeightIsRejectedBeforeNodeCanEnterPolicy()
     {
         Action action = () => _ = new PolicyNode<string>("negative", -1, 1);
-        await Assert.That(action).Throws<ArgumentOutOfRangeException>();
+        action.Should().Throw<ArgumentOutOfRangeException>();
     }
 
     [Test]
-    public async Task NegativeWeightUpdateIsRejectedWithoutMutatingTheResident()
+    public void NegativeWeightUpdateIsRejectedWithoutMutatingTheResident()
     {
         WindowTinyLfuPolicy<int> policy = new(4, seed: 5);
         PolicyNode<int> node = new(1, 1, Hash(1));
         policy.Add(node);
         Action action = () => policy.UpdateWeight(node, -1);
-        await Assert.That(action).Throws<ArgumentOutOfRangeException>();
-        await Assert.That(node.IsAlive).IsTrue();
-        await Assert.That(node.Weight).IsEqualTo(1);
-        await Assert.That(policy.WeightedSize).IsEqualTo(1);
+        action.Should().Throw<ArgumentOutOfRangeException>();
+        node.IsAlive.Should().BeTrue();
+        node.Weight.Should().Be(1);
+        policy.WeightedSize.Should().Be(1);
     }
 
     [Test]
-    public async Task ZeroWeightDoesNotImplicitlyConsumeWeightCapacity()
+    public void ZeroWeightDoesNotImplicitlyConsumeWeightCapacity()
     {
         WindowTinyLfuPolicy<string> policy = new(1, seed: 11);
         PolicyNode<string> first = new("first", 0, 1);
         PolicyNode<string> second = new("second", 0, 2);
         policy.Add(first);
         policy.Add(second);
-        await Assert.That(policy.WeightedSize).IsEqualTo(0);
-        await Assert.That(policy.ResidentCount).IsEqualTo(2);
-        await Assert.That(first.IsAlive).IsTrue();
-        await Assert.That(second.IsAlive).IsTrue();
+        policy.WeightedSize.Should().Be(0);
+        policy.ResidentCount.Should().Be(2);
+        first.IsAlive.Should().BeTrue();
+        second.IsAlive.Should().BeTrue();
         IReadOnlyList<PolicyNode<string>> evicted = policy.SetMaximumCount(1);
-        await Assert.That(evicted.Count).IsEqualTo(1);
-        await Assert.That(policy.ResidentCount).IsEqualTo(1);
-        await Assert.That(policy.WeightedSize).IsEqualTo(0);
+        evicted.Should().HaveCount(1);
+        policy.ResidentCount.Should().Be(1);
+        policy.WeightedSize.Should().Be(0);
     }
 
     [Test]
-    public async Task OversizedWeightIsReturnedAsExactRejectedNode()
+    public void OversizedWeightIsReturnedAsExactRejectedNode()
     {
         WindowTinyLfuPolicy<int> policy = new(3, seed: 13);
         PolicyNode<int> node = new(7, 4, Hash(7));
         IReadOnlyList<PolicyNode<int>> evicted = policy.Add(node);
-        await Assert
-            .That(ReferenceEquals((await Assert.That(evicted).HasSingleItem()), node))
-            .IsTrue();
-        await Assert.That(node.IsAlive).IsFalse();
-        await Assert.That(node.Queue).IsEqualTo(PolicyQueue.None);
-        await Assert.That(policy.WeightedSize).IsEqualTo(0);
-        await Assert.That(policy.ResidentCount).IsEqualTo(0);
+        evicted.Should().ContainSingle().Which.Should().BeSameAs(node);
+        node.IsAlive.Should().BeFalse();
+        node.Queue.Should().Be(PolicyQueue.None);
+        policy.WeightedSize.Should().Be(0);
+        policy.ResidentCount.Should().Be(0);
     }
 
     [Test]
-    public async Task LongMaximumDoesNotOverflowWeightedAccounting()
+    public void LongMaximumDoesNotOverflowWeightedAccounting()
     {
         WindowTinyLfuPolicy<int> policy = new(long.MaxValue, seed: 17);
         PolicyNode<int> maximum = new(1, long.MaxValue, Hash(1));
@@ -92,17 +91,15 @@ public sealed class PolicyTests
         }
 
         IReadOnlyList<PolicyNode<int>> evicted = policy.Add(overflow);
-        await Assert
-            .That(ReferenceEquals((await Assert.That(evicted).HasSingleItem()), maximum))
-            .IsTrue();
-        await Assert.That(maximum.IsAlive).IsFalse();
-        await Assert.That(overflow.IsAlive).IsTrue();
-        await Assert.That(policy.WeightedSize).IsEqualTo(1);
-        await Assert.That(policy.ResidentCount).IsEqualTo(1);
+        evicted.Should().ContainSingle().Which.Should().BeSameAs(maximum);
+        maximum.IsAlive.Should().BeFalse();
+        overflow.IsAlive.Should().BeTrue();
+        policy.WeightedSize.Should().Be(1);
+        policy.ResidentCount.Should().Be(1);
     }
 
     [Test]
-    public async Task WeightIncreaseNearLongMaximumEvictsAnExistingNodeBeforeAccounting()
+    public void WeightIncreaseNearLongMaximumEvictsAnExistingNodeBeforeAccounting()
     {
         WindowTinyLfuPolicy<int> policy = new(long.MaxValue, seed: 79);
         PolicyNode<int> existing = new(1, long.MaxValue - 1, Hash(1));
@@ -115,16 +112,14 @@ public sealed class PolicyTests
         }
 
         IReadOnlyList<PolicyNode<int>> evicted = policy.UpdateWeight(changing, 2);
-        await Assert
-            .That(ReferenceEquals((await Assert.That(evicted).HasSingleItem()), existing))
-            .IsTrue();
-        await Assert.That(existing.IsAlive).IsFalse();
-        await Assert.That(changing.IsAlive).IsTrue();
-        await Assert.That(policy.WeightedSize).IsEqualTo(2);
+        evicted.Should().ContainSingle().Which.Should().BeSameAs(existing);
+        existing.IsAlive.Should().BeFalse();
+        changing.IsAlive.Should().BeTrue();
+        policy.WeightedSize.Should().Be(2);
     }
 
     [Test]
-    public async Task OverflowAdmissionDoesNotDiscardAHotExistingVictim()
+    public void OverflowAdmissionDoesNotDiscardAHotExistingVictim()
     {
         WindowTinyLfuPolicy<int> policy = new(long.MaxValue, seed: 83);
         const long weight = long.MaxValue / 2 + 1;
@@ -137,54 +132,48 @@ public sealed class PolicyTests
         }
 
         IReadOnlyList<PolicyNode<int>> evicted = policy.Add(cold);
-        await Assert
-            .That(ReferenceEquals((await Assert.That(evicted).HasSingleItem()), cold))
-            .IsTrue();
-        await Assert.That(hot.IsAlive).IsTrue();
-        await Assert.That(policy.WeightedSize).IsEqualTo(weight);
+        evicted.Should().ContainSingle().Which.Should().BeSameAs(cold);
+        hot.IsAlive.Should().BeTrue();
+        policy.WeightedSize.Should().Be(weight);
     }
 
     [Test]
-    public async Task ColdTieRejectsCandidateAndKeepsExistingVictim()
+    public void ColdTieRejectsCandidateAndKeepsExistingVictim()
     {
         WindowTinyLfuPolicy<int> policy = new(1, seed: 19);
         PolicyNode<int> victim = new(1, 1, Hash(1));
         PolicyNode<int> candidate = new(2, 1, Hash(2));
         policy.Add(victim);
         IReadOnlyList<PolicyNode<int>> evicted = policy.Add(candidate);
-        await Assert
-            .That(ReferenceEquals((await Assert.That(evicted).HasSingleItem()), victim))
-            .IsTrue();
-        await Assert.That(victim.IsAlive).IsFalse();
-        await Assert.That(candidate.IsAlive).IsTrue();
-        await Assert.That(policy.ResidentCount).IsEqualTo(1);
+        evicted.Should().ContainSingle().Which.Should().BeSameAs(victim);
+        victim.IsAlive.Should().BeFalse();
+        candidate.IsAlive.Should().BeTrue();
+        policy.ResidentCount.Should().Be(1);
     }
 
     [Test]
-    public async Task ColdFillClearsCandidateBeforeLaterHotVictimAdmission()
+    public void ColdFillClearsCandidateBeforeLaterHotVictimAdmission()
     {
         WindowTinyLfuPolicy<int> policy = new(2, seed: 53);
         PolicyNode<int> hotVictim = new(1, 1, Hash(1));
         PolicyNode<int> admitted = new(2, 1, Hash(2));
         policy.Add(hotVictim);
         policy.Add(admitted);
-        await Assert.That(hotVictim.Queue).IsEqualTo(PolicyQueue.Probation);
-        await Assert.That(hotVictim.IsCandidate).IsFalse();
-        await Assert.That(policy.RecordAccess(hotVictim)).IsTrue();
-        await Assert.That(hotVictim.Queue).IsEqualTo(PolicyQueue.Probation);
-        await Assert.That(hotVictim.IsCandidate).IsFalse();
+        hotVictim.Queue.Should().Be(PolicyQueue.Probation);
+        hotVictim.IsCandidate.Should().BeFalse();
+        policy.RecordAccess(hotVictim).Should().BeTrue();
+        hotVictim.Queue.Should().Be(PolicyQueue.Probation);
+        hotVictim.IsCandidate.Should().BeFalse();
         PolicyNode<int> candidate = new(3, 1, Hash(3));
         IReadOnlyList<PolicyNode<int>> evicted = policy.Add(candidate);
-        await Assert
-            .That(ReferenceEquals((await Assert.That(evicted).HasSingleItem()), admitted))
-            .IsTrue();
-        await Assert.That(hotVictim.IsAlive).IsTrue();
-        await Assert.That(candidate.IsAlive).IsTrue();
-        await Assert.That(policy.ResidentCount).IsEqualTo(2);
+        evicted.Should().ContainSingle().Which.Should().BeSameAs(admitted);
+        hotVictim.IsAlive.Should().BeTrue();
+        candidate.IsAlive.Should().BeTrue();
+        policy.ResidentCount.Should().Be(2);
     }
 
     [Test]
-    public async Task HotCandidateCanDisplaceColdVictim()
+    public void HotCandidateCanDisplaceColdVictim()
     {
         WindowTinyLfuPolicy<int> policy = new(3, seed: 23);
         PolicyNode<int> coldVictim = new(1, 1, Hash(1));
@@ -200,51 +189,44 @@ public sealed class PolicyTests
 
         PolicyNode<int> trigger = new(4, 1, Hash(4));
         policy.Add(trigger);
-        await Assert.That(coldVictim.IsAlive).IsFalse();
-        await Assert.That(hotCandidate.IsAlive).IsTrue();
-        await Assert.That(policy.ResidentCount).IsEqualTo(3);
+        coldVictim.IsAlive.Should().BeFalse();
+        hotCandidate.IsAlive.Should().BeTrue();
+        policy.ResidentCount.Should().Be(3);
     }
 
     [Test]
-    public async Task ProbationAccessPromotesAndProtectedOverflowDemotesOldest()
+    public void ProbationAccessPromotesAndProtectedOverflowDemotesOldest()
     {
         WindowTinyLfuPolicy<int> policy = new(10, seed: 29);
         PolicyNode<int> first = new(1, 1, Hash(1));
         PolicyNode<int> second = new(2, 1, Hash(2));
         policy.Add(first);
         policy.Add(second);
-        await Assert.That(first.Queue).IsEqualTo(PolicyQueue.Probation);
-        await Assert.That(policy.RecordAccess(first)).IsTrue();
-        await Assert.That(first.Queue).IsEqualTo(PolicyQueue.Protected);
-        await Assert.That(policy.ProtectedCount).IsEqualTo(1);
-        await Assert.That(policy.MainProtectedWeightedSize).IsEqualTo(1);
+        first.Queue.Should().Be(PolicyQueue.Probation);
+        policy.RecordAccess(first).Should().BeTrue();
+        first.Queue.Should().Be(PolicyQueue.Protected);
+        policy.ProtectedCount.Should().Be(1);
+        policy.MainProtectedWeightedSize.Should().Be(1);
     }
 
     [Test]
-    public async Task RemovingStaleNodeDoesNotAffectAnotherGeneration()
+    public void RemovingStaleNodeDoesNotAffectAnotherGeneration()
     {
         WindowTinyLfuPolicy<int> policy = new(4, seed: 31);
         PolicyNode<int> oldNode = new(1, 1, Hash(1));
         PolicyNode<int> currentNode = new(2, 1, Hash(2));
         policy.Add(oldNode);
-        await Assert
-            .That(
-                ReferenceEquals(
-                    (await Assert.That(policy.Remove(oldNode)).HasSingleItem()),
-                    oldNode
-                )
-            )
-            .IsTrue();
+        policy.Remove(oldNode).Should().ContainSingle().Which.Should().BeSameAs(oldNode);
         policy.Add(currentNode);
-        await Assert.That(policy.RecordAccess(oldNode)).IsFalse();
-        await Assert.That(policy.Remove(oldNode)).IsEmpty();
-        await Assert.That(currentNode.IsAlive).IsTrue();
-        await Assert.That(policy.ResidentCount).IsEqualTo(1);
-        await Assert.That(policy.WeightedSize).IsEqualTo(1);
+        policy.RecordAccess(oldNode).Should().BeFalse();
+        policy.Remove(oldNode).Should().BeEmpty();
+        currentNode.IsAlive.Should().BeTrue();
+        policy.ResidentCount.Should().Be(1);
+        policy.WeightedSize.Should().Be(1);
     }
 
     [Test]
-    public async Task SetMaximumReturnsExactVictimsAndConverges()
+    public void SetMaximumReturnsExactVictimsAndConverges()
     {
         WindowTinyLfuPolicy<int> policy = new(16, seed: 37);
         List<PolicyNode<int>> nodes = [];
@@ -256,15 +238,15 @@ public sealed class PolicyTests
         }
 
         IReadOnlyList<PolicyNode<int>> evicted = policy.SetMaximum(3);
-        await Assert.That(evicted).IsNotEmpty();
-        await Assert.That(evicted).All(node => nodes.Contains(node));
-        await Assert.That(policy.WeightedSize).IsLessThanOrEqualTo(3);
-        await Assert.That(policy.ResidentCount).IsLessThanOrEqualTo(16);
-        await Assert.That(policy.WindowMaximum).IsBetween(1, 3);
+        evicted.Should().NotBeEmpty();
+        evicted.Should().OnlyContain(node => nodes.Contains(node));
+        policy.WeightedSize.Should().BeLessThanOrEqualTo(3);
+        policy.ResidentCount.Should().BeLessThanOrEqualTo(16);
+        policy.WindowMaximum.Should().BeInRange(1, 3);
     }
 
     [Test]
-    public async Task AdaptiveSamplingUsesMinimumProgressForTinyPolicy()
+    public void AdaptiveSamplingUsesMinimumProgressForTinyPolicy()
     {
         WindowTinyLfuPolicy<int> policy = new(3, seed: 41);
         PolicyNode<int> node = new(1, 1, Hash(1));
@@ -276,13 +258,13 @@ public sealed class PolicyTests
         }
 
         policy.Maintain();
-        await Assert.That(Math.Abs(policy.StepSize)).IsGreaterThanOrEqualTo(1);
-        await Assert.That(policy.WindowMaximum).IsBetween(1, policy.Maximum);
-        await Assert.That(policy.ProtectedMaximum).IsLessThanOrEqualTo(policy.MainMaximum);
+        Math.Abs(policy.StepSize).Should().BeGreaterThanOrEqualTo(1);
+        policy.WindowMaximum.Should().BeInRange(1, policy.Maximum);
+        policy.ProtectedMaximum.Should().BeLessThanOrEqualTo(policy.MainMaximum);
     }
 
     [Test]
-    public async Task AdaptiveWindowGrowsThenShrinksAcrossSamples()
+    public void AdaptiveWindowGrowsThenShrinksAcrossSamples()
     {
         WindowTinyLfuPolicy<int> policy = new(256, seed: 59);
         List<PolicyNode<int>> nodes = AddNodes(policy, 256);
@@ -295,18 +277,18 @@ public sealed class PolicyTests
 
         policy.Maintain(10_000);
         long grownWindow = policy.WindowMaximum;
-        await Assert.That(grownWindow).IsGreaterThan(initialWindow);
+        grownWindow.Should().BeGreaterThan(initialWindow);
         for (long i = 0; i < sampleSize; i++)
         {
             policy.RecordMiss(Hash((int)(i + 10_000)));
         }
 
         policy.Maintain(10_000);
-        await Assert.That(policy.WindowMaximum).IsLessThan(grownWindow);
+        policy.WindowMaximum.Should().BeLessThan(grownWindow);
     }
 
     [Test]
-    public async Task PendingAdjustmentSurvivesBudgetExhaustionAndDelaysNextSample()
+    public void PendingAdjustmentSurvivesBudgetExhaustionAndDelaysNextSample()
     {
         WindowTinyLfuPolicy<int> policy = new(256, seed: 61);
         List<PolicyNode<int>> nodes = AddNodes(policy, 256);
@@ -317,21 +299,21 @@ public sealed class PolicyTests
         }
 
         policy.Maintain(1);
-        await Assert.That(policy.Adjustment).IsNotEqualTo(0);
+        policy.Adjustment.Should().NotBe(0);
         for (long i = 0; i < sampleSize; i++)
         {
             policy.RecordMiss(Hash((int)(i + 20_000)));
         }
 
         policy.Maintain(1);
-        await Assert.That(policy.MissesInSample).IsEqualTo(sampleSize);
-        await Assert.That(policy.Adjustment).IsNotEqualTo(0);
+        policy.MissesInSample.Should().Be(sampleSize);
+        policy.Adjustment.Should().NotBe(0);
         policy.Maintain(10_000);
-        await Assert.That(policy.Adjustment).IsEqualTo(0);
+        policy.Adjustment.Should().Be(0);
     }
 
     [Test]
-    public async Task RepeatedSmallMaintenanceBudgetMakesWindowTransferProgress()
+    public void RepeatedSmallMaintenanceBudgetMakesWindowTransferProgress()
     {
         WindowTinyLfuPolicy<int> policy = new(100, seed: 89);
         List<PolicyNode<int>> nodes = AddNodes(policy, 100);
@@ -346,12 +328,12 @@ public sealed class PolicyTests
             policy.Maintain(1);
         }
 
-        await Assert.That(policy.WindowMaximum).IsGreaterThan(initialWindow);
-        await Assert.That(policy.Adjustment).IsEqualTo(0);
+        policy.WindowMaximum.Should().BeGreaterThan(initialWindow);
+        policy.Adjustment.Should().Be(0);
     }
 
     [Test]
-    public async Task SetMaximumResetsSketchSamplingWithoutDiscardingFrequency()
+    public void SetMaximumResetsSketchSamplingWithoutDiscardingFrequency()
     {
         WindowTinyLfuPolicy<int> policy = new(256, seed: 67);
         uint hash = Hash(71);
@@ -361,14 +343,14 @@ public sealed class PolicyTests
         }
 
         int frequency = policy.Frequency(hash);
-        await Assert.That(policy.SketchSampleCount).IsGreaterThan(0);
+        policy.SketchSampleCount.Should().BeGreaterThan(0);
         policy.SetMaximum(128);
-        await Assert.That(policy.SketchSampleCount).IsEqualTo(0);
-        await Assert.That(policy.Frequency(hash)).IsEqualTo(frequency);
+        policy.SketchSampleCount.Should().Be(0);
+        policy.Frequency(hash).Should().Be(frequency);
     }
 
     [Test]
-    public async Task FrequencySketchIsSaturatingAndSeedDeterministic()
+    public void FrequencySketchIsSaturatingAndSeedDeterministic()
     {
         FrequencySketch first = new(43);
         FrequencySketch second = new(43);
@@ -380,13 +362,13 @@ public sealed class PolicyTests
             second.Increment(Hash(123));
         }
 
-        await Assert.That(first.Frequency(Hash(123))).IsEqualTo(15);
-        await Assert.That(first.Frequency(Hash(123))).IsEqualTo(second.Frequency(Hash(123)));
-        await Assert.That(first.Capacity).IsEqualTo(1_024);
+        first.Frequency(Hash(123)).Should().Be(15);
+        first.Frequency(Hash(123)).Should().Be(second.Frequency(Hash(123)));
+        first.Capacity.Should().Be(1_024);
     }
 
     [Test]
-    public async Task SetMaximumCountBoundsZeroWeightResidentNodes()
+    public void SetMaximumCountBoundsZeroWeightResidentNodes()
     {
         WindowTinyLfuPolicy<int> policy = new(10, seed: 47);
         for (int i = 0; i < 5; i++)
@@ -395,13 +377,13 @@ public sealed class PolicyTests
         }
 
         IReadOnlyList<PolicyNode<int>> evicted = policy.SetMaximumCount(2);
-        await Assert.That(evicted.Count).IsEqualTo(3);
-        await Assert.That(policy.ResidentCount).IsEqualTo(2);
-        await Assert.That(policy.WeightedSize).IsEqualTo(0);
+        evicted.Should().HaveCount(3);
+        policy.ResidentCount.Should().Be(2);
+        policy.WeightedSize.Should().Be(0);
     }
 
     [Test]
-    public async Task FixedSeedKeepsWeightedRuntimeMutationsDeterministic()
+    public void FixedSeedKeepsWeightedRuntimeMutationsDeterministic()
     {
         WindowTinyLfuPolicy<int> first = new(8, seed: 71, maximumCount: 8);
         WindowTinyLfuPolicy<int> second = new(8, seed: 71, maximumCount: 8);
@@ -425,19 +407,19 @@ public sealed class PolicyTests
                 continue;
             }
 
-            Assert.NotNull(secondLive[i]);
+            secondLive[i].Should().NotBeNull();
             first.RecordAccess(firstAccess);
             second.RecordAccess(secondLive[i]);
         }
 
-        await Assert.That(first.WeightedSize).IsEqualTo(second.WeightedSize);
-        await Assert.That(first.ResidentCount).IsEqualTo(second.ResidentCount);
-        await Assert.That(first.WindowMaximum).IsEqualTo(second.WindowMaximum);
-        await Assert.That(firstLive.Keys).IsEquivalentTo(secondLive.Keys);
+        first.WeightedSize.Should().Be(second.WeightedSize);
+        first.ResidentCount.Should().Be(second.ResidentCount);
+        first.WindowMaximum.Should().Be(second.WindowMaximum);
+        firstLive.Keys.Should().BeEquivalentTo(secondLive.Keys);
     }
 
     [Test]
-    public async Task RuntimeMutationsPreserveAllKnownIntrusiveLinks()
+    public void RuntimeMutationsPreserveAllKnownIntrusiveLinks()
     {
         WindowTinyLfuPolicy<int> policy = new(16, seed: 73, maximumCount: 16);
         List<PolicyNode<int>> nodes = AddNodes(policy, 8);
@@ -458,77 +440,43 @@ public sealed class PolicyTests
             {
                 aliveCount++;
                 weightedSize += node.Weight;
-                await Assert.That(node.Queue).IsNotEqualTo(PolicyQueue.None);
+                node.Queue.Should().NotBe(PolicyQueue.None);
                 AssertLinks(node);
             }
             else
             {
-                await Assert.That(node.Queue).IsEqualTo(PolicyQueue.None);
-                await Assert.That((node.Previous) is null).IsTrue();
-                await Assert.That((node.Next) is null).IsTrue();
-                await Assert.That((node.PositivePrevious) is null).IsTrue();
-                await Assert.That((node.PositiveNext) is null).IsTrue();
-                await Assert.That((node.EligiblePrevious) is null).IsTrue();
-                await Assert.That((node.EligibleNext) is null).IsTrue();
-                await Assert.That((node.EligiblePositivePrevious) is null).IsTrue();
-                await Assert.That((node.EligiblePositiveNext) is null).IsTrue();
-                await Assert.That((node.CandidatePrevious) is null).IsTrue();
-                await Assert.That((node.CandidateNext) is null).IsTrue();
+                node.Queue.Should().Be(PolicyQueue.None);
+                node.Previous.Should().BeNull();
+                node.Next.Should().BeNull();
+                node.PositivePrevious.Should().BeNull();
+                node.PositiveNext.Should().BeNull();
+                node.EligiblePrevious.Should().BeNull();
+                node.EligibleNext.Should().BeNull();
+                node.EligiblePositivePrevious.Should().BeNull();
+                node.EligiblePositiveNext.Should().BeNull();
+                node.CandidatePrevious.Should().BeNull();
+                node.CandidateNext.Should().BeNull();
             }
         }
 
         int externalCount = added.IsAlive ? 1 : 0;
         long externalWeight = added.IsAlive ? added.Weight : 0;
-        await Assert.That(aliveCount).IsEqualTo(policy.ResidentCount - externalCount);
-        await Assert.That(weightedSize).IsEqualTo(policy.WeightedSize - externalWeight);
+        aliveCount.Should().Be(policy.ResidentCount - externalCount);
+        weightedSize.Should().Be(policy.WeightedSize - externalWeight);
     }
 
     private static void AssertLinks(PolicyNode<int> node)
     {
-        if (node.Previous is { } adjacentPrevious && !ReferenceEquals(adjacentPrevious.Next, node))
-            Assert.Fail("Broken reciprocal policy link.");
-        if (node.Next is { } adjacentNext && !ReferenceEquals(adjacentNext.Previous, node))
-            Assert.Fail("Broken reciprocal policy link.");
-        if (
-            node.PositivePrevious is { } adjacentPositivePrevious
-            && !ReferenceEquals(adjacentPositivePrevious.PositiveNext, node)
-        )
-            Assert.Fail("Broken reciprocal policy link.");
-        if (
-            node.PositiveNext is { } adjacentPositiveNext
-            && !ReferenceEquals(adjacentPositiveNext.PositivePrevious, node)
-        )
-            Assert.Fail("Broken reciprocal policy link.");
-        if (
-            node.EligiblePrevious is { } adjacentEligiblePrevious
-            && !ReferenceEquals(adjacentEligiblePrevious.EligibleNext, node)
-        )
-            Assert.Fail("Broken reciprocal policy link.");
-        if (
-            node.EligibleNext is { } adjacentEligibleNext
-            && !ReferenceEquals(adjacentEligibleNext.EligiblePrevious, node)
-        )
-            Assert.Fail("Broken reciprocal policy link.");
-        if (
-            node.EligiblePositivePrevious is { } adjacentEligiblePositivePrevious
-            && !ReferenceEquals(adjacentEligiblePositivePrevious.EligiblePositiveNext, node)
-        )
-            Assert.Fail("Broken reciprocal policy link.");
-        if (
-            node.EligiblePositiveNext is { } adjacentEligiblePositiveNext
-            && !ReferenceEquals(adjacentEligiblePositiveNext.EligiblePositivePrevious, node)
-        )
-            Assert.Fail("Broken reciprocal policy link.");
-        if (
-            node.CandidatePrevious is { } adjacentCandidatePrevious
-            && !ReferenceEquals(adjacentCandidatePrevious.CandidateNext, node)
-        )
-            Assert.Fail("Broken reciprocal policy link.");
-        if (
-            node.CandidateNext is { } adjacentCandidateNext
-            && !ReferenceEquals(adjacentCandidateNext.CandidatePrevious, node)
-        )
-            Assert.Fail("Broken reciprocal policy link.");
+        node.Previous?.Next.Should().BeSameAs(node);
+        node.Next?.Previous.Should().BeSameAs(node);
+        node.PositivePrevious?.PositiveNext.Should().BeSameAs(node);
+        node.PositiveNext?.PositivePrevious.Should().BeSameAs(node);
+        node.EligiblePrevious?.EligibleNext.Should().BeSameAs(node);
+        node.EligibleNext?.EligiblePrevious.Should().BeSameAs(node);
+        node.EligiblePositivePrevious?.EligiblePositiveNext.Should().BeSameAs(node);
+        node.EligiblePositiveNext?.EligiblePositivePrevious.Should().BeSameAs(node);
+        node.CandidatePrevious?.CandidateNext.Should().BeSameAs(node);
+        node.CandidateNext?.CandidatePrevious.Should().BeSameAs(node);
     }
 
     private static List<PolicyNode<int>> AddNodes(WindowTinyLfuPolicy<int> policy, int count)

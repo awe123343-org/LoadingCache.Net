@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using FluentAssertions;
 
 namespace LoadingCache.Tests;
 
@@ -26,11 +27,9 @@ public sealed class AdversarialRegressionTests
                 try
                 {
                     await AwaitWithTestTimeout(cache.DisposeAsync().AsTask(), cancellationToken);
-                    await Assert
-                        .That(
-                            ((Func<Task>)(() => AwaitWithTestTimeout(pending, cancellationToken)))
-                        )
-                        .ThrowsExactly<ObjectDisposedException>();
+                    await ((Func<Task>)(() => AwaitWithTestTimeout(pending, cancellationToken)))
+                        .Should()
+                        .ThrowExactlyAsync<ObjectDisposedException>();
                 }
                 finally
                 {
@@ -59,7 +58,7 @@ public sealed class AdversarialRegressionTests
             }
         }
 
-        await Assert.That(completion.TimedOut).IsFalse();
+        completion.TimedOut.Should().BeFalse();
     }
 
     [Test]
@@ -67,16 +66,32 @@ public sealed class AdversarialRegressionTests
     {
         var cache = Create<int, int>((_, _) => Task.FromResult(1));
         await cache.DisposeAsync();
-        await Assert
-            .That(() => Get(cache, 1, cancellationToken).AsTask())
-            .ThrowsExactly<ObjectDisposedException>();
-        await Assert.That(() => cache.TryGet(1, out _)).ThrowsExactly<ObjectDisposedException>();
-        await Assert.That(() => cache.Set(1, 1)).ThrowsExactly<ObjectDisposedException>();
-        await Assert.That(() => cache.Invalidate(1)).ThrowsExactly<ObjectDisposedException>();
-        await Assert.That(cache.Clear).ThrowsExactly<ObjectDisposedException>();
-        await Assert.That(cache.CleanUp).ThrowsExactly<ObjectDisposedException>();
-        await Assert.That(cache.GetStatistics).ThrowsExactly<ObjectDisposedException>();
-        await Assert.That(() => _ = cache.EstimatedCount).ThrowsExactly<ObjectDisposedException>();
+        await FluentActions
+            .Awaiting(() => Get(cache, 1, cancellationToken).AsTask())
+            .Should()
+            .ThrowExactlyAsync<ObjectDisposedException>();
+        FluentActions
+            .Invoking(() => cache.TryGet(1, out _))
+            .Should()
+            .ThrowExactly<ObjectDisposedException>();
+        FluentActions
+            .Invoking(() => cache.Set(1, 1))
+            .Should()
+            .ThrowExactly<ObjectDisposedException>();
+        FluentActions
+            .Invoking(() => cache.Invalidate(1))
+            .Should()
+            .ThrowExactly<ObjectDisposedException>();
+        FluentActions.Invoking(cache.Clear).Should().ThrowExactly<ObjectDisposedException>();
+        FluentActions.Invoking(cache.CleanUp).Should().ThrowExactly<ObjectDisposedException>();
+        FluentActions
+            .Invoking(cache.GetStatistics)
+            .Should()
+            .ThrowExactly<ObjectDisposedException>();
+        FluentActions
+            .Invoking(() => _ = cache.EstimatedCount)
+            .Should()
+            .ThrowExactly<ObjectDisposedException>();
     }
 
     [Test]
@@ -130,17 +145,17 @@ public sealed class AdversarialRegressionTests
             int[] values = await AwaitWithTestTimeout(Task.WhenAll(waiters), cancellationToken);
             foreach (int value in values)
             {
-                await Assert.That(value).IsEqualTo(130);
+                value.Should().Be(130);
             }
 
             var statistics = cache.GetStatistics();
-            await Assert.That(statistics.Misses).IsEqualTo(callerCount);
-            await Assert.That(statistics.LoadsStarted).IsEqualTo(1);
-            await Assert.That(statistics.CoalescedWaiters).IsEqualTo(callerCount - 1);
-            await Assert.That(statistics.LoadSuccesses).IsEqualTo(1);
-            await Assert.That(statistics.Hits).IsEqualTo(0);
-            await Assert.That(statistics.InFlightLoads).IsEqualTo(0);
-            await Assert.That(calls).IsEqualTo(1);
+            statistics.Misses.Should().Be(callerCount);
+            statistics.LoadsStarted.Should().Be(1);
+            statistics.CoalescedWaiters.Should().Be(callerCount - 1);
+            statistics.LoadSuccesses.Should().Be(1);
+            statistics.Hits.Should().Be(0);
+            statistics.InFlightLoads.Should().Be(0);
+            calls.Should().Be(1);
         }
         finally
         {
@@ -178,14 +193,12 @@ public sealed class AdversarialRegressionTests
         {
             await AwaitWithTestTimeout(loaderEntered.Task, cancellationToken);
             var running = cache.GetStatistics();
-            await Assert.That(running.Hits).IsEqualTo(0);
-            await Assert.That(running.Misses).IsEqualTo(0);
-            await Assert.That(running.LoadsStarted).IsEqualTo(0);
-            await Assert.That(running.InFlightLoads).IsEqualTo(1);
+            running.Hits.Should().Be(0);
+            running.Misses.Should().Be(0);
+            running.LoadsStarted.Should().Be(0);
+            running.InFlightLoads.Should().Be(1);
             releaseLoader.TrySetResult(true);
-            await Assert
-                .That((await AwaitWithTestTimeout(pending, cancellationToken)))
-                .IsEqualTo(131);
+            (await AwaitWithTestTimeout(pending, cancellationToken)).Should().Be(131);
         }
         finally
         {
@@ -194,10 +207,10 @@ public sealed class AdversarialRegressionTests
         }
 
         var idle = cache.GetStatistics();
-        await Assert.That(idle.Hits).IsEqualTo(0);
-        await Assert.That(idle.Misses).IsEqualTo(0);
-        await Assert.That(idle.LoadsStarted).IsEqualTo(0);
-        await Assert.That(idle.InFlightLoads).IsEqualTo(0);
+        idle.Hits.Should().Be(0);
+        idle.Misses.Should().Be(0);
+        idle.LoadsStarted.Should().Be(0);
+        idle.InFlightLoads.Should().Be(0);
     }
 
     [Test]
@@ -255,12 +268,12 @@ public sealed class AdversarialRegressionTests
             var exceptions = await AwaitWithTestTimeout(Task.WhenAll(waiters), cancellationToken);
             foreach (var exception in exceptions)
             {
-                await Assert.That<object>(exception!).IsTypeOf<InvalidOperationException>();
+                exception.Should().BeOfType<InvalidOperationException>();
             }
 
-            await Assert.That(calls).IsEqualTo(1);
-            await Assert.That((await Get(cache, 1, cancellationToken))).IsEqualTo(132);
-            await Assert.That(calls).IsEqualTo(2);
+            calls.Should().Be(1);
+            (await Get(cache, 1, cancellationToken)).Should().Be(132);
+            calls.Should().Be(2);
         }
         finally
         {
@@ -289,15 +302,15 @@ public sealed class AdversarialRegressionTests
         );
         await Get(cache, 1, cancellationToken);
         clock.Advance(2);
-        await Assert.That(cache.TryGet(1, out _)).IsTrue();
+        cache.TryGet(1, out _).Should().BeTrue();
         clock.Advance(1);
-        await Assert.That(cache.TryGet(1, out _)).IsTrue();
+        cache.TryGet(1, out _).Should().BeTrue();
         clock.Advance(1);
-        await Assert.That(cache.TryGet(1, out _)).IsTrue();
+        cache.TryGet(1, out _).Should().BeTrue();
         clock.Advance(1);
-        await Assert.That(cache.TryGet(1, out _)).IsTrue();
+        cache.TryGet(1, out _).Should().BeTrue();
         clock.Advance(3);
-        await Assert.That(cache.TryGet(1, out _)).IsFalse();
+        cache.TryGet(1, out _).Should().BeFalse();
     }
 
     [Test]
@@ -309,15 +322,16 @@ public sealed class AdversarialRegressionTests
             comparer: StringComparer.OrdinalIgnoreCase
         );
         loader.Cache = cache;
-        await Assert
-            .That(() =>
+        await cache
+            .Awaiting(current =>
                 AwaitWithTestTimeout(
-                    Get(cache, "KEY", cancellationToken).AsTask(),
+                    Get(current, "KEY", cancellationToken).AsTask(),
                     cancellationToken
                 )
             )
-            .ThrowsExactly<LoadingCacheReentrancyException>();
-        await Assert.That(loader.Calls).IsEqualTo(1);
+            .Should()
+            .ThrowExactlyAsync<LoadingCacheReentrancyException>();
+        loader.Calls.Should().Be(1);
     }
 
     [Test]
@@ -328,8 +342,8 @@ public sealed class AdversarialRegressionTests
         var loader = new DependentLoader();
         await using var cache = Create<string, int>(loader.LoadDifferentKeyAsync);
         loader.Cache = cache;
-        await Assert.That((await Get(cache, "K", cancellationToken))).IsEqualTo(141);
-        await Assert.That((await Get(cache, "J", cancellationToken))).IsEqualTo(140);
+        (await Get(cache, "K", cancellationToken)).Should().Be(141);
+        (await Get(cache, "J", cancellationToken)).Should().Be(140);
     }
 
     private sealed class DependentLoader
@@ -377,29 +391,28 @@ public sealed class AdversarialRegressionTests
             },
             Options(maxConcurrentLoads: 1, testHooks: hooks)
         );
-        Task<int> first = Task.Run(() => Get(cache, 1, cancellationToken).AsTask());
+        Task<int> first = Task.Run(
+            () => Get(cache, 1, cancellationToken).AsTask(),
+            cancellationToken
+        );
         try
         {
             await AwaitWithTestTimeout(completion.Entered, cancellationToken);
-            await Assert
-                .That(
-                    (
-                        (Func<Task>)(
-                            () =>
-                                AwaitWithTestTimeout(
-                                    Get(cache, 2, cancellationToken).AsTask(),
-                                    cancellationToken
-                                )
+            await (
+                (Func<Task>)(
+                    () =>
+                        AwaitWithTestTimeout(
+                            Get(cache, 2, cancellationToken).AsTask(),
+                            cancellationToken
                         )
-                    )
                 )
-                .ThrowsExactly<CacheLoadRejectedException>();
+            )
+                .Should()
+                .ThrowExactlyAsync<CacheLoadRejectedException>();
             completion.Release();
-            await Assert
-                .That((await AwaitWithTestTimeout(first, cancellationToken)))
-                .IsEqualTo(150);
-            await Assert.That((await Get(cache, 2, cancellationToken))).IsEqualTo(151);
-            await Assert.That(completion.TimedOut).IsFalse();
+            (await AwaitWithTestTimeout(first, cancellationToken)).Should().Be(150);
+            (await Get(cache, 2, cancellationToken)).Should().Be(151);
+            completion.TimedOut.Should().BeFalse();
         }
         finally
         {
@@ -435,10 +448,9 @@ public sealed class AdversarialRegressionTests
         try
         {
             var weakPayload = await StartLoadWithAmbientPayloadAsync(cache);
-            await Assert
-                .That(Collects(weakPayload))
-                .IsTrue()
-                .Because("The cache-owned observer retained the caller ExecutionContext payload.");
+            Collects(weakPayload)
+                .Should()
+                .BeTrue("The cache-owned observer retained the caller ExecutionContext payload.");
         }
         finally
         {
@@ -556,9 +568,10 @@ public sealed class AdversarialRegressionTests
 
         var weakPayload = new WeakReference(payload);
         await cancellation.CancelAsync();
-        await Assert
-            .That(() => waiter.WaitAsync(TestTimeout, CancellationToken.None))
-            .Throws<OperationCanceledException>();
+        await FluentActions
+            .Awaiting(() => waiter.WaitAsync(TestTimeout, CancellationToken.None))
+            .Should()
+            .ThrowAsync<OperationCanceledException>();
         // Return only the weak reference after observing the canceled waiter.
         // The GC assertion must not depend on this helper's strong local roots.
         return weakPayload;

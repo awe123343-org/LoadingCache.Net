@@ -1,3 +1,4 @@
+using FluentAssertions;
 using LoadingCache.Maintenance;
 
 namespace LoadingCache.Tests;
@@ -8,7 +9,7 @@ public sealed class EngineMaintenanceTests
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
 
     [Test]
-    public async Task ReadMaintenanceIsDeferredUntilTheStripeIsFull()
+    public void ReadMaintenanceIsDeferredUntilTheStripeIsFull()
     {
         ManualMaintenanceScheduler scheduler = new();
         CacheEngine<int, string> engine = CreateEngine(
@@ -18,26 +19,24 @@ public sealed class EngineMaintenanceTests
         );
         using var cache = new Cache<int, string>(engine);
         cache.Put(1, "ready");
-        await Assert.That(scheduler.Pending).IsEqualTo(1);
+        scheduler.Pending.Should().Be(1);
         scheduler.RunNext();
-        await Assert.That(scheduler.Pending).IsEqualTo(0);
-        await Assert.That(cache.TryGet(1, out string? first)).IsTrue();
-        await Assert.That(first).IsEqualTo("ready");
-        await Assert.That(engine.GetPolicyReadBufferStatistics().Queued).IsEqualTo(1);
-        await Assert.That(scheduler.Pending).IsEqualTo(0);
-        await Assert.That(cache.TryGet(1, out string? second)).IsTrue();
-        await Assert.That(second).IsEqualTo("ready");
-        await Assert.That(engine.GetPolicyReadBufferStatistics().DroppedFull).IsEqualTo(1);
-        await Assert.That(scheduler.Pending).IsEqualTo(1);
+        scheduler.Pending.Should().Be(0);
+        cache.TryGet(1, out string? first).Should().BeTrue();
+        first.Should().Be("ready");
+        engine.GetPolicyReadBufferStatistics().Queued.Should().Be(1);
+        scheduler.Pending.Should().Be(0);
+        cache.TryGet(1, out string? second).Should().BeTrue();
+        second.Should().Be("ready");
+        engine.GetPolicyReadBufferStatistics().DroppedFull.Should().Be(1);
+        scheduler.Pending.Should().Be(1);
         scheduler.RunNext();
-        await Assert.That(engine.GetPolicyReadBufferStatistics().Queued).IsEqualTo(0);
-        await Assert
-            .That(engine.GetMaintenanceStatistics().State)
-            .IsEqualTo(MaintenanceCoordinatorState.Idle);
+        engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
+        engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
     }
 
     [Test]
-    public async Task DefaultReadBufferBatches64HitsBeforeSchedulingMaintenance()
+    public void DefaultReadBufferBatches64HitsBeforeSchedulingMaintenance()
     {
         ManualMaintenanceScheduler scheduler = new();
         CacheEngine<int, string> engine = new(
@@ -53,35 +52,33 @@ public sealed class EngineMaintenanceTests
         // Activate read recording without overriding either production buffer default.
         cache.Policy.Eviction!.SetMaximum(4);
         cache.Put(1, "ready");
-        await Assert.That(scheduler.Pending).IsEqualTo(1);
+        scheduler.Pending.Should().Be(1);
         scheduler.RunNext();
-        await Assert.That(scheduler.Pending).IsEqualTo(0);
+        scheduler.Pending.Should().Be(0);
         int writeScheduleCalls = scheduler.ScheduleCalls;
         for (int index = 0; index < 64; index++)
         {
-            await Assert.That(cache.TryGet(1, out string? value)).IsTrue();
-            await Assert.That(value).IsEqualTo("ready");
-            await Assert.That(scheduler.Pending).IsEqualTo(0);
+            cache.TryGet(1, out string? value).Should().BeTrue();
+            value.Should().Be("ready");
+            scheduler.Pending.Should().Be(0);
         }
 
         ReadBufferStatistics full = engine.GetPolicyReadBufferStatistics();
-        await Assert.That(full.Queued).IsEqualTo(64);
-        await Assert.That(full.Enqueued).IsEqualTo(64);
-        await Assert.That(full.DroppedFull).IsEqualTo(0);
-        await Assert.That(scheduler.ScheduleCalls).IsEqualTo(writeScheduleCalls);
-        await Assert.That(cache.TryGet(1, out string? last)).IsTrue();
-        await Assert.That(last).IsEqualTo("ready");
-        await Assert.That(engine.GetPolicyReadBufferStatistics().DroppedFull).IsEqualTo(1);
-        await Assert.That(scheduler.Pending).IsEqualTo(1);
-        await Assert.That(scheduler.ScheduleCalls).IsEqualTo(writeScheduleCalls + 1);
+        full.Queued.Should().Be(64);
+        full.Enqueued.Should().Be(64);
+        full.DroppedFull.Should().Be(0);
+        scheduler.ScheduleCalls.Should().Be(writeScheduleCalls);
+        cache.TryGet(1, out string? last).Should().BeTrue();
+        last.Should().Be("ready");
+        engine.GetPolicyReadBufferStatistics().DroppedFull.Should().Be(1);
+        scheduler.Pending.Should().Be(1);
+        scheduler.ScheduleCalls.Should().Be(writeScheduleCalls + 1);
         scheduler.RunNext();
         ReadBufferStatistics drained = engine.GetPolicyReadBufferStatistics();
-        await Assert.That(drained.Queued).IsEqualTo(0);
-        await Assert.That(drained.Dequeued).IsEqualTo(64);
-        await Assert.That(scheduler.Pending).IsEqualTo(0);
-        await Assert
-            .That(engine.GetMaintenanceStatistics().State)
-            .IsEqualTo(MaintenanceCoordinatorState.Idle);
+        drained.Queued.Should().Be(0);
+        drained.Dequeued.Should().Be(64);
+        scheduler.Pending.Should().Be(0);
+        engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
         engine.AssertInvariants();
     }
 
@@ -99,9 +96,9 @@ public sealed class EngineMaintenanceTests
         );
         using var cache = new Cache<int, string>(engine);
         cache.Put(1, "ready");
-        await Assert.That(cache.TryGet(1, out string? first)).IsTrue();
-        await Assert.That(first).IsEqualTo("ready");
-        await Assert.That(scheduler.Pending).IsEqualTo(1);
+        cache.TryGet(1, out string? first).Should().BeTrue();
+        first.Should().Be("ready");
+        scheduler.Pending.Should().Be(1);
         Task worker = Task.Run(scheduler.RunNext);
         Task<bool>? hit = null;
         try
@@ -118,7 +115,7 @@ public sealed class EngineMaintenanceTests
                 TaskCreationOptions.DenyChildAttach,
                 TaskScheduler.Default
             );
-            await Assert.That((await hit.WaitAsync(Watchdog, CancellationToken.None))).IsTrue();
+            (await hit.WaitAsync(Watchdog, CancellationToken.None)).Should().BeTrue();
         }
         finally
         {
@@ -127,14 +124,12 @@ public sealed class EngineMaintenanceTests
                 .WaitAsync(Watchdog, CancellationToken.None);
         }
 
-        await Assert.That(hook.TimedOut).IsFalse();
-        await Assert
-            .That(engine.GetMaintenanceStatistics().State)
-            .IsEqualTo(MaintenanceCoordinatorState.Idle);
+        hook.TimedOut.Should().BeFalse();
+        engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
     }
 
     [Test]
-    public async Task ReadBufferIsBoundedAndDropsOnlyBestEffortAccessEvents()
+    public void ReadBufferIsBoundedAndDropsOnlyBestEffortAccessEvents()
     {
         ManualMaintenanceScheduler scheduler = new();
         CacheEngine<int, string> engine = CreateEngine(
@@ -146,23 +141,23 @@ public sealed class EngineMaintenanceTests
         cache.Put(1, "ready");
         for (int index = 0; index < 32; index++)
         {
-            await Assert.That(cache.TryGet(1, out _)).IsTrue();
+            cache.TryGet(1, out _).Should().BeTrue();
         }
 
         ReadBufferStatistics statistics = engine.GetPolicyReadBufferStatistics();
-        await Assert.That(statistics.Queued).IsLessThanOrEqualTo(2);
-        await Assert.That(statistics.DroppedFull).IsGreaterThan(0);
-        await Assert.That(scheduler.ScheduleCalls).IsEqualTo(1);
+        statistics.Queued.Should().BeLessThanOrEqualTo(2);
+        statistics.DroppedFull.Should().BeGreaterThan(0);
+        scheduler.ScheduleCalls.Should().Be(1);
         // Reliable mapping writes do not depend on admission to the lossy read
         // transport.
         cache.Put(2, "write");
-        await Assert.That(cache.TryGet(2, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("write");
+        cache.TryGet(2, out string? value).Should().BeTrue();
+        value.Should().Be("write");
         engine.AssertInvariants();
     }
 
     [Test]
-    public async Task RejectedSchedulerUsesSynchronousFallbackForQueuedReads()
+    public void RejectedSchedulerUsesSynchronousFallbackForQueuedReads()
     {
         ManualMaintenanceScheduler scheduler = new() { Reject = true };
         CacheEngine<int, string> engine = CreateEngine(
@@ -172,18 +167,18 @@ public sealed class EngineMaintenanceTests
         );
         using var cache = new Cache<int, string>(engine);
         cache.Put(1, "ready");
-        await Assert.That(cache.TryGet(1, out _)).IsTrue();
-        await Assert.That(cache.TryGet(1, out _)).IsTrue();
+        cache.TryGet(1, out _).Should().BeTrue();
+        cache.TryGet(1, out _).Should().BeTrue();
         ReadBufferStatistics buffer = engine.GetPolicyReadBufferStatistics();
-        await Assert.That(buffer.Queued).IsEqualTo(0);
+        buffer.Queued.Should().Be(0);
         MaintenanceStatistics maintenance = engine.GetMaintenanceStatistics();
-        await Assert.That(maintenance.ScheduleRejections).IsGreaterThan(0);
-        await Assert.That(maintenance.DrainPasses).IsGreaterThan(0);
-        await Assert.That(maintenance.FallbackRequired).IsFalse();
+        maintenance.ScheduleRejections.Should().BeGreaterThan(0);
+        maintenance.DrainPasses.Should().BeGreaterThan(0);
+        maintenance.FallbackRequired.Should().BeFalse();
     }
 
     [Test]
-    public async Task FullReadStripeCanRetryAfterARejectedBudgetedFallback()
+    public void FullReadStripeCanRetryAfterARejectedBudgetedFallback()
     {
         ManualMaintenanceScheduler scheduler = new() { Reject = true };
         RearmRetryState state = new();
@@ -208,28 +203,26 @@ public sealed class EngineMaintenanceTests
             // maintenance path. The hook then keeps one event queued at every
             // pass; the rejected re-arm must stop at the coordinator budget,
             // leaving the signal clear while the stripe is still full.
-            await Assert.That(cache.TryGet(1, out _)).IsTrue();
-            await Assert.That(cache.TryGet(1, out _)).IsTrue();
-            await Assert.That(state.MaintenanceCalls).IsEqualTo(32);
-            await Assert.That(engine.GetMaintenanceStatistics().BudgetExhaustions).IsGreaterThan(0);
-            await Assert.That(engine.GetMaintenanceStatistics().FallbackRequired).IsTrue();
-            await Assert.That(engine.GetPolicyReadBufferStatistics().Queued).IsEqualTo(1);
+            cache.TryGet(1, out _).Should().BeTrue();
+            cache.TryGet(1, out _).Should().BeTrue();
+            state.MaintenanceCalls.Should().Be(32);
+            engine.GetMaintenanceStatistics().BudgetExhaustions.Should().BeGreaterThan(0);
+            engine.GetMaintenanceStatistics().FallbackRequired.Should().BeTrue();
+            engine.GetPolicyReadBufferStatistics().Queued.Should().Be(1);
             state.StopFilling();
             // The stripe is full, so this hit's event is dropped. It must still
             // observe the clear signal, request the rejected scheduler again,
             // and synchronously drain the old event.
-            await Assert.That(cache.TryGet(1, out _)).IsTrue();
-            await Assert.That(engine.GetPolicyReadBufferStatistics().Queued).IsEqualTo(0);
-            await Assert.That(engine.GetMaintenanceStatistics().FallbackRequired).IsFalse();
-            await Assert
-                .That(engine.GetMaintenanceStatistics().State)
-                .IsEqualTo(MaintenanceCoordinatorState.Idle);
-            await Assert.That(engine.GetPolicyReadBufferStatistics().DroppedFull).IsGreaterThan(0);
+            cache.TryGet(1, out _).Should().BeTrue();
+            engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
+            engine.GetMaintenanceStatistics().FallbackRequired.Should().BeFalse();
+            engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
+            engine.GetPolicyReadBufferStatistics().DroppedFull.Should().BeGreaterThan(0);
         }
     }
 
     [Test]
-    public async Task AcceptedWorkerThatCannotRearmAllowsTheNextFullHitToRetry()
+    public void AcceptedWorkerThatCannotRearmAllowsTheNextFullHitToRetry()
     {
         AcceptThenRejectMaintenanceScheduler scheduler = new();
         RearmRetryState state = new();
@@ -249,21 +242,19 @@ public sealed class EngineMaintenanceTests
         using (cache)
         {
             cache.Put(1, "ready");
-            await Assert.That(cache.TryGet(1, out _)).IsTrue();
-            await Assert.That(scheduler.Pending).IsEqualTo(1);
+            cache.TryGet(1, out _).Should().BeTrue();
+            scheduler.Pending.Should().Be(1);
             scheduler.RunNext();
-            await Assert.That(state.MaintenanceCalls).IsEqualTo(1);
-            await Assert.That(scheduler.ScheduleCalls).IsEqualTo(2);
-            await Assert.That(engine.GetMaintenanceStatistics().FallbackRequired).IsTrue();
-            await Assert.That(engine.GetPolicyReadBufferStatistics().Queued).IsEqualTo(1);
+            state.MaintenanceCalls.Should().Be(1);
+            scheduler.ScheduleCalls.Should().Be(2);
+            engine.GetMaintenanceStatistics().FallbackRequired.Should().BeTrue();
+            engine.GetPolicyReadBufferStatistics().Queued.Should().Be(1);
             state.StopFilling();
-            await Assert.That(cache.TryGet(1, out _)).IsTrue();
+            cache.TryGet(1, out _).Should().BeTrue();
             // The first worker's rejected re-arm left the read signal set. A
             // subsequent full stripe must claim a fresh maintenance request.
-            await Assert.That(engine.GetPolicyReadBufferStatistics().Queued).IsEqualTo(0);
-            await Assert
-                .That(engine.GetMaintenanceStatistics().State)
-                .IsEqualTo(MaintenanceCoordinatorState.Idle);
+            engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
+            engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
         }
     }
 
@@ -281,14 +272,14 @@ public sealed class EngineMaintenanceTests
         );
         using var cache = new Cache<int, string>(engine);
         cache.Put(1, "ready");
-        await Assert.That(cache.TryGet(1, out _)).IsTrue();
+        cache.TryGet(1, out _).Should().BeTrue();
         Task worker = Task.Run(scheduler.RunNext);
         try
         {
             await hook.Entered.WaitAsync(Watchdog, CancellationToken.None);
             for (int index = 0; index < 300; index++)
             {
-                await Assert.That(cache.TryGet(1, out _)).IsTrue();
+                cache.TryGet(1, out _).Should().BeTrue();
             }
         }
         finally
@@ -297,12 +288,10 @@ public sealed class EngineMaintenanceTests
             await worker.WaitAsync(Watchdog, CancellationToken.None);
         }
 
-        await Assert.That(hook.TimedOut).IsFalse();
-        await Assert.That(engine.GetPolicyReadBufferStatistics().Queued).IsEqualTo(0);
-        await Assert.That(engine.GetMaintenanceStatistics().DrainPasses).IsGreaterThan(1);
-        await Assert
-            .That(engine.GetMaintenanceStatistics().State)
-            .IsEqualTo(MaintenanceCoordinatorState.Idle);
+        hook.TimedOut.Should().BeFalse();
+        engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
+        engine.GetMaintenanceStatistics().DrainPasses.Should().BeGreaterThan(1);
+        engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
     }
 
     [Test]
@@ -319,12 +308,12 @@ public sealed class EngineMaintenanceTests
         );
         using var cache = new Cache<int, string>(engine);
         cache.Put(1, "ready");
-        await Assert.That(cache.TryGet(1, out _)).IsTrue();
+        cache.TryGet(1, out _).Should().BeTrue();
         Task worker = Task.Run(scheduler.RunNext);
         try
         {
             await hook.Entered.WaitAsync(Watchdog, CancellationToken.None);
-            await Assert.That(cache.TryGet(1, out _)).IsTrue();
+            cache.TryGet(1, out _).Should().BeTrue();
         }
         finally
         {
@@ -332,15 +321,13 @@ public sealed class EngineMaintenanceTests
             await worker.WaitAsync(Watchdog, CancellationToken.None);
         }
 
-        await Assert.That(hook.TimedOut).IsFalse();
-        await Assert.That(engine.GetPolicyReadBufferStatistics().Queued).IsEqualTo(0);
-        await Assert
-            .That(engine.GetMaintenanceStatistics().State)
-            .IsEqualTo(MaintenanceCoordinatorState.Idle);
+        hook.TimedOut.Should().BeFalse();
+        engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
+        engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
     }
 
     [Test]
-    public async Task ExplicitCleanupRejectionAllowsAFullReadToRecoverAfterSchedulingResumes()
+    public void ExplicitCleanupRejectionAllowsAFullReadToRecoverAfterSchedulingResumes()
     {
         ManualMaintenanceScheduler scheduler = new();
         CacheEngine<int, string> engine = CreateEngine(
@@ -354,58 +341,58 @@ public sealed class EngineMaintenanceTests
         scheduler.RunNext();
         for (int index = 0; index < 300; index++)
         {
-            await Assert.That(cache.TryGet(1, out _)).IsTrue();
+            cache.TryGet(1, out _).Should().BeTrue();
         }
 
         scheduler.Reject = true;
         cache.CleanUp();
-        await Assert.That(engine.GetPolicyReadBufferStatistics().Queued).IsEqualTo(44);
-        await Assert.That(engine.GetMaintenanceStatistics().FallbackRequired).IsTrue();
-        await Assert.That(scheduler.Pending).IsEqualTo(0);
+        engine.GetPolicyReadBufferStatistics().Queued.Should().Be(44);
+        engine.GetMaintenanceStatistics().FallbackRequired.Should().BeTrue();
+        scheduler.Pending.Should().Be(0);
         scheduler.Reject = false;
         for (int index = 44; index < 512; index++)
         {
-            await Assert.That(cache.TryGet(1, out _)).IsTrue();
+            cache.TryGet(1, out _).Should().BeTrue();
         }
 
-        await Assert.That(cache.TryGet(1, out _)).IsTrue();
-        await Assert.That(scheduler.Pending).IsEqualTo(1);
+        cache.TryGet(1, out _).Should().BeTrue();
+        scheduler.Pending.Should().Be(1);
         scheduler.RunNext();
-        await Assert.That(scheduler.Pending).IsEqualTo(1);
+        scheduler.Pending.Should().Be(1);
         scheduler.RunNext();
-        await Assert.That(engine.GetPolicyReadBufferStatistics().Queued).IsEqualTo(0);
-        await Assert.That(engine.GetPolicyReadBufferStatistics().Dequeued).IsEqualTo(768);
-        await Assert.That(engine.GetPolicyReadBufferStatistics().DroppedFull).IsEqualTo(1);
-        await Assert.That(engine.GetMaintenanceStatistics().FallbackRequired).IsFalse();
-        await Assert.That(scheduler.Pending).IsEqualTo(0);
+        engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
+        engine.GetPolicyReadBufferStatistics().Dequeued.Should().Be(768);
+        engine.GetPolicyReadBufferStatistics().DroppedFull.Should().Be(1);
+        engine.GetMaintenanceStatistics().FallbackRequired.Should().BeFalse();
+        scheduler.Pending.Should().Be(0);
         engine.AssertInvariants();
     }
 
     [Test]
-    public async Task OldReadEventsAfterClearAndSetCannotPolluteTheCurrentPolicy()
+    public void OldReadEventsAfterClearAndSetCannotPolluteTheCurrentPolicy()
     {
         ManualMaintenanceScheduler scheduler = new();
         CacheEngine<int, string> engine = CreateEngine(scheduler, readStripeCount: 1);
         using var cache = new Cache<int, string>(engine);
         cache.Put(1, "old");
-        await Assert.That(cache.TryGet(1, out _)).IsTrue();
+        cache.TryGet(1, out _).Should().BeTrue();
         cache.Clear();
         cache.Put(1, "after-clear");
         scheduler.RunNext();
-        await Assert.That(cache.Policy.Eviction!.WeightedSize).IsEqualTo(1);
-        await Assert.That(cache.TryGet(1, out string? clearValue)).IsTrue();
-        await Assert.That(clearValue).IsEqualTo("after-clear");
-        await Assert.That(cache.TryGet(1, out _)).IsTrue();
+        cache.Policy.Eviction!.WeightedSize.Should().Be(1);
+        cache.TryGet(1, out string? clearValue).Should().BeTrue();
+        clearValue.Should().Be("after-clear");
+        cache.TryGet(1, out _).Should().BeTrue();
         cache.Put(1, "after-set");
         cache.CleanUp();
-        await Assert.That(cache.Policy.Eviction.WeightedSize).IsEqualTo(1);
-        await Assert.That(cache.TryGet(1, out string? setValue)).IsTrue();
-        await Assert.That(setValue).IsEqualTo("after-set");
+        cache.Policy.Eviction.WeightedSize.Should().Be(1);
+        cache.TryGet(1, out string? setValue).Should().BeTrue();
+        setValue.Should().Be("after-set");
         engine.AssertInvariants();
     }
 
     [Test]
-    public async Task QuiescentEngineConvergesToSizeAndWeightBounds()
+    public void QuiescentEngineConvergesToSizeAndWeightBounds()
     {
         CacheEngine<int, string> sizedEngine = CreateEngine(scheduler: null, maximumSize: 2);
         using var sized = new Cache<int, string>(sizedEngine);
@@ -415,8 +402,8 @@ public sealed class EngineMaintenanceTests
         }
 
         sized.CleanUp();
-        await Assert.That(sized.EstimatedCount).IsLessThanOrEqualTo(2);
-        await Assert.That(sized.Policy.Eviction!.WeightedSize).IsLessThanOrEqualTo(2);
+        sized.EstimatedCount.Should().BeLessThanOrEqualTo(2);
+        sized.Policy.Eviction!.WeightedSize.Should().BeLessThanOrEqualTo(2);
         sizedEngine.AssertInvariants();
         CacheEngine<int, string> weightedEngine = new(
             new CacheEngineOptions<int, string>
@@ -434,8 +421,8 @@ public sealed class EngineMaintenanceTests
         }
 
         weighted.CleanUp();
-        await Assert.That(weighted.Policy.Eviction!.WeightedSize).IsLessThanOrEqualTo(5);
-        await Assert.That(weighted.EstimatedCount).IsLessThanOrEqualTo(4);
+        weighted.Policy.Eviction!.WeightedSize.Should().BeLessThanOrEqualTo(5);
+        weighted.EstimatedCount.Should().BeLessThanOrEqualTo(4);
         weightedEngine.AssertInvariants();
     }
 

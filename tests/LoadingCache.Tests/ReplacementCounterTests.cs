@@ -1,8 +1,9 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 using System.Reflection;
+using FluentAssertions;
+using FluentAssertions.Execution;
 using LoadingCache.Diagnostics;
-using TUnit.Assertions.Exceptions;
 
 namespace LoadingCache.Tests;
 
@@ -38,10 +39,10 @@ public sealed class ReplacementCounterTests
                 }
             }
         );
-        await Assert.That(cache.Statistics.ReplacedRemovals).IsEqualTo(workers * replacements);
+        cache.Statistics.ReplacedRemovals.Should().Be(workers * replacements);
         cache.Clear();
-        await Assert.That(cache.Statistics.ReplacedRemovals).IsEqualTo(workers * replacements);
-        await Assert.That(cache.Statistics.ClearedRemovals).IsEqualTo(sameKey ? 1 : workers);
+        cache.Statistics.ReplacedRemovals.Should().Be(workers * replacements);
+        cache.Statistics.ClearedRemovals.Should().Be(sameKey ? 1 : workers);
     }
 
     [Test]
@@ -49,7 +50,7 @@ public sealed class ReplacementCounterTests
     [Arguments(true, false)]
     [Arguments(false, true)]
     [Arguments(true, true)]
-    public async Task MixedResidentPhysicalMutationAndClearCountsRespectOptIn(
+    public void MixedResidentPhysicalMutationAndClearCountsRespectOptIn(
         bool statistics,
         bool metrics
     )
@@ -66,21 +67,18 @@ public sealed class ReplacementCounterTests
         );
         using var cache = new Cache<int, string>(engine);
         ExerciseMixedReplacements(cache);
-        await Assert.That(cache.Statistics.ReplacedRemovals).IsEqualTo(statistics ? 5 : 0);
-        await Assert.That(cache.Statistics.ClearedRemovals).IsEqualTo(statistics ? 2 : 0);
+        cache.Statistics.ReplacedRemovals.Should().Be(statistics ? 5 : 0);
+        cache.Statistics.ClearedRemovals.Should().Be(statistics ? 2 : 0);
         var counters = (StripedCacheCounters?)
             PrivateField(engine.GetType(), "_counters").GetValue(engine);
         if (statistics || metrics)
         {
-            Assert.NotNull(counters);
-            await Assert.That(counters.Snapshot()[CacheCounterKind.ReplacedRemovals]).IsEqualTo(5);
+            counters.Should().NotBeNull();
+            counters.Snapshot()[CacheCounterKind.ReplacedRemovals].Should().Be(5);
         }
         else
         {
-            await Assert
-                .That((counters) is null)
-                .IsTrue()
-                .Because("disabled diagnostics must not allocate a counter object");
+            counters.Should().BeNull("disabled diagnostics must not allocate a counter object");
         }
     }
 
@@ -98,11 +96,10 @@ public sealed class ReplacementCounterTests
         using var cache = new Cache<int, string>(engine);
         cache.Put(1, "first");
         engine.PutTask(1, Task.FromResult("task value"));
-        await Assert.That(engine.TryGetTask(1, out Task<string>? task)).IsTrue();
-        Assert.NotNull(task);
-        await Assert.That((await task!.WaitAsync(Watchdog))).IsEqualTo("task value");
+        engine.TryGetTask(1, out Task<string>? task).Should().BeTrue();
+        (await task!.WaitAsync(Watchdog)).Should().Be("task value");
         cache.Put(1, "resident replacement");
-        await Assert.That(cache.Statistics.ReplacedRemovals).IsEqualTo(2);
+        cache.Statistics.ReplacedRemovals.Should().Be(2);
     }
 
     [Test]
@@ -121,11 +118,11 @@ public sealed class ReplacementCounterTests
         Task<string> first = cache.RefreshAsync(1).AsTask();
         Task<string> second = cache.RefreshAsync(1).AsTask();
         result.SetResult("refreshed");
-        await Assert
-            .That((await Task.WhenAll(first, second).WaitAsync(Watchdog)))
-            .All(value => value == "refreshed");
-        await Assert.That(cache.Statistics.ReplacedRemovals).IsEqualTo(1);
-        await Assert.That(cache.Statistics.RefreshSuccesses).IsEqualTo(1);
+        (await Task.WhenAll(first, second).WaitAsync(Watchdog))
+            .Should()
+            .OnlyContain(value => value == "refreshed");
+        cache.Statistics.ReplacedRemovals.Should().Be(1);
+        cache.Statistics.RefreshSuccesses.Should().Be(1);
     }
 
     [Test]
@@ -176,7 +173,7 @@ public sealed class ReplacementCounterTests
         try
         {
             await publication.Entered.WaitAsync(Watchdog);
-            await Assert.That(cache.Statistics.ReplacedRemovals).IsEqualTo(0);
+            cache.Statistics.ReplacedRemovals.Should().Be(0);
             if (clear)
             {
                 cache.Clear();
@@ -185,21 +182,22 @@ public sealed class ReplacementCounterTests
             publication.Release();
             if (fail)
             {
-                await Assert
-                    .That((Func<Task>)(() => refresh.WaitAsync(Watchdog)))
-                    .ThrowsExactly<InvalidOperationException>();
+                await FluentActions
+                    .Awaiting(() => refresh.WaitAsync(Watchdog))
+                    .Should()
+                    .ThrowExactlyAsync<InvalidOperationException>();
             }
             else
             {
-                await Assert.That((await refresh.WaitAsync(Watchdog))).IsEqualTo("refreshed");
+                (await refresh.WaitAsync(Watchdog)).Should().Be("refreshed");
             }
 
-            await Assert.That(cache.Statistics.ReplacedRemovals).IsEqualTo(fail ? 0 : 1);
-            await Assert.That(cache.Statistics.ClearedRemovals).IsEqualTo(clear ? 1 : 0);
-            await Assert.That(cache.TryGet(1, out string? value)).IsEqualTo(!clear);
+            cache.Statistics.ReplacedRemovals.Should().Be(fail ? 0 : 1);
+            cache.Statistics.ClearedRemovals.Should().Be(clear ? 1 : 0);
+            cache.TryGet(1, out string? value).Should().Be(!clear);
             if (!clear)
             {
-                await Assert.That(value).IsEqualTo(fail ? "old" : "refreshed");
+                value.Should().Be(fail ? "old" : "refreshed");
             }
         }
         finally
@@ -212,11 +210,11 @@ public sealed class ReplacementCounterTests
             catch (InvalidOperationException) when (fail) { }
         }
 
-        await Assert.That(publication.TimedOut).IsFalse();
+        publication.TimedOut.Should().BeFalse();
     }
 
     [Test]
-    public async Task MetricsOnlyExposesCombinedReplacementsWhilePublicStatisticsStayZero()
+    public void MetricsOnlyExposesCombinedReplacementsWhilePublicStatisticsStayZero()
     {
         string cacheName = $"replacement-metrics-{Guid.NewGuid():N}";
         ConcurrentQueue<long> replacements = new();
@@ -256,9 +254,9 @@ public sealed class ReplacementCounterTests
             .MaxConcurrentLoads(4)
             .Build();
         ExerciseMixedReplacements(cache);
-        await Assert.That(cache.Statistics.ReplacedRemovals).IsEqualTo(0);
+        cache.Statistics.ReplacedRemovals.Should().Be(0);
         listener.RecordObservableInstruments();
-        await Assert.That((await Assert.That(replacements).HasSingleItem())).IsEqualTo(5);
+        replacements.Should().ContainSingle().Which.Should().Be(5);
     }
 
     private static void ExerciseMixedReplacements(ICache<int, string> cache)
@@ -278,7 +276,7 @@ public sealed class ReplacementCounterTests
 
     private static FieldInfo PrivateField(Type type, string name) =>
         type.GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)
-        ?? throw new AssertionException($"Missing private field {name}.");
+        ?? throw new AssertionFailedException($"Missing private field {name}.");
 
     private static async Task RunTogether(int workerCount, Action<int> action)
     {
@@ -309,7 +307,7 @@ public sealed class ReplacementCounterTests
 
         try
         {
-            await Assert.That(ready.Wait(Watchdog)).IsTrue();
+            ready.Wait(Watchdog).Should().BeTrue();
         }
         finally
         {

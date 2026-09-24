@@ -1,12 +1,13 @@
+using FluentAssertions;
+using FluentAssertions.Execution;
 using Microsoft.Extensions.Time.Testing;
-using TUnit.Assertions.Exceptions;
 
 namespace LoadingCache.Tests;
 
 public sealed class StatisticsIntegrationTests
 {
     [Test]
-    public async Task SynchronousLoadingStatisticsSeparateHitsMissesAndLoads()
+    public void SynchronousLoadingStatisticsSeparateHitsMissesAndLoads()
     {
         int calls = 0;
         using ILoadingCache<int, string> cache = CacheBuilder
@@ -19,20 +20,20 @@ public sealed class StatisticsIntegrationTests
                 Interlocked.Increment(ref calls);
                 return $"value-{key}";
             });
-        await Assert.That(cache.Get(7)).IsEqualTo("value-7");
-        await Assert.That(cache.Get(7)).IsEqualTo("value-7");
+        cache.Get(7).Should().Be("value-7");
+        cache.Get(7).Should().Be("value-7");
         CacheStatistics statistics = cache.Statistics;
-        await Assert.That(calls).IsEqualTo(1);
-        await Assert.That(statistics.Misses).IsEqualTo(1);
-        await Assert.That(statistics.Hits).IsEqualTo(1);
-        await Assert.That(statistics.LoadsStarted).IsEqualTo(1);
-        await Assert.That(statistics.LoadSuccesses).IsEqualTo(1);
-        await Assert.That(statistics.LoadFailures).IsEqualTo(0);
-        await Assert.That(statistics.TotalLoadTimeTicks).IsGreaterThanOrEqualTo(0);
+        calls.Should().Be(1);
+        statistics.Misses.Should().Be(1);
+        statistics.Hits.Should().Be(1);
+        statistics.LoadsStarted.Should().Be(1);
+        statistics.LoadSuccesses.Should().Be(1);
+        statistics.LoadFailures.Should().Be(0);
+        statistics.TotalLoadTimeTicks.Should().BeGreaterThanOrEqualTo(0);
     }
 
     [Test]
-    public async Task RemovalStatisticsIncludeCapacityAndClearCauses()
+    public void RemovalStatisticsIncludeCapacityAndClearCauses()
     {
         using ICache<int, string> cache = CacheBuilder
             .Create<int, string>()
@@ -45,10 +46,10 @@ public sealed class StatisticsIntegrationTests
         cache.CleanUp();
         cache.Clear();
         CacheStatistics statistics = cache.Statistics;
-        await Assert.That(statistics.Evictions).IsGreaterThanOrEqualTo(1);
-        await Assert.That(statistics.SizeRemovals).IsGreaterThanOrEqualTo(1);
-        await Assert.That(statistics.ClearedRemovals).IsGreaterThanOrEqualTo(1);
-        await Assert.That(statistics.EvictedWeight).IsGreaterThanOrEqualTo(1);
+        statistics.Evictions.Should().BeGreaterThanOrEqualTo(1);
+        statistics.SizeRemovals.Should().BeGreaterThanOrEqualTo(1);
+        statistics.ClearedRemovals.Should().BeGreaterThanOrEqualTo(1);
+        statistics.EvictedWeight.Should().BeGreaterThanOrEqualTo(1);
     }
 
     [Test]
@@ -70,13 +71,13 @@ public sealed class StatisticsIntegrationTests
                     return Task.FromResult($"value-{call}");
                 }
             );
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("value-1");
+        (await cache.GetAsync(1)).Should().Be("value-1");
         time.Advance(TimeSpan.FromSeconds(1));
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo("value-1");
+        (await cache.GetAsync(1)).Should().Be("value-1");
         await Eventually(() => cache.Statistics.RefreshSuccesses >= 1);
-        await Assert.That(cache.Statistics.RefreshAttempts).IsEqualTo(1);
-        await Assert.That(cache.Statistics.LoadsStarted).IsEqualTo(2);
-        await Assert.That(cache.Statistics.LoadSuccesses).IsEqualTo(2);
+        cache.Statistics.RefreshAttempts.Should().Be(1);
+        cache.Statistics.LoadsStarted.Should().Be(2);
+        cache.Statistics.LoadSuccesses.Should().Be(2);
     }
 
     [Test]
@@ -98,15 +99,15 @@ public sealed class StatisticsIntegrationTests
                 }
             );
         Task<string> load = cache.GetAsync(1).AsTask();
-        await Assert.That((Func<Task>)(() => load)).ThrowsExactly<TimeoutException>();
-        await Assert.That(calls).IsEqualTo(0);
+        await FluentActions.Awaiting(() => load).Should().ThrowExactlyAsync<TimeoutException>();
+        calls.Should().Be(0);
         CacheStatistics statistics = cache.Statistics;
-        await Assert.That(statistics.LoadsStarted).IsEqualTo(0);
-        await Assert.That(statistics.LoadSuccesses).IsEqualTo(0);
-        await Assert.That(statistics.LoadFailures).IsEqualTo(0);
-        await Assert.That(statistics.LoadCancellations).IsEqualTo(0);
-        await Assert.That(statistics.LoadTimeouts).IsEqualTo(1);
-        await Assert.That(statistics.TotalLoadTimeTicks).IsEqualTo(0);
+        statistics.LoadsStarted.Should().Be(0);
+        statistics.LoadSuccesses.Should().Be(0);
+        statistics.LoadFailures.Should().Be(0);
+        statistics.LoadCancellations.Should().Be(0);
+        statistics.LoadTimeouts.Should().Be(1);
+        statistics.TotalLoadTimeTicks.Should().Be(0);
     }
 
     [Test]
@@ -132,14 +133,13 @@ public sealed class StatisticsIntegrationTests
             );
         Task<string> first = cache.GetAsync(1).AsTask();
         await loaderStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await Assert.That(cache.TryGetTask(1, out Task<string>? shared)).IsTrue();
-        Assert.NotNull(shared);
-        Assert.NotNull(shared);
-        await Assert.That(cache.Statistics.Misses).IsEqualTo(2);
-        await Assert.That(cache.Statistics.LoadsStarted).IsEqualTo(1);
+        cache.TryGetTask(1, out Task<string>? shared).Should().BeTrue();
+        shared.Should().NotBeNull();
+        cache.Statistics.Misses.Should().Be(2);
+        cache.Statistics.LoadsStarted.Should().Be(1);
         release.TrySetResult("value");
-        await Assert.That((await first)).IsEqualTo("value");
-        await Assert.That((await shared)).IsEqualTo("value");
+        (await first).Should().Be("value");
+        (await shared).Should().Be("value");
     }
 
     private static async Task Eventually(Func<bool> condition)
@@ -149,7 +149,7 @@ public sealed class StatisticsIntegrationTests
         {
             if (DateTimeOffset.UtcNow >= deadline)
             {
-                throw new AssertionException("The condition did not become true in time.");
+                throw new AssertionFailedException("The condition did not become true in time.");
             }
 
             await Task.Yield();

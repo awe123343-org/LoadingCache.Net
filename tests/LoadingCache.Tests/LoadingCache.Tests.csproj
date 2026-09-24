@@ -1,6 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <LangVersion>14.0</LangVersion>
     <TargetFramework />
     <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
     <IsTestProject>true</IsTestProject>
@@ -21,6 +20,7 @@
     <ProjectReference Include="../../src/LoadingCache/LoadingCache.csproj" />
     <!-- IDE-only annotations document generated record equality. -->
     <PackageReference Include="JetBrains.Annotations" PrivateAssets="all" IncludeAssets="compile" />
+    <PackageReference Include="FluentAssertions" PrivateAssets="all" />
     <PackageReference Include="TUnit" PrivateAssets="all" />
 
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" PrivateAssets="all" />

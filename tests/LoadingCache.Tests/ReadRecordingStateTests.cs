@@ -1,3 +1,5 @@
+using FluentAssertions;
+
 namespace LoadingCache.Tests;
 
 public sealed class ReadRecordingStateTests
@@ -6,7 +8,7 @@ public sealed class ReadRecordingStateTests
     [Arguments("flush")]
     [Arguments("cleanup")]
     [Arguments("snapshot")]
-    public async Task WriteDrainActivatesReadRecordingAndClearRestoresColdStart(string drain)
+    public void WriteDrainActivatesReadRecordingAndClearRestoresColdStart(string drain)
     {
         using WindowTinyLfuEnginePolicy policy = CreatePolicy(maximum: 4);
         var first = CreateToken(1);
@@ -14,13 +16,13 @@ public sealed class ReadRecordingStateTests
         policy.OnPublish(first, 1);
         DrainWrites(policy, drain);
         policy.OnAccess(first);
-        await Assert.That(policy.IsSketchInitialized).IsFalse();
-        await Assert.That(policy.GetReadBufferStatistics().Enqueued).IsEqualTo(0);
+        policy.IsSketchInitialized.Should().BeFalse();
+        policy.GetReadBufferStatistics().Enqueued.Should().Be(0);
         policy.OnPublish(second, 1);
         DrainWrites(policy, drain);
         policy.OnAccess(second);
-        await Assert.That(policy.IsSketchInitialized).IsTrue();
-        await Assert.That(policy.GetReadBufferStatistics().Enqueued).IsEqualTo(1);
+        policy.IsSketchInitialized.Should().BeTrue();
+        policy.GetReadBufferStatistics().Enqueued.Should().Be(1);
         policy.Clear();
         var third = CreateToken(3);
         var fourth = CreateToken(4);
@@ -28,51 +30,52 @@ public sealed class ReadRecordingStateTests
         DrainWrites(policy, drain);
         policy.OnAccess(first);
         policy.OnAccess(third);
-        await Assert.That(policy.IsSketchInitialized).IsFalse();
-        await Assert.That(policy.GetReadBufferStatistics().Enqueued).IsEqualTo(1);
+        policy.IsSketchInitialized.Should().BeFalse();
+        policy.GetReadBufferStatistics().Enqueued.Should().Be(1);
         policy.OnPublish(fourth, 1);
         DrainWrites(policy, drain);
         policy.OnAccess(fourth);
-        await Assert.That(policy.IsSketchInitialized).IsTrue();
-        await Assert.That(policy.GetReadBufferStatistics().Enqueued).IsEqualTo(2);
+        policy.IsSketchInitialized.Should().BeTrue();
+        policy.GetReadBufferStatistics().Enqueued.Should().Be(2);
         policy.CleanUp();
-        await Assert.That(policy.GetReadBufferStatistics().Queued).IsEqualTo(0);
-        await Assert
-            .That(policy.Snapshot(hottest: true, limit: 4))
-            .IsEquivalentTo([third.Entry, fourth.Entry]);
+        policy.GetReadBufferStatistics().Queued.Should().Be(0);
+        policy
+            .Snapshot(hottest: true, limit: 4)
+            .Should()
+            .BeEquivalentTo([third.Entry, fourth.Entry]);
     }
 
     [Test]
     [Arguments(6)]
     [Arguments(8)]
     [Arguments(16)]
-    public async Task ResizeActivatesReadsAndRemovalBelowThresholdDoesNotDisableThem(int maximum)
+    public void ResizeActivatesReadsAndRemovalBelowThresholdDoesNotDisableThem(int maximum)
     {
         using WindowTinyLfuEnginePolicy policy = CreatePolicy(maximum: 8);
         var first = CreateToken(1);
         policy.OnPublish(first, 1);
         policy.FlushWrites();
         policy.OnAccess(first);
-        await Assert.That(policy.IsSketchInitialized).IsFalse();
-        await Assert.That(policy.GetReadBufferStatistics().Enqueued).IsEqualTo(0);
+        policy.IsSketchInitialized.Should().BeFalse();
+        policy.GetReadBufferStatistics().Enqueued.Should().Be(0);
         // Same-size, smaller, and larger maxima all explicitly initialize the sketch,
         // even though one resident is below every selected half-capacity threshold.
         policy.SetMaximum(maximum, weighted: false);
         policy.OnAccess(first);
-        await Assert.That(policy.IsSketchInitialized).IsTrue();
-        await Assert.That(policy.GetReadBufferStatistics().Enqueued).IsEqualTo(1);
+        policy.IsSketchInitialized.Should().BeTrue();
+        policy.GetReadBufferStatistics().Enqueued.Should().Be(1);
         policy.OnRemove(first);
         policy.FlushWrites();
-        await Assert.That(policy.ResidentCount).IsEqualTo(0);
+        policy.ResidentCount.Should().Be(0);
         var second = CreateToken(2);
         policy.OnPublish(second, 1);
         policy.FlushWrites();
         policy.OnAccess(second);
-        await Assert.That(policy.IsSketchInitialized).IsTrue();
-        await Assert.That(policy.GetReadBufferStatistics().Enqueued).IsEqualTo(2);
+        policy.IsSketchInitialized.Should().BeTrue();
+        policy.GetReadBufferStatistics().Enqueued.Should().Be(2);
         policy.CleanUp();
-        await Assert.That(policy.GetReadBufferStatistics().Queued).IsEqualTo(0);
-        await Assert.That(policy.Snapshot(hottest: true, limit: 4)).IsEquivalentTo([second.Entry]);
+        policy.GetReadBufferStatistics().Queued.Should().Be(0);
+        policy.Snapshot(hottest: true, limit: 4).Should().BeEquivalentTo([second.Entry]);
     }
 
     private static void DrainWrites(WindowTinyLfuEnginePolicy policy, string drain)

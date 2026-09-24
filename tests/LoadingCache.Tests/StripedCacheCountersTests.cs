@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Numerics;
+using FluentAssertions;
 using LoadingCache.Diagnostics;
 
 namespace LoadingCache.Tests;
@@ -7,7 +8,7 @@ namespace LoadingCache.Tests;
 public sealed class StripedCacheCountersTests
 {
     [Test]
-    public async Task ParallelAddsAreExactAfterQuiescence()
+    public void ParallelAddsAreExactAfterQuiescence()
     {
         StripedCacheCounters counters = new(8);
         const int workerCount = 8;
@@ -25,25 +26,23 @@ public sealed class StripedCacheCountersTests
             }
         );
         CacheCounterSnapshot snapshot = counters.Snapshot();
-        await Assert
-            .That(snapshot[CacheCounterKind.Hits])
-            .IsEqualTo(workerCount * incrementsPerWorker);
-        await Assert
-            .That(snapshot[CacheCounterKind.TotalLoadTimeTicks])
-            .IsEqualTo(workerCount * incrementsPerWorker * 3L);
+        snapshot[CacheCounterKind.Hits].Should().Be(workerCount * incrementsPerWorker);
+        snapshot[CacheCounterKind.TotalLoadTimeTicks]
+            .Should()
+            .Be(workerCount * incrementsPerWorker * 3L);
     }
 
     [Test]
-    public async Task SingleStripeCounterSaturatesAtLongMaxValue()
+    public void SingleStripeCounterSaturatesAtLongMaxValue()
     {
         StripedCacheCounters counters = new(1);
         counters.Add(CacheCounterKind.Misses, long.MaxValue - 1);
         counters.Add(CacheCounterKind.Misses, 2);
-        await Assert.That(counters.Snapshot()[CacheCounterKind.Misses]).IsEqualTo(long.MaxValue);
+        counters.Snapshot()[CacheCounterKind.Misses].Should().Be(long.MaxValue);
     }
 
     [Test]
-    public async Task EveryCounterSaturatesAcrossRepeatedUnitAdds()
+    public void EveryCounterSaturatesAcrossRepeatedUnitAdds()
     {
         StripedCacheCounters counters = new(1);
         for (int index = 0; index < (int)CacheCounterKind.Count; index++)
@@ -51,9 +50,9 @@ public sealed class StripedCacheCountersTests
             CacheCounterKind counter = (CacheCounterKind)index;
             counters.Add(counter, long.MaxValue - 1);
             counters.Add(counter);
-            await Assert.That(counters.Snapshot()[counter]).IsEqualTo(long.MaxValue);
+            counters.Snapshot()[counter].Should().Be(long.MaxValue);
             counters.Add(counter);
-            await Assert.That(counters.Snapshot()[counter]).IsEqualTo(long.MaxValue);
+            counters.Snapshot()[counter].Should().Be(long.MaxValue);
         }
     }
 
@@ -106,7 +105,7 @@ public sealed class StripedCacheCountersTests
 
         try
         {
-            await Assert.That(ready.Wait(TimeSpan.FromSeconds(10))).IsTrue();
+            ready.Wait(TimeSpan.FromSeconds(10)).Should().BeTrue();
         }
         finally
         {
@@ -121,53 +120,49 @@ public sealed class StripedCacheCountersTests
             static (total, delta) => total + (BigInteger)incrementsPerWorker * (delta + 1)
         );
         long expected = (long)BigInteger.Min(sum, long.MaxValue);
-        await Assert
-            .That(counters.Snapshot()[CacheCounterKind.TotalLoadTimeTicks])
-            .IsEqualTo(expected);
+        counters.Snapshot()[CacheCounterKind.TotalLoadTimeTicks].Should().Be(expected);
     }
 
     [Test]
-    public async Task AggregateSnapshotSaturatesAcrossStripes()
+    public void AggregateSnapshotSaturatesAcrossStripes()
     {
         StripedCacheCounters counters = new(4);
         counters.AddToStripeForTesting(0, CacheCounterKind.EvictedWeight, long.MaxValue - 10);
         counters.AddToStripeForTesting(1, CacheCounterKind.EvictedWeight, 11);
-        await Assert
-            .That(counters.Snapshot()[CacheCounterKind.EvictedWeight])
-            .IsEqualTo(long.MaxValue);
+        counters.Snapshot()[CacheCounterKind.EvictedWeight].Should().Be(long.MaxValue);
     }
 
     [Test]
-    public async Task InvalidCounterAndDeltaAreRejectedWithoutMutation()
+    public void InvalidCounterAndDeltaAreRejectedWithoutMutation()
     {
         StripedCacheCounters counters = new(1);
         Action invalidCounter = () => counters.Add((CacheCounterKind)byte.MaxValue);
         Action countSentinel = () => counters.Add(CacheCounterKind.Count);
         Action invalidDelta = () => counters.Add(CacheCounterKind.Hits, -1);
-        await Assert.That(invalidCounter).Throws<ArgumentOutOfRangeException>();
-        await Assert.That(countSentinel).Throws<ArgumentOutOfRangeException>();
-        await Assert.That(invalidDelta).Throws<ArgumentOutOfRangeException>();
-        await Assert.That(counters.Snapshot()[CacheCounterKind.Hits]).IsEqualTo(0);
+        invalidCounter.Should().Throw<ArgumentOutOfRangeException>();
+        countSentinel.Should().Throw<ArgumentOutOfRangeException>();
+        invalidDelta.Should().Throw<ArgumentOutOfRangeException>();
+        counters.Snapshot()[CacheCounterKind.Hits].Should().Be(0);
     }
 
     [Test]
-    public async Task InvalidStripeCountsAreRejected()
+    public void InvalidStripeCountsAreRejected()
     {
         Action zero = () => CreateCounters(0);
         Action nonPowerOfTwo = () => CreateCounters(3);
         Action tooLarge = () => CreateCounters(128);
-        await Assert.That(zero).Throws<ArgumentOutOfRangeException>();
-        await Assert.That(nonPowerOfTwo).Throws<ArgumentOutOfRangeException>();
-        await Assert.That(tooLarge).Throws<ArgumentOutOfRangeException>();
+        zero.Should().Throw<ArgumentOutOfRangeException>();
+        nonPowerOfTwo.Should().Throw<ArgumentOutOfRangeException>();
+        tooLarge.Should().Throw<ArgumentOutOfRangeException>();
     }
 
     [Test]
-    public async Task StripeNormalizationIsBoundedPowerOfTwo()
+    public void StripeNormalizationIsBoundedPowerOfTwo()
     {
-        await Assert.That(StripedCacheCounters.NormalizeStripeCount(1)).IsEqualTo(1);
-        await Assert.That(StripedCacheCounters.NormalizeStripeCount(3)).IsEqualTo(4);
-        await Assert.That(StripedCacheCounters.NormalizeStripeCount(64)).IsEqualTo(64);
-        await Assert.That(StripedCacheCounters.NormalizeStripeCount(65)).IsEqualTo(64);
+        StripedCacheCounters.NormalizeStripeCount(1).Should().Be(1);
+        StripedCacheCounters.NormalizeStripeCount(3).Should().Be(4);
+        StripedCacheCounters.NormalizeStripeCount(64).Should().Be(64);
+        StripedCacheCounters.NormalizeStripeCount(65).Should().Be(64);
     }
 
     [Test]
@@ -202,9 +197,7 @@ public sealed class StripedCacheCountersTests
                 CacheCounterSnapshot snapshot = counters.Snapshot();
                 for (int counter = 0; counter < (int)CacheCounterKind.Count; counter++)
                 {
-                    await Assert
-                        .That(snapshot[(CacheCounterKind)counter])
-                        .IsGreaterThanOrEqualTo(0);
+                    snapshot[(CacheCounterKind)counter].Should().BeGreaterThanOrEqualTo(0);
                 }
             }
         }
@@ -214,11 +207,11 @@ public sealed class StripedCacheCountersTests
             await writer.WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
         }
 
-        await Assert.That(failures).IsEmpty();
+        failures.Should().BeEmpty();
     }
 
     [Test]
-    public async Task MetadataDoesNotGrowWithThreadsOrKeys()
+    public void MetadataDoesNotGrowWithThreadsOrKeys()
     {
         StripedCacheCounters counters = new(8);
         int slotCount = counters.CounterSlotCount;
@@ -230,18 +223,18 @@ public sealed class StripedCacheCountersTests
                 counters.Add(CacheCounterKind.Misses, index + 1L);
             }
         );
-        await Assert.That(counters.StripeCount).IsEqualTo(8);
-        await Assert.That(counters.CounterSlotCount).IsEqualTo(slotCount);
-        await Assert.That(counters.Snapshot()[CacheCounterKind.Misses]).IsEqualTo(256L * 257 / 2);
+        counters.StripeCount.Should().Be(8);
+        counters.CounterSlotCount.Should().Be(slotCount);
+        counters.Snapshot()[CacheCounterKind.Misses].Should().Be(256L * 257 / 2);
     }
 
     [Test]
-    public async Task ZeroDeltaDoesNotChangeCounters()
+    public void ZeroDeltaDoesNotChangeCounters()
     {
         StripedCacheCounters counters = new(1);
         counters.Add(CacheCounterKind.Hits, 0);
         counters.AddToStripeForTesting(0, CacheCounterKind.Hits, 0);
-        await Assert.That(counters.Snapshot()[CacheCounterKind.Hits]).IsEqualTo(0);
+        counters.Snapshot()[CacheCounterKind.Hits].Should().Be(0);
     }
 
     [Test]

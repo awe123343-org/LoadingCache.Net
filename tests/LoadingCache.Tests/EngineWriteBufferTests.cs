@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using FluentAssertions;
 using LoadingCache.Maintenance;
 using Microsoft.Extensions.Time.Testing;
 
@@ -9,7 +10,7 @@ public sealed class EngineWriteBufferTests
     private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
 
     [Test]
-    public async Task RejectsAnIndependentlyConstructedBuiltInPolicy()
+    public void RejectsAnIndependentlyConstructedBuiltInPolicy()
     {
         using var policy = new WindowTinyLfuEnginePolicy(
             maximum: 4,
@@ -28,14 +29,15 @@ public sealed class EngineWriteBufferTests
             MaxConcurrentLoads = 1,
             Policy = policy,
         };
-        await Assert
-            .That(() => _ = new CacheEngine<int, string>(options))
-            .Throws<ArgumentException>()
-            .WithMessageMatching("*built-in policy*custom test policy*");
+        options
+            .Invoking(static o => _ = new CacheEngine<int, string>(o))
+            .Should()
+            .Throw<ArgumentException>()
+            .WithMessage("*built-in policy*custom test policy*");
     }
 
     [Test]
-    public async Task QueuedWritesShareOneMaintenanceRequestAndRearmAfterDraining()
+    public void QueuedWritesShareOneMaintenanceRequestAndRearmAfterDraining()
     {
         var scheduler = new ControlledScheduler();
         var engine = CreateEngine(scheduler, capacity: 8);
@@ -45,59 +47,57 @@ public sealed class EngineWriteBufferTests
             cache.Put(key, "value");
         }
 
-        await Assert.That(engine.GetMaintenanceStatistics().Requests).IsEqualTo(1);
-        await Assert.That(scheduler.Pending).IsEqualTo(1);
-        await Assert.That(engine.GetPolicyWriteBufferStatistics().Full).IsGreaterThan(0);
+        engine.GetMaintenanceStatistics().Requests.Should().Be(1);
+        scheduler.Pending.Should().Be(1);
+        engine.GetPolicyWriteBufferStatistics().Full.Should().BeGreaterThan(0);
         scheduler.RunAll();
-        await Assert.That(engine.GetPolicyWriteBufferStatistics().Queued).IsEqualTo(0);
+        engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
         cache.Put(128, "next batch");
-        await Assert.That(engine.GetMaintenanceStatistics().Requests).IsEqualTo(2);
-        await Assert.That(scheduler.Pending).IsEqualTo(1);
+        engine.GetMaintenanceStatistics().Requests.Should().Be(2);
+        scheduler.Pending.Should().Be(1);
         scheduler.RunAll();
         engine.AssertInvariants();
     }
 
     [Test]
-    public async Task PolicySnapshotFlushDoesNotStrandTheFollowingWrite()
+    public void PolicySnapshotFlushDoesNotStrandTheFollowingWrite()
     {
         var scheduler = new ControlledScheduler();
         var engine = CreateEngine(scheduler);
         using var cache = new Cache<int, string>(engine);
         cache.Put(1, "first");
-        await Assert.That(cache.Policy.Eviction!.WeightedSize).IsEqualTo(1);
-        await Assert.That(engine.GetPolicyWriteBufferStatistics().Queued).IsEqualTo(0);
+        cache.Policy.Eviction!.WeightedSize.Should().Be(1);
+        engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
         cache.Put(2, "following write");
         scheduler.RunAll();
-        await Assert.That(engine.GetPolicyWriteBufferStatistics().Queued).IsEqualTo(0);
-        await Assert.That(cache.Policy.Eviction.WeightedSize).IsEqualTo(2);
+        engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
+        cache.Policy.Eviction.WeightedSize.Should().Be(2);
         engine.AssertInvariants();
     }
 
     [Test]
-    public async Task ReadyMappingsAreVisibleBeforeDeferredPolicyWritesRun()
+    public void ReadyMappingsAreVisibleBeforeDeferredPolicyWritesRun()
     {
         var scheduler = new ControlledScheduler();
         var engine = CreateEngine(scheduler);
         using var cache = new Cache<int, string>(engine);
         cache.Put(1, "ready");
-        await Assert.That(engine.GetPolicyWriteBufferStatistics().Queued).IsEqualTo(1);
-        await Assert.That(cache.TryGet(1, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("ready");
-        await Assert.That(scheduler.Pending).IsEqualTo(1);
-        await Assert.That(cache.Statistics.WriteBufferBacklog).IsEqualTo(1);
-        await Assert.That(cache.Statistics.MaintenanceBacklog).IsGreaterThanOrEqualTo(1);
+        engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(1);
+        cache.TryGet(1, out string? value).Should().BeTrue();
+        value.Should().Be("ready");
+        scheduler.Pending.Should().Be(1);
+        cache.Statistics.WriteBufferBacklog.Should().Be(1);
+        cache.Statistics.MaintenanceBacklog.Should().BeGreaterThanOrEqualTo(1);
         scheduler.RunAll();
-        await Assert.That(engine.GetPolicyWriteBufferStatistics().Queued).IsEqualTo(0);
-        await Assert.That(cache.Policy.Eviction!.WeightedSize).IsEqualTo(1);
+        engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
+        cache.Policy.Eviction!.WeightedSize.Should().Be(1);
         engine.AssertInvariants();
     }
 
     [Test]
     [Arguments(false)]
     [Arguments(true)]
-    public async Task FullBufferAssistsWithoutLosingWritesOrExceedingTheDerivedCountBound(
-        bool statistics
-    )
+    public void FullBufferAssistsWithoutLosingWritesOrExceedingTheDerivedCountBound(bool statistics)
     {
         const int maximum = 2;
         const int capacity = 2;
@@ -112,26 +112,24 @@ public sealed class EngineWriteBufferTests
         for (int key = 0; key < 64; key++)
         {
             cache.Put(key, "value");
-            await Assert
-                .That(engine.GetPolicyWriteBufferStatistics().Queued)
-                .IsLessThanOrEqualTo(capacity);
-            await Assert.That(cache.EstimatedCount).IsLessThanOrEqualTo(maximum + capacity + 1);
+            engine.GetPolicyWriteBufferStatistics().Queued.Should().BeLessThanOrEqualTo(capacity);
+            cache.EstimatedCount.Should().BeLessThanOrEqualTo(maximum + capacity + 1);
         }
 
-        await Assert.That(engine.GetPolicyWriteBufferStatistics().Full).IsGreaterThan(0);
+        engine.GetPolicyWriteBufferStatistics().Full.Should().BeGreaterThan(0);
         if (statistics)
         {
-            await Assert.That(cache.Statistics.WriteBufferPressure).IsGreaterThan(0);
+            cache.Statistics.WriteBufferPressure.Should().BeGreaterThan(0);
         }
         else
         {
-            await Assert.That(cache.Statistics.WriteBufferPressure).IsEqualTo(0);
+            cache.Statistics.WriteBufferPressure.Should().Be(0);
         }
 
         cache.CleanUp();
-        await Assert.That(engine.GetPolicyWriteBufferStatistics().Queued).IsEqualTo(0);
-        await Assert.That(cache.EstimatedCount).IsLessThanOrEqualTo(maximum);
-        await Assert.That(cache.Policy.Eviction!.WeightedSize).IsLessThanOrEqualTo(maximum);
+        engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
+        cache.EstimatedCount.Should().BeLessThanOrEqualTo(maximum);
+        cache.Policy.Eviction!.WeightedSize.Should().BeLessThanOrEqualTo(maximum);
         engine.AssertInvariants();
     }
 
@@ -142,34 +140,34 @@ public sealed class EngineWriteBufferTests
         var engine = CreateEngine(scheduler, maximum: 16, capacity: 2);
         using var cache = new Cache<int, string>(engine);
         await Task.WhenAll(StartPublishers(cache)).WaitAsync(Watchdog, CancellationToken.None);
-        await Assert.That(engine.GetPolicyWriteBufferStatistics().Queued).IsLessThanOrEqualTo(2);
-        await Assert.That(cache.EstimatedCount).IsLessThanOrEqualTo(19);
+        engine.GetPolicyWriteBufferStatistics().Queued.Should().BeLessThanOrEqualTo(2);
+        cache.EstimatedCount.Should().BeLessThanOrEqualTo(19);
         cache.CleanUp();
-        await Assert.That(cache.EstimatedCount).IsLessThanOrEqualTo(16);
-        await Assert.That(engine.GetPolicyWriteBufferStatistics().Queued).IsEqualTo(0);
+        cache.EstimatedCount.Should().BeLessThanOrEqualTo(16);
+        engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
         engine.AssertInvariants();
     }
 
     [Test]
-    public async Task QueuedAddRemoveAndReplacementOnlyAffectTheirExactEntries()
+    public void QueuedAddRemoveAndReplacementOnlyAffectTheirExactEntries()
     {
         var scheduler = new ControlledScheduler();
         var engine = CreateEngine(scheduler, capacity: 8);
         using var cache = new Cache<int, string>(engine);
         cache.Put(1, "old");
-        await Assert.That(cache.Invalidate(1)).IsTrue();
+        cache.Invalidate(1).Should().BeTrue();
         cache.Put(1, "replacement");
         cache.Put(2, "other");
         scheduler.RunAll();
-        await Assert.That(cache.TryGet(1, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("replacement");
-        await Assert.That(cache.Policy.Eviction!.WeightedSize).IsEqualTo(2);
-        await Assert.That(cache.EstimatedCount).IsEqualTo(2);
+        cache.TryGet(1, out string? value).Should().BeTrue();
+        value.Should().Be("replacement");
+        cache.Policy.Eviction!.WeightedSize.Should().Be(2);
+        cache.EstimatedCount.Should().Be(2);
         engine.AssertInvariants();
     }
 
     [Test]
-    public async Task ClearDiscardsOldEpochWritesWithoutTurningThemIntoSizeEvictions()
+    public void ClearDiscardsOldEpochWritesWithoutTurningThemIntoSizeEvictions()
     {
         var scheduler = new ControlledScheduler();
         var engine = CreateEngine(scheduler, maximum: 2, capacity: 8, statistics: true);
@@ -180,20 +178,20 @@ public sealed class EngineWriteBufferTests
         }
 
         cache.Clear();
-        await Assert.That(engine.GetPolicyWriteBufferStatistics().Queued).IsEqualTo(0);
-        await Assert.That(cache.Statistics.SizeRemovals).IsEqualTo(0);
-        await Assert.That(cache.Statistics.ClearedRemovals).IsEqualTo(4);
+        engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
+        cache.Statistics.SizeRemovals.Should().Be(0);
+        cache.Statistics.ClearedRemovals.Should().Be(4);
         cache.Put(1, "new epoch");
         scheduler.RunAll();
-        await Assert.That(cache.TryGet(1, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("new epoch");
-        await Assert.That(cache.EstimatedCount).IsEqualTo(1);
-        await Assert.That(cache.Policy.Eviction!.WeightedSize).IsEqualTo(1);
+        cache.TryGet(1, out string? value).Should().BeTrue();
+        value.Should().Be("new epoch");
+        cache.EstimatedCount.Should().Be(1);
+        cache.Policy.Eviction!.WeightedSize.Should().Be(1);
         engine.AssertInvariants();
     }
 
     [Test]
-    public async Task DisposeReleasesPendingWritesAndMakesAnOldWorkerHarmless()
+    public void DisposeReleasesPendingWritesAndMakesAnOldWorkerHarmless()
     {
         var scheduler = new ControlledScheduler();
         var engine = CreateEngine(scheduler);
@@ -202,17 +200,15 @@ public sealed class EngineWriteBufferTests
         cache.Dispose();
         scheduler.RunAll();
         var buffer = engine.GetPolicyWriteBufferStatistics();
-        await Assert.That(buffer.IsDisposed).IsTrue();
-        await Assert.That(buffer.Queued).IsEqualTo(0);
-        await Assert
-            .That(engine.GetMaintenanceStatistics().State)
-            .IsEqualTo(MaintenanceCoordinatorState.Disposed);
+        buffer.IsDisposed.Should().BeTrue();
+        buffer.Queued.Should().Be(0);
+        engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Disposed);
     }
 
     [Test]
     [Arguments(false)]
     [Arguments(true)]
-    public async Task RejectedOrInlineSchedulingRunsOutsideTheEngineLocks(bool inline)
+    public void RejectedOrInlineSchedulingRunsOutsideTheEngineLocks(bool inline)
     {
         var scheduler = new ControlledScheduler
         {
@@ -227,9 +223,9 @@ public sealed class EngineWriteBufferTests
             cache.Put(key, "value");
         }
 
-        await Assert.That(scheduler.ObservedCacheLock).IsFalse();
-        await Assert.That(engine.GetPolicyWriteBufferStatistics().Queued).IsEqualTo(0);
-        await Assert.That(cache.EstimatedCount).IsLessThanOrEqualTo(4);
+        scheduler.ObservedCacheLock.Should().BeFalse();
+        engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
+        cache.EstimatedCount.Should().BeLessThanOrEqualTo(4);
         engine.AssertInvariants();
     }
 
@@ -252,7 +248,7 @@ public sealed class EngineWriteBufferTests
         {
             await hook.Entered.WaitAsync(Watchdog, CancellationToken.None);
             cache.Put(2, "last write");
-            await Assert.That(engine.GetPolicyWriteBufferStatistics().Queued).IsEqualTo(1);
+            engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(1);
         }
         finally
         {
@@ -261,21 +257,19 @@ public sealed class EngineWriteBufferTests
         }
 
         scheduler.RunAll();
-        await Assert.That(hook.TimedOut).IsFalse();
-        await Assert.That(engine.GetPolicyWriteBufferStatistics().Queued).IsEqualTo(0);
-        await Assert.That(cache.Policy.Eviction!.WeightedSize).IsEqualTo(2);
+        hook.TimedOut.Should().BeFalse();
+        engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
+        cache.Policy.Eviction!.WeightedSize.Should().Be(2);
         if (rejectRearm)
         {
-            await Assert
-                .That(engine.GetMaintenanceStatistics().ScheduleRejections)
-                .IsGreaterThan(0);
+            engine.GetMaintenanceStatistics().ScheduleRejections.Should().BeGreaterThan(0);
         }
 
         engine.AssertInvariants();
     }
 
     [Test]
-    public async Task FailedMaintenancePassUsesTheReliableWriteFallback()
+    public void FailedMaintenancePassUsesTheReliableWriteFallback()
     {
         var scheduler = new ControlledScheduler();
         var hooks = new LoadingCacheTestHooks
@@ -287,14 +281,14 @@ public sealed class EngineWriteBufferTests
         using var cache = new Cache<int, string>(engine);
         cache.Put(1, "ready");
         scheduler.RunAll();
-        await Assert.That(engine.GetMaintenanceStatistics().DrainFaults).IsGreaterThan(0);
-        await Assert.That(engine.GetPolicyWriteBufferStatistics().Queued).IsEqualTo(0);
-        await Assert.That(cache.Policy.Eviction!.WeightedSize).IsEqualTo(1);
+        engine.GetMaintenanceStatistics().DrainFaults.Should().BeGreaterThan(0);
+        engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
+        cache.Policy.Eviction!.WeightedSize.Should().Be(1);
         engine.AssertInvariants();
     }
 
     [Test]
-    public async Task ExpirationIsAuthoritativeEvenWhenTheAddEventHasNotRun()
+    public void ExpirationIsAuthoritativeEvenWhenTheAddEventHasNotRun()
     {
         var time = new FakeTimeProvider();
         var scheduler = new ControlledScheduler();
@@ -312,12 +306,12 @@ public sealed class EngineWriteBufferTests
         using var cache = new Cache<int, string>(engine);
         cache.Put(1, "expired");
         time.Advance(TimeSpan.FromSeconds(1));
-        await Assert.That(cache.TryGet(1, out _)).IsFalse();
+        cache.TryGet(1, out _).Should().BeFalse();
         cache.Put(1, "new");
         scheduler.RunAll();
-        await Assert.That(cache.TryGet(1, out string? value)).IsTrue();
-        await Assert.That(value).IsEqualTo("new");
-        await Assert.That(cache.Policy.Eviction!.WeightedSize).IsEqualTo(1);
+        cache.TryGet(1, out string? value).Should().BeTrue();
+        value.Should().Be("new");
+        cache.Policy.Eviction!.WeightedSize.Should().Be(1);
         engine.AssertInvariants();
     }
 
@@ -345,22 +339,20 @@ public sealed class EngineWriteBufferTests
             static (_, _) => Task.FromResult(1L),
             (_, _, _) => Task.FromResult(weight)
         );
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo(1);
+        (await cache.GetAsync(1)).Should().Be(1);
         cache.CleanUp();
-        await Assert.That((await cache.RefreshAsync(1))).IsEqualTo(weight);
+        (await cache.RefreshAsync(1)).Should().Be(weight);
         if (weight > 10)
         {
-            await Assert.That(cache.TryGet(1, out _)).IsFalse();
+            cache.TryGet(1, out _).Should().BeFalse();
         }
 
         scheduler.RunAll();
         cache.CleanUp();
-        await Assert.That(cache.Policy.Eviction!.WeightedSize).IsEqualTo(weight > 10 ? 0 : weight);
-        await Assert.That(cache.EstimatedCount).IsEqualTo(weight > 10 ? 0 : 1);
-        await Assert
-            .That(cache.Policy.Eviction.Coldest(4).Count)
-            .IsEqualTo((int)cache.EstimatedCount);
-        await Assert.That(engine.GetPolicyWriteBufferStatistics().Queued).IsEqualTo(0);
+        cache.Policy.Eviction!.WeightedSize.Should().Be(weight > 10 ? 0 : weight);
+        cache.EstimatedCount.Should().Be(weight > 10 ? 0 : 1);
+        cache.Policy.Eviction.Coldest(4).Count.Should().Be((int)cache.EstimatedCount);
+        engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
         engine.AssertInvariants();
     }
 
@@ -384,22 +376,22 @@ public sealed class EngineWriteBufferTests
             static (_, _) => Task.FromResult(1L),
             static (_, oldValue, _) => Task.FromResult(oldValue + 2)
         );
-        await Assert.That((await cache.GetAsync(1))).IsEqualTo(1);
+        (await cache.GetAsync(1)).Should().Be(1);
         cache.CleanUp();
-        await Assert.That((await cache.RefreshAsync(1))).IsEqualTo(3);
-        await Assert.That((await cache.RefreshAsync(1))).IsEqualTo(5);
-        await Assert.That((await cache.RefreshAsync(1))).IsEqualTo(7);
-        await Assert.That(engine.GetPolicyWriteBufferStatistics().Queued).IsEqualTo(3);
+        (await cache.RefreshAsync(1)).Should().Be(3);
+        (await cache.RefreshAsync(1)).Should().Be(5);
+        (await cache.RefreshAsync(1)).Should().Be(7);
+        engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(3);
         scheduler.RunAll();
-        await Assert.That(cache.TryGet(1, out long value)).IsTrue();
-        await Assert.That(value).IsEqualTo(7);
-        await Assert.That(cache.Policy.Eviction!.WeightedSize).IsEqualTo(7);
-        await Assert.That(cache.Policy.Eviction.Coldest(4)).HasSingleItem();
+        cache.TryGet(1, out long value).Should().BeTrue();
+        value.Should().Be(7);
+        cache.Policy.Eviction!.WeightedSize.Should().Be(7);
+        cache.Policy.Eviction.Coldest(4).Should().ContainSingle();
         engine.AssertInvariants();
     }
 
     [Test]
-    public async Task WeightedAndZeroWeightWritesRemainBoundedWithAStoppedConsumer()
+    public void WeightedAndZeroWeightWritesRemainBoundedWithAStoppedConsumer()
     {
         const int residentMaximum = 4;
         const int bufferCapacity = 2;
@@ -419,19 +411,15 @@ public sealed class EngineWriteBufferTests
         for (int key = 0; key < 128; key++)
         {
             cache.Put(key, key % 2 == 0 ? 0 : 6);
-            await Assert
-                .That(cache.EstimatedCount)
-                .IsLessThanOrEqualTo(residentMaximum + bufferCapacity + 1);
+            cache.EstimatedCount.Should().BeLessThanOrEqualTo(residentMaximum + bufferCapacity + 1);
         }
 
         cache.Policy.Eviction!.SetMaximum(3);
         cache.CleanUp();
-        await Assert.That(cache.Policy.Eviction.WeightedSize).IsLessThanOrEqualTo(3);
-        await Assert.That(cache.EstimatedCount).IsLessThanOrEqualTo(residentMaximum);
-        await Assert
-            .That(cache.Policy.Eviction.Coldest(residentMaximum).Count)
-            .IsEqualTo((int)cache.EstimatedCount);
-        await Assert.That(engine.GetPolicyWriteBufferStatistics().Queued).IsEqualTo(0);
+        cache.Policy.Eviction.WeightedSize.Should().BeLessThanOrEqualTo(3);
+        cache.EstimatedCount.Should().BeLessThanOrEqualTo(residentMaximum);
+        cache.Policy.Eviction.Coldest(residentMaximum).Count.Should().Be((int)cache.EstimatedCount);
+        engine.GetPolicyWriteBufferStatistics().Queued.Should().Be(0);
         engine.AssertInvariants();
     }
 
@@ -505,8 +493,7 @@ public sealed class EngineWriteBufferTests
 
         internal void RunNext()
         {
-            if (!(_callbacks.TryDequeue(out var callback)))
-                Assert.Fail("Expected _callbacks.TryDequeue(out var callback) to be true ().");
+            _callbacks.TryDequeue(out var callback).Should().BeTrue();
             callback!();
         }
 

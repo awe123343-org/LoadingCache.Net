@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using FluentAssertions;
 
 namespace LoadingCache.Tests;
 
@@ -21,10 +22,10 @@ public sealed class EngineRetentionTests
         WeakReference[] retiredValues = PopulateAndClear(cache);
         try
         {
-            await Assert.That(oldWaiter.IsCompleted).IsFalse();
+            oldWaiter.IsCompleted.Should().BeFalse();
             CollectTargets(retiredValues);
-            await Assert.That(retiredValues).All(reference => !reference.IsAlive);
-            await Assert.That(cache.EstimatedCount).IsEqualTo(0);
+            retiredValues.Should().OnlyContain(reference => !reference.IsAlive);
+            cache.EstimatedCount.Should().Be(0);
         }
         finally
         {
@@ -32,7 +33,7 @@ public sealed class EngineRetentionTests
             await oldWaiter.WaitAsync(TimeSpan.FromSeconds(10));
         }
 
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
+        cache.EstimatedCount.Should().Be(0);
         GC.KeepAlive(cache);
     }
 
@@ -59,9 +60,9 @@ public sealed class EngineRetentionTests
         WeakReference[] retiredValues = PopulateAndClear(cache);
         try
         {
-            await Assert.That(refresh.IsCompleted).IsFalse();
+            refresh.IsCompleted.Should().BeFalse();
             CollectTargets(retiredValues);
-            await Assert.That(retiredValues).All(reference => !reference.IsAlive);
+            retiredValues.Should().OnlyContain(reference => !reference.IsAlive);
         }
         finally
         {
@@ -69,13 +70,13 @@ public sealed class EngineRetentionTests
             await refresh.WaitAsync(TimeSpan.FromSeconds(10));
         }
 
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
+        cache.EstimatedCount.Should().Be(0);
         GC.KeepAlive(cache);
     }
 
     /// <summary>Explicit removal releases both mapping and policy references to old values.</summary>
     [Test]
-    public async Task RepeatedReplacementAndCleanupDoNotRetainHistoricalValues()
+    public void RepeatedReplacementAndCleanupDoNotRetainHistoricalValues()
     {
         using ICache<int, Payload> cache = CacheBuilder
             .Create<int, Payload>()
@@ -85,8 +86,8 @@ public sealed class EngineRetentionTests
         WeakReference[] retiredValues = ReplaceAndInvalidate(cache);
         cache.CleanUp();
         CollectTargets(retiredValues);
-        await Assert.That(retiredValues).All(reference => !reference.IsAlive);
-        await Assert.That(cache.EstimatedCount).IsEqualTo(0);
+        retiredValues.Should().OnlyContain(reference => !reference.IsAlive);
+        cache.EstimatedCount.Should().Be(0);
         ((Cache<int, Payload>)cache).AssertInvariants();
         GC.KeepAlive(cache);
     }

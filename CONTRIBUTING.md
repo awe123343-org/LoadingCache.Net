@@ -42,10 +42,11 @@ run both targets. For an isolated runtime installation, invoke its `dotnet exec
 --fx-version <installed-patch> tests/<project>/bin/Release/<framework>/<project>.dll`.
 Do not roll .NET 8 tests forward to .NET 10 and report that as .NET 8 validation.
 
-Use TUnit for test discovery and native assertions. Await assertion chains; use
-`ThrowsExactly<T>` for exact exception types. Inject `CancellationToken` into tests
-and pass it explicitly to their helpers. Synchronous callbacks and GC-lifetime
-helpers use immediate `Assert.Fail` guards rather than blocking on async assertions.
+Use TUnit for discovery and execution, and FluentAssertions for assertions.
+Use `ThrowExactly<T>` / `ThrowExactlyAsync<T>` when the exact exception type is
+part of the contract. Await asynchronous operations and asynchronous exception
+assertions; keep synchronous callbacks and GC-lifetime helpers synchronous.
+Inject `CancellationToken` into tests and pass it explicitly to their helpers.
 Allocation measurements run in the separate `LoadingCache.AllocationProbe` executable;
 test projects use the generated TUnit entry point. Preserve exact
 exception-type assertions and controlled interleavings when migrating tests.

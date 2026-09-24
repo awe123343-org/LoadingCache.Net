@@ -2,7 +2,7 @@ namespace LoadingCache.Tests;
 
 public static class TestConfiguration
 {
-    [Before(HookType.TestDiscovery)]
+    [Before(TestDiscovery)]
     public static void Configure(BeforeTestDiscoveryContext context)
     {
         // Blocking race gates need worker capacity for continuations. Bound concurrent cases

@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using FluentAssertions;
 using LoadingCache.Diagnostics;
 using LoadingCache.Maintenance;
 using LoadingCache.ReferenceStorage;
@@ -7,15 +8,14 @@ namespace LoadingCache.AllocationProbe;
 
 internal static class AllocationScenarios
 {
-    internal static async Task HotCounterUpdatesDoNotAllocatePerEvent()
+    internal static void HotCounterUpdatesDoNotAllocatePerEvent()
     {
         StripedCacheCounters counters = new(1);
         counters.Add(CacheCounterKind.Hits);
-        long allocated = MeasureCounter(counters);
-        await Assert.That(allocated).IsEqualTo(0L);
+        MeasureCounter(counters).Should().Be(0);
     }
 
-    // NoInlining keeps this kernel out of the async test; AggressiveOptimization
+    // NoInlining keeps this kernel out of the caller; AggressiveOptimization
     // compiles it before the allocation baseline. Otherwise OSR can grow the CLR
     // CastCache during JIT cast analysis (6,192 B observed on Windows .NET 10).
     // Keep the zero-byte assertion; only this measurement kernel bypasses tiering.
@@ -31,17 +31,17 @@ internal static class AllocationScenarios
         return GC.GetAllocatedBytesForCurrentThread() - before;
     }
 
-    internal static async Task WeakKeyObjectComparerDoesNotAllocateDuringRawLookupComparison()
+    internal static void WeakKeyObjectComparerDoesNotAllocateDuringRawLookupComparison()
     {
         Key key = new(1);
         ReferenceKey<Key> handle = ReferenceKey<Key>.CreateWeak(key);
         IEqualityComparer<object> comparer = WeakKeyObjectComparer<Key>.Instance;
         (long allocated, bool allMatches) = MeasureComparison(comparer, handle, key);
-        await Assert.That(allMatches).IsTrue();
-        await Assert.That(allocated).IsEqualTo(0L);
+        allMatches.Should().BeTrue();
+        allocated.Should().Be(0);
     }
 
-    // NoInlining keeps this kernel out of the async test; AggressiveOptimization
+    // NoInlining keeps this kernel out of the caller; AggressiveOptimization
     // compiles it before the allocation baseline. Otherwise OSR can grow the CLR
     // CastCache during JIT cast analysis (6,192 B observed on Windows .NET 10).
     // Keep the zero-byte assertion; only this measurement kernel bypasses tiering.
@@ -62,7 +62,7 @@ internal static class AllocationScenarios
         return (GC.GetAllocatedBytesForCurrentThread() - before, allMatches);
     }
 
-    internal static async Task RawComparisonMeasurementDetectsAllocatingComparer()
+    internal static void RawComparisonMeasurementDetectsAllocatingComparer()
     {
         Key key = new(1);
         ReferenceKey<Key> handle = ReferenceKey<Key>.CreateWeak(key);
@@ -74,8 +74,8 @@ internal static class AllocationScenarios
             }
         );
         (long allocated, bool allMatches) = MeasureComparison(allocating, handle, key);
-        await Assert.That(allMatches).IsTrue();
-        await Assert.That(allocated).IsGreaterThan(0L);
+        allMatches.Should().BeTrue();
+        allocated.Should().BeGreaterThan(0);
     }
 
     internal static async Task WeakKeyResidentHitDoesNotAllocateLookupProbe()
@@ -98,7 +98,7 @@ internal static class AllocationScenarios
         engine.CleanUp();
         for (int index = 0; index < 10_000; index++)
         {
-            await Assert.That(engine.TryGet(key, out _)).IsTrue();
+            engine.TryGet(key, out _).Should().BeTrue();
         }
 
         engine.CleanUp();
@@ -110,15 +110,15 @@ internal static class AllocationScenarios
         }
 
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        await Assert.That(allHits).IsTrue();
-        await Assert.That(allocated).IsEqualTo(0);
+        allHits.Should().BeTrue();
+        allocated.Should().Be(0);
     }
 
-    internal static async Task EstimatedCountDoesNotAllocateAValuesSnapshotPerEntry()
+    internal static void EstimatedCountDoesNotAllocateAValuesSnapshotPerEntry()
     {
         long smallAllocation = MeasureEstimatedCountAllocation(512);
         long largeAllocation = MeasureEstimatedCountAllocation(4096);
-        await Assert.That(largeAllocation).IsLessThanOrEqualTo(smallAllocation + 1024);
+        largeAllocation.Should().BeLessThanOrEqualTo(smallAllocation + 1024);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -140,19 +140,17 @@ internal static class AllocationScenarios
         engine.CleanUp();
         for (int index = 0; index < 4; index++)
         {
-            if ((engine.EstimatedCount) != (entryCount))
-                Assert.Fail("Expected the warmup count to match the populated entries.");
+            engine.EstimatedCount.Should().Be(entryCount);
         }
 
         long before = GC.GetAllocatedBytesForCurrentThread();
         long count = engine.EstimatedCount;
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        if ((count) != (entryCount))
-            Assert.Fail($"Expected {entryCount} entries, found {count}.");
+        count.Should().Be(entryCount);
         return allocated;
     }
 
-    internal static async Task RepeatedResidentPutHasBoundedAllocation()
+    internal static void RepeatedResidentPutHasBoundedAllocation()
     {
         const int iterations = 4096;
         int[] values = new int[iterations];
@@ -182,9 +180,9 @@ internal static class AllocationScenarios
 
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         cache.CleanUp();
-        await Assert.That(cache.TryGet(1, out int current)).IsTrue();
-        await Assert.That(current).IsEqualTo(iterations - 1);
-        await Assert.That(allocated).IsLessThan(iterations * 128L);
+        cache.TryGet(1, out int current).Should().BeTrue();
+        current.Should().Be(iterations - 1);
+        allocated.Should().BeLessThan(iterations * 128L);
     }
 
     private sealed class Key(int number)
