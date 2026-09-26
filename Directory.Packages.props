@@ -5,7 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="JetBrains.Annotations" Version="2026.2.0" />
-    <PackageVersion Include="TUnit" Version="1.69.16" />
+    <PackageVersion Include="TUnit" Version="1.69.21" />
     <PackageVersion Include="FluentAssertions" Version="8.11.0" />
     <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
     <PackageVersion Include="Microsoft.Extensions.Caching.Memory" Version="10.0.12" />
