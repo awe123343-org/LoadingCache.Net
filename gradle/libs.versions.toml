@@ -1,7 +1,7 @@
 # Keep entries within each section in lexicographic order by key.
 [versions]
 caffeine = "3.3.0"
-guava = "33.7.1-jre"
+guava = "33.7.2-jre"
 jmh = "1.37"
 kotlin = "2.4.20"
 ktfmt = "0.64"
