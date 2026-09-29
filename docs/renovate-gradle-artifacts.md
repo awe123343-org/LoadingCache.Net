@@ -13,13 +13,29 @@ runs `properties` before its resolution task. Normal dependency updates use
 `--update-locks` for the updated coordinates; lockfile maintenance uses
 `--write-locks`. Enabling maintenance would not repair this earlier failure.
 
-The local host later received HTTP 200 for the same Kotlin BOM URL. This confirms
-availability from that host, not recovery of the failing Mend runner. Its egress
-IP and response body were unavailable; the Mend browser log was inaccessible.
-[Sonatype distinguishes 403 policy blocks from 429 rate limits](https://central.sonatype.org/faq/403-error-central/),
-but the incident-specific reason for the 403 remains unconfirmed. The Gradle
-child process performs these downloads, independently of Renovate's Maven
-metadata cache. Reordering the same repositories cannot bypass that rejection.
+The [original Mend job](https://developer.mend.io/github/awe123343-org/LoadingCache.Net/-/job/01a0edf9-b324-7c5d-8111-815ac529b6f7)
+provides the server response. At `2026-09-29 20:26:38 UTC`, the Caffeine metadata
+GET to Maven Central returned 403 with the message:
+
+> This IP has been blocked for excessive or automated consumption of Maven Central
+
+The response identifies `cf-ray: a42db9589d1fd69d-IAD`, and Renovate logs a fallback
+to stale cached metadata. This confirms an IP block on that Mend request. The
+same job's Gradle child then received 403 for Kotlin plugin/BOM downloads from
+the same host, consistent with that block. The child response body and actual
+egress IP are not logged, so the exact traffic or tenant responsible is unknown.
+A later local GET returning 200 proves availability from the local host, not that
+Mend access recovered. Renovate's metadata cache does not supply Gradle artifacts.
+[Sonatype's guidance](https://central.sonatype.org/faq/403-error-central/) calls for
+provider-side investigation of the blocked egress; a repository rebase cannot
+remove that block.
+
+The job also records no updated lock files and creation with artifact errors.
+[Renovate's two-hour gate](https://github.com/renovatebot/renovate/blob/44.112.0/lib/workers/repository/update/branch/index.ts#L709-L728)
+uses the dependency `releaseTimestamp`, not the PR creation time. That threshold
+had elapsed, so Renovate created the catalog-only PR and set `renovate/artifacts`
+red. The inaccurate log wording about the PR being older than two hours does not
+mean this PR already existed for that long.
 
 ## Recovery policy
 
