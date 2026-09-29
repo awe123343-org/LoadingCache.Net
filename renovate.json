@@ -18,6 +18,11 @@
   ],
   "packageRules": [
     {
+      "description": "Regenerate Gradle artifacts when the base branch advances.",
+      "matchManagers": ["gradle", "gradle-wrapper"],
+      "rebaseWhen": "behind-base-branch"
+    },
+    {
       "matchManagers": ["nuget"],
       "rangeStrategy": "bump"
     },
