@@ -58,11 +58,12 @@ internal enum ReadBufferOfferResult : byte
 internal sealed class StripedReadBuffer<TEvent> : IDisposable
 {
     private static readonly RingBuffer<TEvent>?[] DisposedTable = [];
-    private const int DroppedFullOffset = 0;
-    private const int DroppedFailedOffset = 1;
+    private const int DroppedFullOffset = 15;
+    private const int DroppedFailedOffset = 16;
 
-    // Two counters occupy the first two longs. A 17-long stride leaves at least 128 bytes
-    // between counters owned by adjacent shards without assuming array-base alignment.
+    // Two counters occupy the last two longs. A 17-long stride leaves at least 128 bytes
+    // between counters owned by adjacent shards, and between the first shard and the array
+    // length read by every drop, without assuming array-base alignment.
     private const int DropCounterStride = 17;
 
     private readonly int _maximumStripes;

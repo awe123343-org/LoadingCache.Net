@@ -926,6 +926,10 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
         internal void Restore(Entry entry, Action? beforeSnapshotRestored)
         {
+            if (entry.PublishedWrite is not null)
+            {
+                entry.PrepareWriteSnapshotUpdate();
+            }
             entry.SetValue(Value, _weakValue);
             InvokeHook(beforeSnapshotRestored);
             entry.Weight = Weight;
