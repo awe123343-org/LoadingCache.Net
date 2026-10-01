@@ -388,6 +388,35 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
         }
     }
 
+    /// <summary>Returns whether a ring has a published head and is at least a quarter full.</summary>
+    internal bool HasBacklog
+    {
+        get
+        {
+            if (Volatile.Read(ref _disposed) != 0)
+            {
+                return false;
+            }
+
+            RingBuffer<TEvent>?[]? table = Volatile.Read(ref _table);
+            if (table is null)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < table.Length; index++)
+            {
+                RingBuffer<TEvent>? ring = Volatile.Read(ref table[index]);
+                if (ring is not null && ring.HasBacklog)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
     internal ReadBufferStatistics GetStatistics(Action? afterTableCaptureForTesting = null)
     {
         bool isDisposed = Volatile.Read(ref _disposed) != 0;
@@ -919,6 +948,13 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
                 return Volatile.Read(ref slot.Sequence) == unchecked(head + 1);
             }
         }
+
+        // Reservations count towards pressure, but an unpublished head cannot make progress.
+        internal bool HasBacklog =>
+            HasPublished
+            && unchecked(
+                (ulong)(Volatile.Read(ref _writeCounter) - Volatile.Read(ref _readCounter))
+            ) >= (ulong)Math.Max(1, _capacity >> 2);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal ReadBufferOfferResult Offer(T value)

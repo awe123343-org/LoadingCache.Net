@@ -259,7 +259,7 @@ public sealed class EngineMaintenanceTests
     }
 
     [Test]
-    public async Task LastEnqueueDuringAWorkerPassIsDrainedWithoutLostWakeup()
+    public async Task BackgroundPassLeavesSmallReadTailForExplicitCleanup()
     {
         ManualMaintenanceScheduler scheduler = new();
         await using BlockingTestHook hook = new(Watchdog);
@@ -289,13 +289,20 @@ public sealed class EngineMaintenanceTests
         }
 
         hook.TimedOut.Should().BeFalse();
+        // ADR-0014: a background pass may leave a readable tail below a quarter of a stripe.
+        engine.GetPolicyReadBufferStatistics().Queued.Should().Be(45);
+        engine.GetPolicyReadBufferStatistics().Dequeued.Should().Be(256);
+        engine.GetMaintenanceStatistics().DrainPasses.Should().Be(1);
+        engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
+        cache.CleanUp();
         engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
+        engine.GetPolicyReadBufferStatistics().Dequeued.Should().Be(301);
         engine.GetMaintenanceStatistics().DrainPasses.Should().BeGreaterThan(1);
         engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
     }
 
     [Test]
-    public async Task ReadEnqueuedDuringSignalClearHandoffIsNotStranded()
+    public async Task SmallReadDuringSignalClearHandoffWaitsForExplicitCleanup()
     {
         ManualMaintenanceScheduler scheduler = new();
         await using BlockingTestHook hook = new(Watchdog);
@@ -322,7 +329,132 @@ public sealed class EngineMaintenanceTests
         }
 
         hook.TimedOut.Should().BeFalse();
+        engine.GetPolicyReadBufferStatistics().Queued.Should().Be(1);
+        engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
+        cache.CleanUp();
         engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
+        engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
+    }
+
+    [Test]
+    public async Task FullStripeDuringSignalClearHandoffIsNotStranded()
+    {
+        ManualMaintenanceScheduler scheduler = new();
+        await using BlockingTestHook hook = new(Watchdog);
+        var hooks = new LoadingCacheTestHooks { BeforeMaintenanceSignalClear = hook.Invoke };
+        CacheEngine<int, string> engine = CreateEngine(
+            scheduler,
+            hooks,
+            readStripeCount: 1,
+            readStripeCapacity: 8
+        );
+        using var cache = new Cache<int, string>(engine);
+        cache.Put(1, "ready");
+        for (int index = 0; index < 9; index++)
+        {
+            cache.TryGet(1, out _).Should().BeTrue();
+        }
+
+        // The full offer has already claimed the read signal before this worker starts.
+        Task worker = Task.Factory.StartNew(
+            scheduler.RunNext,
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default
+        );
+        try
+        {
+            await hook.Entered.WaitAsync(Watchdog, CancellationToken.None);
+            for (int index = 0; index < 9; index++)
+            {
+                cache.TryGet(1, out _).Should().BeTrue();
+            }
+        }
+        finally
+        {
+            hook.Release();
+            await worker.WaitAsync(Watchdog, CancellationToken.None);
+        }
+
+        hook.TimedOut.Should().BeFalse();
+        engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
+        engine.GetPolicyReadBufferStatistics().Dequeued.Should().Be(16);
+        engine.GetPolicyReadBufferStatistics().DroppedFull.Should().Be(2);
+        engine.GetMaintenanceStatistics().DrainPasses.Should().Be(2);
+        engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
+        scheduler.Pending.Should().Be(0);
+    }
+
+    [Test]
+    public async Task ExplicitCleanupWhileWorkerRunsDrainsBelowThresholdAcrossPasses()
+    {
+        ManualMaintenanceScheduler scheduler = new();
+        await using BlockingTestHook hook = new(Watchdog);
+        var hooks = new LoadingCacheTestHooks { AfterPolicyMaintenance = hook.Invoke };
+        CacheEngine<int, string> engine = CreateEngine(
+            scheduler,
+            hooks,
+            readStripeCount: 1,
+            readStripeCapacity: 2048
+        );
+        using var cache = new Cache<int, string>(engine);
+        cache.Put(1, "ready");
+        Task worker = Task.Factory.StartNew(
+            scheduler.RunNext,
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default
+        );
+        try
+        {
+            // This hook pauses after the policy lock is released but before the owner exits.
+            await hook.Entered.WaitAsync(Watchdog, CancellationToken.None);
+            for (int index = 0; index < 300; index++)
+            {
+                cache.TryGet(1, out _).Should().BeTrue();
+            }
+            cache.CleanUp();
+            engine.GetPolicyReadBufferStatistics().Queued.Should().Be(300);
+            engine
+                .GetMaintenanceStatistics()
+                .State.Should()
+                .Be(MaintenanceCoordinatorState.RunningRequired);
+        }
+        finally
+        {
+            hook.Release();
+            await worker.WaitAsync(Watchdog, CancellationToken.None);
+        }
+
+        hook.TimedOut.Should().BeFalse();
+        engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
+        engine.GetPolicyReadBufferStatistics().Dequeued.Should().Be(300);
+        engine.GetMaintenanceStatistics().DrainPasses.Should().Be(3);
+        engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
+    }
+
+    [Test]
+    public void RejectedSchedulerDrainsBelowThresholdReadTail()
+    {
+        ManualMaintenanceScheduler scheduler = new() { Reject = true };
+        // The last 256 observations are below the quarter-full threshold of 512.
+        CacheEngine<int, string> engine = CreateEngine(
+            scheduler,
+            readStripeCount: 1,
+            readStripeCapacity: 2048
+        );
+        using var cache = new Cache<int, string>(engine);
+        cache.Put(1, "ready");
+        for (int index = 0; index < 2049; index++)
+        {
+            cache.TryGet(1, out _).Should().BeTrue();
+        }
+
+        engine.GetPolicyReadBufferStatistics().Queued.Should().Be(0);
+        engine.GetPolicyReadBufferStatistics().Dequeued.Should().Be(2048);
+        engine.GetPolicyReadBufferStatistics().DroppedFull.Should().Be(1);
+        engine.GetMaintenanceStatistics().DrainPasses.Should().Be(8);
+        engine.GetMaintenanceStatistics().FallbackRequired.Should().BeFalse();
         engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
     }
 

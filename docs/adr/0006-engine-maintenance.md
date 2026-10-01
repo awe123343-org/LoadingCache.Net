@@ -24,14 +24,18 @@ mapping visibility, generation fencing, or loader ownership.
 
 The coordinator has one drain owner. Its drain callback acquires the engine gate and then the
 policy gate, in that order. It drains at most the configured per-pass read budget and returns
-whether more work remains. A worker handoff re-checks the bounded transport after clearing the
-signal, so a producer racing the handoff cannot strand a queued read. The focused test seam can
-pause immediately before that re-check and proves the race with a real scheduled worker.
+whether more eligible work remains. Following the 30 September 2026 revision in
+[ADR-0014 R1-R3](0014-cas-read-transport.md), background passes re-arm for reads only when a stripe
+has a published head and is at least a quarter full. A smaller readable tail waits for a later full
+offer, write or explicit cleanup. The worker clears its signal and re-checks this condition;
+a full stripe with a published head always qualifies, preserving the full-offer handoff.
 
 If the injected scheduler rejects an initial request, the producer performs one coordinator
-cleanup invocation. The coordinator invocation has its finite pass budget; the engine does not
-wrap it in an unbounded loop. If a lossy read batch remains, the adapter clears its signal so a
-later hit or explicit `CleanUp` may retry. Mapping writes do not rely on the lossy transport:
+cleanup invocation. It requests a read drain under the policy gate, so this cleanup follows
+`HasPublished` rather than the background backlog threshold. The coordinator invocation has its
+finite pass budget; the engine does not wrap it in an unbounded loop. If a lossy read batch remains,
+the adapter clears its signal so a later hit or explicit `CleanUp` may retry. Mapping writes do not
+rely on the lossy transport:
 `OnPublish` and `OnRemove` synchronously drain a bounded batch and apply exact node identity under
 the policy gate. Eviction callbacks are invoked through the existing engine fencing path, never
 from the ordinary hit path.
@@ -42,8 +46,11 @@ touch or evict a newer generation. Disposal stops the coordinator and disposes t
 and policy roots; it does not wait for arbitrary user-owned loader work.
 
 The engine's resident size and weighted-size bounds remain soft during concurrent publication and
-maintenance. `CleanUp` performs expiration while holding the engine gate, releases it, and then
-drains policy maintenance. It does not await loaders or user callbacks.
+maintenance. `CleanUp` performs expiration while holding the engine gate, requests a read drain
+under the policy gate, releases the engine gate, and then drains policy maintenance. The request
+survives a running owner and uses `HasPublished` until no head is immediately consumable. With
+sufficient budget and no new publications it drains readable tails; budget exhaustion or scheduler
+rejection retains the existing retry behaviour. It does not await loaders or user callbacks.
 
 ## Lock and publication order
 
@@ -94,10 +101,10 @@ identity and node fencing are required for clear/set/invalidate races.
 
 ## Evidence
 
-`tests/LoadingCache.Tests/EngineMaintenanceTests.cs` covers eight focused cases on both target
-frameworks: hit progress during a paused policy worker, bounded read drops, rejected-scheduler
-fallback, recovery when a full read stripe meets a budgeted rejected fallback, enqueue during a
-running worker, enqueue during the signal-clear handoff, stale events after clear/set, and
-quiescent size/weight convergence with invariant checks.
+`tests/LoadingCache.Tests/EngineMaintenanceTests.cs` covers hit progress during a paused policy
+worker, bounded read drops, rejected-scheduler fallback, recovery when a full read stripe meets a
+budgeted rejected fallback, delayed small tails and their explicit cleanup, cleanup requested
+during a running owner, full-stripe signal handoff, stale events after clear/set, and quiescent
+size/weight convergence with invariant checks.
 
 Validation status is recorded in [release readiness](../release-readiness.md).

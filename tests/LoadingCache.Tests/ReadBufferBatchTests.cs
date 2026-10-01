@@ -85,6 +85,29 @@ public sealed class ReadBufferBatchTests
     }
 
     [Test]
+    [Arguments(1)]
+    [Arguments(4)]
+    [Arguments(64)]
+    public void BacklogRequiresAtLeastAQuarterOfAStripe(int capacity)
+    {
+        using StripedReadBuffer<int> buffer = new(1, capacity);
+        int threshold = Math.Max(1, capacity / 4);
+        buffer.HasBacklog.Should().BeFalse();
+        for (int index = 0; index < threshold - 1; index++)
+        {
+            buffer.TryEnqueue(index).Should().BeTrue();
+            buffer.HasBacklog.Should().BeFalse();
+        }
+
+        buffer.TryEnqueue(threshold).Should().BeTrue();
+        buffer.HasBacklog.Should().BeTrue();
+        buffer.DrainTo(_ => { }, 1).Should().Be(1);
+        buffer.HasBacklog.Should().BeFalse();
+        buffer.Dispose();
+        buffer.HasBacklog.Should().BeFalse();
+    }
+
+    [Test]
     [Arguments(long.MaxValue - 2)]
     [Arguments(-2L)]
     public void BoundedBatchReleasesTheConsumedPrefixAcrossCounterWrap(long counter)
@@ -97,8 +120,10 @@ public sealed class ReadBufferBatchTests
             buffer.TryEnqueue(value).Should().BeTrue();
         }
 
+        buffer.HasBacklog.Should().BeTrue();
         List<int> observed = [];
         buffer.DrainTo(observed.Add, 3).Should().Be(3);
+        buffer.HasBacklog.Should().BeTrue();
         buffer.GetStatistics().Queued.Should().Be(1);
         buffer.GetStatistics().Dequeued.Should().Be(3);
         for (int value = 5; value <= 7; value++)
@@ -110,6 +135,7 @@ public sealed class ReadBufferBatchTests
         buffer.DrainTo(observed.Add, 4).Should().Be(4);
         observed.Should().Equal(1, 2, 3, 4, 5, 6, 7);
         buffer.HasPublished.Should().BeFalse();
+        buffer.HasBacklog.Should().BeFalse();
         ReadBufferStatistics statistics = buffer.GetStatistics();
         statistics.Queued.Should().Be(0);
         statistics.Enqueued.Should().Be(7);
@@ -185,11 +211,13 @@ public sealed class ReadBufferBatchTests
             buffer.TryEnqueue(2).Should().BeTrue();
             buffer.GetStatistics().Queued.Should().Be(2);
             buffer.GetStatistics().Enqueued.Should().Be(2);
+            buffer.HasBacklog.Should().BeTrue();
             List<int> observed = [];
             buffer.DrainTo(observed.Add, 4).Should().Be(1);
             observed.Should().Equal(0);
             buffer.GetStatistics().Queued.Should().Be(1);
             buffer.HasPublished.Should().BeFalse();
+            buffer.HasBacklog.Should().BeFalse();
             publication.Release();
             (await paused.WaitAsync(TestTimeout)).Should().BeTrue();
             buffer.DrainTo(observed.Add, 4).Should().Be(2);

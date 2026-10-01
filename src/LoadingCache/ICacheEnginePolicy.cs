@@ -44,6 +44,10 @@ internal interface ICacheEnginePolicy
     // next full read buffer must be allowed to request a new coordinator owner.
     void ResetReadMaintenanceSignalAfterFallback() { }
 
+    // Explicit and rejected-scheduler cleanup consume every published head within the existing
+    // coordinator budget. The request survives a running owner until no readable work remains.
+    void RequestReadDrain() { }
+
     void FlushWrites() { }
 
     WriteBufferStatistics GetWriteBufferStatistics() => default;
