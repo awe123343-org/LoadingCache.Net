@@ -29,6 +29,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     // Raw timestamp deltas below these bounds are certainly fresh; -1 means disabled.
     private long _expireAfterWriteFreshBound;
     private long _expireAfterAccessFreshBound;
+    private readonly long _accessTouchToleranceCap;
     private long _refreshAfterWriteTicks;
     private readonly long _loadTimeoutTicks;
     private readonly long _refreshFailureBackoffTicks;
@@ -257,6 +258,10 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                     WeakValues: false,
                     OnValueRetired: null,
                 };
+        _accessTouchToleranceCap =
+            _useFixedWriteSnapshots && options.ExpireAfterAccess.HasValue
+                ? _timeProvider.TimestampFrequency / 1_000
+                : 0;
         _recordStatistics = options.RecordStatistics;
         _enableExpirationScheduler = options.EnableExpirationScheduler;
         _testHooks = options.TestHooks;
@@ -2565,7 +2570,14 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         // afterwards is conservative; revalidation prevents combining an old value
         // with a duration extended only after refresh/replacement. Rollback always
         // publishes a new reference, so it cannot conceal an intervening version.
-        if (accessBound >= 0)
+        // Coalesce nearby accesses only on this validated fixed-expiry path. The
+        // recorded access may lag by this tolerance, capped at one millisecond;
+        // locked touches remain exact, including the near-deadline fallback.
+        if (
+            accessBound >= 0
+            && unchecked(now - accessTimestamp)
+                > Math.Min(accessBound >> 20, _accessTouchToleranceCap)
+        )
         {
             TouchPublished(entry, publication, accessTimestamp, now);
         }

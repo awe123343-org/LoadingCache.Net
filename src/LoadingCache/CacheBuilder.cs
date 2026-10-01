@@ -152,6 +152,11 @@ public sealed class CacheBuilder<TKey, TValue>
     }
 
     /// <summary>Enables expire-after-access.</summary>
+    /// <remarks>
+    /// Lock-free fixed-expiration hits may coalesce accesses within a tolerance of at most
+    /// duration / 2^20, capped at one millisecond. Expiration can occur this much early.
+    /// See <see cref="IFixedExpirationPolicy{TKey,TValue}"/> for policy age and duration-change semantics.
+    /// </remarks>
     public CacheBuilder<TKey, TValue> ExpireAfterAccess(TimeSpan duration)
     {
         ValidateDuration(duration, nameof(duration));
