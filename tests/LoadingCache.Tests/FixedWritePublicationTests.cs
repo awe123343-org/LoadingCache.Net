@@ -9,6 +9,75 @@ public sealed class FixedWritePublicationTests
     private static readonly TimeSpan ReaderWatchdog = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan TimeToLive = TimeSpan.FromSeconds(10);
 
+    [Test]
+    public async Task AccessReadThatCapturedUpdatingPublicationKeepsAnExactTouch()
+    {
+        await using var publication = new BlockingTestHook(Watchdog);
+        await using var timestamp = new BlockingTestHook(Watchdog);
+        var clock = new ReaderGatedTimeProvider(timestamp);
+        var engine = new CacheEngine<int, string>(
+            new CacheEngineOptions<int, string>
+            {
+                MaximumSize = 8,
+                TimeProvider = clock,
+                ExpireAfterAccess = TimeSpan.FromDays(1),
+                TestHooks = new LoadingCacheTestHooks
+                {
+                    BeforeRefreshSnapshotPublished = publication.Invoke,
+                },
+            }
+        );
+        await using var cache = new AsyncLoadingCache<int, string>(
+            engine,
+            static (_, _) => throw new InvalidOperationException("Unexpected load."),
+            static (_, _, _) => Task.FromResult("refreshed")
+        );
+        cache.Set(1, "old");
+        clock.Advance(TimeSpan.FromTicks(1));
+        Task<string> refresh = StartRefresh(cache);
+        Task<string>? reader = null;
+        try
+        {
+            await publication.Entered.WaitAsync(Watchdog);
+            clock.Advance(TimeSpan.FromTicks(1));
+            reader = Task.Factory.StartNew(
+                () =>
+                    clock.ReadAtNextTimestamp(() =>
+                    {
+                        cache.TryGet(1, out string? value).Should().BeTrue();
+                        return value!;
+                    }),
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default
+            );
+            if (Environment.Is64BitProcess)
+            {
+                // The lock-free reader captured Updating before sampling time.
+                // A 32-bit reader instead waits for the entry lock first.
+                await timestamp.Entered.WaitAsync(Watchdog);
+            }
+
+            publication.Release();
+            (await refresh.WaitAsync(Watchdog)).Should().Be("refreshed");
+            timestamp.Release();
+            (await reader.WaitAsync(Watchdog)).Should().Be("refreshed");
+            // One tick after refresh is inside the coalescing tolerance, but this
+            // reader must retry through the exact locked publication fallback.
+            cache.Policy.ExpireAfterAccess!.AgeOf(1).Should().Be(TimeSpan.Zero);
+        }
+        finally
+        {
+            publication.Release();
+            timestamp.Release();
+            await Task.WhenAll(refresh, reader ?? Task.CompletedTask).WaitAsync(Watchdog);
+        }
+
+        publication.TimedOut.Should().BeFalse();
+        timestamp.TimedOut.Should().BeFalse();
+        engine.AssertInvariants();
+    }
+
     // These tests specify nonblocking fixed-write snapshots. The previous locked
     // reader can preserve correctness while failing this new progress requirement.
     [Test]
