@@ -1135,6 +1135,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             {
                 AdvanceExpirationLocked(GetExpirationNowLocked());
             }
+
+            _policy.RequestReadDrain();
         }
 
         MaintenanceCleanupResult cleanup = _maintenanceCoordinator.CleanUp();
@@ -1159,6 +1161,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         // drain loop. One coordinator invocation already has its own bounded
         // pass budget; a remaining lossy read batch is retried by a later hit
         // or explicit CleanUp.
+        _policy.RequestReadDrain();
         MaintenanceCleanupResult cleanup = _maintenanceCoordinator.CleanUp();
         if (cleanup.FallbackRequired)
         {

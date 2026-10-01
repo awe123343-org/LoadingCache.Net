@@ -33,6 +33,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
     private long _nextWriteSequence;
     private int _maintenanceSignal;
     private int _writeMaintenanceSignal;
+    private bool _readDrainRequested;
     private bool _evictionPending;
     private bool _skipReadBuffer;
 
@@ -354,6 +355,14 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
         }
     }
 
+    public void RequestReadDrain()
+    {
+        lock (_policyGate)
+        {
+            _readDrainRequested = true;
+        }
+    }
+
     public WriteBufferStatistics GetWriteBufferStatistics() => _pendingWrites.GetStatistics();
 
     public ReadBufferStatistics GetReadBufferStatistics() => _pendingAccesses.GetStatistics();
@@ -445,6 +454,7 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
             ResetPolicyLocked();
             Volatile.Write(ref _maintenanceSignal, 0);
             Volatile.Write(ref _writeMaintenanceSignal, 0);
+            _readDrainRequested = false;
             _evictionPending = false;
         }
 
@@ -658,24 +668,28 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
 
     private bool UpdateMaintenanceSignalLocked()
     {
-        if (_pendingAccesses.HasPublished)
+        if (HasReadMaintenanceWorkLocked())
         {
             Volatile.Write(ref _maintenanceSignal, 1);
             return true;
         }
 
-        // Clear the signal, then re-check the transport. A producer that races
-        // this handoff either observes the cleared signal and requests a worker
-        // or is observed by this second check and keeps the worker alive.
+        // A full stripe is always a backlog when its head is published. A full offer racing
+        // this handoff either claims the cleared signal or is covered by the second check.
+        // Smaller background tails remain delayable until a full offer, write or cleanup.
         Volatile.Write(ref _maintenanceSignal, 0);
-        if (!_pendingAccesses.HasPublished)
+        if (!HasReadMaintenanceWorkLocked())
         {
+            _readDrainRequested = false;
             return false;
         }
 
         Volatile.Write(ref _maintenanceSignal, 1);
         return true;
     }
+
+    private bool HasReadMaintenanceWorkLocked() =>
+        _readDrainRequested ? _pendingAccesses.HasPublished : _pendingAccesses.HasBacklog;
 
     private bool UpdateWriteMaintenanceSignalLocked()
     {
