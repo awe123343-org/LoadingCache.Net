@@ -22,14 +22,14 @@ internal sealed partial class CacheEngine<TKey, TValue>
     {
         // The ref is forwarded to Volatile.Read/Write; no unsynchronized value access occurs here.
         // ReSharper disable once InconsistentlySynchronizedField
-        SetFixedDuration(ref _expireAfterAccessTicks, duration);
+        SetFixedDuration(ref _expireAfterAccessTicks, ref _expireAfterAccessFreshBound, duration);
     }
 
     private void SetExpireAfterWrite(TimeSpan duration)
     {
         // The ref is forwarded to Volatile.Read/Write; no unsynchronized value access occurs here.
         // ReSharper disable once InconsistentlySynchronizedField
-        SetFixedDuration(ref _expireAfterWriteTicks, duration);
+        SetFixedDuration(ref _expireAfterWriteTicks, ref _expireAfterWriteFreshBound, duration);
     }
 
     private void SetRefreshAfterWrite(TimeSpan duration)
@@ -43,7 +43,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         }
     }
 
-    private void SetFixedDuration(ref long target, TimeSpan duration)
+    private void SetFixedDuration(ref long target, ref long freshBound, TimeSpan duration)
     {
         ValidateDuration(duration, nameof(duration));
         ThrowIfDisposed();
@@ -52,6 +52,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         {
             ThrowIfDisposedLocked();
             Volatile.Write(ref target, duration.Ticks);
+            Volatile.Write(ref freshBound, ToFreshTimestampBound(duration.Ticks));
             RescheduleAllExpirationNodesLocked();
         }
 
@@ -811,10 +812,54 @@ internal sealed partial class CacheEngine<TKey, TValue>
     {
         // Compare timestamp units before TimeSpan truncation: a negative fraction of a tick
         // must not move access time backwards. Subtraction preserves signed wraparound.
-        if (unchecked(now - entry.AccessTimestamp) >= 0)
+        // Lock-free fixed-expiry hits also advance it, so only a forward CAS publishes.
+        long observed = Volatile.Read(ref entry.AccessTimestamp);
+        while (unchecked(now - observed) > 0)
         {
-            entry.AccessTimestamp = now;
+            long current = Interlocked.CompareExchange(ref entry.AccessTimestamp, now, observed);
+            if (current == observed)
+            {
+                return;
+            }
+            observed = current;
         }
+    }
+
+    // Advances access time for a validated lock-free hit. A writer changes access time only
+    // after replacing the publication with a full fence, so retry only while it is unchanged.
+    private static void TouchPublished(
+        Entry entry,
+        FixedWritePublication? publication,
+        long observed,
+        long now
+    )
+    {
+        while (unchecked(now - observed) > 0)
+        {
+            long current = Interlocked.CompareExchange(ref entry.AccessTimestamp, now, observed);
+            if (
+                current == observed
+                || !ReferenceEquals(publication, Volatile.Read(ref entry.PublishedWrite))
+            )
+            {
+                return;
+            }
+            observed = current;
+        }
+    }
+
+    // Largest raw timestamp delta that is certainly below the duration. The 2^-20 guard band
+    // absorbs double rounding in GetElapsedTime; reads inside it take the exact locked path.
+    private long ToFreshTimestampBound(long ticks)
+    {
+        if (ticks < 0)
+        {
+            return -1;
+        }
+
+        Int128 raw = (Int128)ticks * _timeProvider.TimestampFrequency / TimeSpan.TicksPerSecond;
+        long bound = raw >= long.MaxValue ? long.MaxValue : (long)raw;
+        return bound - (bound >> 20);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

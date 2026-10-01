@@ -25,6 +25,10 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     private readonly bool _supportsBulkLoading;
     private long _expireAfterWriteTicks;
     private long _expireAfterAccessTicks;
+
+    // Raw timestamp deltas below these bounds are certainly fresh; -1 means disabled.
+    private long _expireAfterWriteFreshBound;
+    private long _expireAfterAccessFreshBound;
     private long _refreshAfterWriteTicks;
     private readonly long _loadTimeoutTicks;
     private readonly long _refreshFailureBackoffTicks;
@@ -216,6 +220,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         _refreshFailureBackoffTicks = options.RefreshFailureBackoff.Ticks;
         _expiry = options.Expiry;
         _timeProvider = options.TimeProvider;
+        _expireAfterWriteFreshBound = ToFreshTimestampBound(_expireAfterWriteTicks);
+        _expireAfterAccessFreshBound = ToFreshTimestampBound(_expireAfterAccessTicks);
         // The policy view exposes only features enabled at construction, so a cache without
         // these policies cannot acquire a read-side clock dependency through policy mutation.
         _requiresReadTime =
@@ -240,10 +246,11 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                     EvictionListener: null,
                 };
         _useFixedWriteSnapshots =
-            options
+            (options.ExpireAfterWrite.HasValue || options.ExpireAfterAccess.HasValue)
+            // Lock-free access touches race locked plain reads, atomic only on 64-bit.
+            && (options.ExpireAfterAccess is null || Environment.Is64BitProcess)
+            && options
                 is {
-                    ExpireAfterWrite: not null,
-                    ExpireAfterAccess: null,
                     RefreshAfterWrite: null,
                     Expiry: null,
                     WeakKeys: false,
@@ -2509,7 +2516,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         }
 
         FixedWritePublication? publication = Volatile.Read(ref entry.PublishedWrite);
-        long duration = Volatile.Read(ref _expireAfterWriteTicks);
+        long writeBound = Volatile.Read(ref _expireAfterWriteFreshBound);
+        long accessBound = Volatile.Read(ref _expireAfterAccessFreshBound);
         TValue snapshotValue;
         long writeTimestamp;
         if (publication is null)
@@ -2522,9 +2530,19 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             snapshotValue = publication.Value;
             writeTimestamp = publication.Timestamp;
         }
+        // Writers replace the publication with a full fence before changing access time, so an
+        // unchanged non-updating publication proves this access time belongs to its value.
+        long accessTimestamp = accessBound < 0 ? 0 : Volatile.Read(ref entry.AccessTimestamp);
         long now = _timeProvider.GetTimestamp();
         if (
-            GetElapsedTime(writeTimestamp, now) >= TimeSpan.FromTicks(duration)
+            (writeBound >= 0 && unchecked(now - writeTimestamp) >= writeBound)
+            || (
+                accessBound >= 0
+                && (
+                    publication is { Updating: true }
+                    || unchecked(now - accessTimestamp) >= accessBound
+                )
+            )
             || !ReferenceEquals(publication, Volatile.Read(ref entry.PublishedWrite))
             || Volatile.Read(ref entry.Retired)
         )
@@ -2544,6 +2562,10 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         // afterwards is conservative; revalidation prevents combining an old value
         // with a duration extended only after refresh/replacement. Rollback always
         // publishes a new reference, so it cannot conceal an intervening version.
+        if (accessBound >= 0)
+        {
+            TouchPublished(entry, publication, accessTimestamp, now);
+        }
         value = snapshotValue;
         readyEntry = entry;
         RecordHit();

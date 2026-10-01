@@ -197,10 +197,14 @@ internal sealed partial class CacheEngine<TKey, TValue>
         }
     }
 
-    private sealed class FixedWritePublication(TValue value, long timestamp)
+    private sealed class FixedWritePublication(TValue value, long timestamp, bool updating = false)
     {
         internal readonly TValue Value = value;
         internal readonly long Timestamp = timestamp;
+
+        // Installed while a locked writer mutates the entry: value/write time stay valid,
+        // but mutable access time may be torn, so access-expiring readers must lock.
+        internal readonly bool Updating = updating;
     }
 
     private sealed class Entry
@@ -220,7 +224,9 @@ internal sealed partial class CacheEngine<TKey, TValue>
             Generation = generation;
         }
 
-        internal readonly object Sync = new();
+        // The private entry is its own monitor, saving one lock object per entry. Identity maps
+        // (expiration nodes) use a field hash so a runtime header hash never inflates the lock.
+        internal object Sync => this;
         private readonly TKey? _strongKey;
         internal readonly ReferenceKey<TKey>? WeakKey;
         internal readonly long Epoch;
@@ -264,6 +270,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
         internal long RefreshFailureTimestamp;
 
         internal bool HasRefreshFailure;
+
+        public override int GetHashCode() => Generation.GetHashCode();
 
         internal static Entry Loading(
             TKey key,
@@ -331,16 +339,14 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
         internal void PrepareWriteSnapshotUpdate()
         {
-            if (PublishedWrite is null)
-            {
-                // Initial atomic fields are immutable until this full fence. Readers
-                // validate the null marker after acquiring both fields; subsequent
-                // mutations cannot become visible before the snapshot replaces it.
-                Interlocked.Exchange(
-                    ref PublishedWrite,
-                    new FixedWritePublication(_strongValue, WriteTimestamp)
-                );
-            }
+            // Initial atomic fields are immutable until this full fence. Readers
+            // validate the null marker after acquiring both fields; subsequent
+            // mutations cannot become visible before the snapshot replaces it.
+            // Every update installs a new identity because access time is mutable.
+            Interlocked.Exchange(
+                ref PublishedWrite,
+                new FixedWritePublication(_strongValue, WriteTimestamp, updating: true)
+            );
         }
 
         internal bool TryGetKey([MaybeNullWhen(false)] out TKey key)

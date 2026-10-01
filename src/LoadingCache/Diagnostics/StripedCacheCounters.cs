@@ -51,7 +51,13 @@ internal sealed class StripedCacheCounters
 {
     private const int MaximumStripeCount = 64;
 
-    private readonly long[][] _stripes;
+    // Stripes share one flat array. A 16-long gap before every stripe keeps each stripe's
+    // counters at least 128 bytes from both a neighbouring stripe and the array length read by
+    // every bounds check, without assuming array-base alignment.
+    private const int StripePadding = 16;
+    private const int StripeStride = StripePadding + (int)CacheCounterKind.Count;
+
+    private readonly long[] _values;
     private readonly int _stripeMask;
 
     internal StripedCacheCounters(int? stripeCount = null)
@@ -59,22 +65,17 @@ internal sealed class StripedCacheCounters
         int count = stripeCount ?? NormalizeStripeCount(Environment.ProcessorCount);
         ValidateStripeCount(count);
 
-        _stripes = new long[count][];
-        for (int index = 0; index < count; index++)
-        {
-            _stripes[index] = new long[(int)CacheCounterKind.Count];
-        }
-
+        _values = new long[count * StripeStride];
         _stripeMask = count - 1;
     }
 
     /// <summary>Gets the fixed number of counter stripes.</summary>
-    internal int StripeCount => _stripes.Length;
+    internal int StripeCount => _stripeMask + 1;
 
     /// <summary>
     /// Gets the bounded number of counter slots allocated by this instance.
     /// </summary>
-    internal int CounterSlotCount => _stripes.Length * (int)CacheCounterKind.Count;
+    internal int CounterSlotCount => StripeCount * (int)CacheCounterKind.Count;
 
     /// <summary>
     /// Adds a non-negative delta to a counter selected by the current managed thread.
@@ -100,9 +101,9 @@ internal sealed class StripedCacheCounters
         for (int counter = 0; counter < (int)CacheCounterKind.Count; counter++)
         {
             long total = 0;
-            foreach (long[] stripe in _stripes)
+            for (int index = StripePadding + counter; index < _values.Length; index += StripeStride)
             {
-                total = SaturatingAdd(total, Volatile.Read(ref stripe[counter]));
+                total = SaturatingAdd(total, Volatile.Read(ref _values[index]));
                 if (total == long.MaxValue)
                 {
                     break;
@@ -126,7 +127,7 @@ internal sealed class StripedCacheCounters
     {
         ValidateCounter(counter);
         ValidateDelta(delta);
-        if ((uint)stripe >= (uint)_stripes.Length)
+        if ((uint)stripe >= (uint)StripeCount)
         {
             throw new ArgumentOutOfRangeException(nameof(stripe));
         }
@@ -165,11 +166,10 @@ internal sealed class StripedCacheCounters
 
     private void AddToStripe(int stripe, CacheCounterKind counter, long delta)
     {
-        long[] values = _stripes[stripe];
-        int index = (int)counter;
+        ref long value = ref _values[stripe * StripeStride + StripePadding + (int)counter];
         while (true)
         {
-            long current = Volatile.Read(ref values[index]);
+            long current = Volatile.Read(ref value);
             if (current == long.MaxValue)
             {
                 return;
@@ -177,7 +177,7 @@ internal sealed class StripedCacheCounters
 
             long available = long.MaxValue - current;
             long next = delta >= available ? long.MaxValue : current + delta;
-            if (Interlocked.CompareExchange(ref values[index], next, current) == current)
+            if (Interlocked.CompareExchange(ref value, next, current) == current)
             {
                 return;
             }

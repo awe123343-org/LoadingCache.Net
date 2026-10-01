@@ -4,7 +4,7 @@ Accepted, 12 September 2026.
 
 A single global increment location can contend on every hit; thread/key dictionaries would retain unbounded diagnostic history. Use fixed cache-owned stripes and distinguish cumulative counters from ownership gauges.
 
-`StripedCacheCounters` accepts power-of-two stripe counts from 1 through 64. Default selection rounds processor count up and caps at 64. Each stripe contains `CacheCounterKind.Count` longs, selected by `unchecked((uint)Environment.CurrentManagedThreadId) & (stripeCount-1)`. Thread IDs may be reused; there is no thread registry, key/tenant label map or claimed cache-line alignment guarantee.
+`StripedCacheCounters` accepts power-of-two stripe counts from 1 through 64. Default selection rounds processor count up and caps at 64. Each stripe contains `CacheCounterKind.Count` longs, selected by `unchecked((uint)Environment.CurrentManagedThreadId) & (stripeCount-1)`. Stripes share one flat `long[]`; a 16-long gap before every stripe keeps its counters at least 128 bytes from neighbouring stripes and from the array length read by every bounds check, so a stripe-0 writer does not slow other stripes. Thread IDs may be reused; there is no thread registry, key/tenant label map or claimed cache-line alignment guarantee.
 
 `Add(kind,delta)` requires a known counter and non-negative delta. Zero does not write. `Volatile.Read`/`Interlocked.CompareExchange` saturate at `long.MaxValue`; already saturated fields need no CAS. Ordinary `Interlocked.Add` would wrap negative. Saturated values mean at least that many events.
 
