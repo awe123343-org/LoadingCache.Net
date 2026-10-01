@@ -37,6 +37,7 @@ Weak-key storage uses `ConcurrentDictionary<object, Entry>` with stored stable i
 | Bulk promise completion                                   | Separate short group gate, never nested with engine gate; bounded internal TCS/monitor signalling only.                                                      |
 | Policy/deques/sketch/write buffer                         | Engine/adapter/write buffer share one monitor. Exact token pending counts and node sequences belong to it.                                                   |
 | Wheel and normalised time                                 | Engine gate, at most 128 node visits per pass.                                                                                                               |
+| Entry expiration-node reference                           | Engine gate for both fixed and variable expiry; due processing validates node reference and exact map identity.                                              |
 | Expiration timer arm/dispose                              | Expiration-timer gate → engine gate; mutation releases engine before requesting a timer. Stop timers outside engine mutation.                                |
 | Timer running/re-arm                                      | Interlocked/Volatile ownership flags, one cache timer.                                                                                                       |
 | Runtime TTL/TTI duration                                  | Volatile reads/writes; setters coordinate and re-arm.                                                                                                        |
@@ -47,6 +48,8 @@ Weak-key storage uses `ConcurrentDictionary<object, Entry>` with stored stable i
 | Statistics                                                | Bounded striped atomic counters and independently owned gauges; weak snapshots.                                                                              |
 
 Entry-only readers release their monitor before requesting engine coordination. Engine-coordinated fallback can retire another entry while holding an entry monitor, but the outer engine gate serialises such mutation. Parallel resident writers touch only their own entry under that lock. User loaders, weighers, expiry/listener/disposal callbacks and cancellation callbacks execute outside internal locks. Comparers and timestamp providers are explicitly required to be fast, stable and non-reentrant.
+
+Each timed Entry holds its current identity timer node directly. Retiring a schedule clears that reference and permanently retires the node; a surviving refresh can later install a new node on the same Entry. A stale due node cannot clear a newer reference. Advance and due-batch processing stay inside the engine gate. Clear/disposal retire current entries before clearing the map, then retire any remaining wheel bucket links and clear pending continuation work. Already-detached due nodes belong to the caller, so bucket teardown alone cannot retire them. Teardown may visit every node; the normal 128-node advance budget is unchanged.
 
 Async shared promises are Tasks with `RunContinuationsAsynchronously`; public ValueTasks are per-call containers. Synchronous loading uses its own monitor completion without awaiting arbitrary user tasks. No lock contains await, `.Wait()` or `.Result`.
 

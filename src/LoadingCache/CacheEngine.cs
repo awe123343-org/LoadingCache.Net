@@ -44,7 +44,6 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     private readonly MemoryPressureController<TKey, TValue>? _memoryPressureController;
     private readonly object _expirationTimerGate = new();
     private TimerWheel<Entry>? _expirationWheel;
-    private readonly Dictionary<Entry, IdentityTimerNode<Entry>>? _expirationNodes;
     private long _expirationOriginTimestamp;
     private ulong _expirationNow;
     private bool _expirationClockInitialized;
@@ -322,7 +321,6 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             _expirationOriginTimestamp = _timeProvider.GetTimestamp();
             _expirationClockInitialized = true;
             _expirationWheel = new TimerWheel<Entry>();
-            _expirationNodes = new Dictionary<Entry, IdentityTimerNode<Entry>>();
             if (_enableExpirationScheduler)
             {
                 _expirationTimer = CreateExpirationTimer();
@@ -1342,6 +1340,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     {
         lock (_gate)
         {
+            AssertExpirationInvariantsLocked();
             if (_policy is WindowTinyLfuEnginePolicy bufferedPolicy)
             {
                 bufferedPolicy.AssertInvariants();
