@@ -43,6 +43,7 @@ public sealed class CacheBuilder<TKey, TValue>
     private TimeProvider _timeProvider = System.TimeProvider.System;
     private bool _recordStatistics;
     private bool _enableExpirationScheduler;
+    private bool _enableCoarseExpirationChecks;
     private TimeSpan? _memoryPressureSamplingInterval;
     private double _memoryPressureThreshold = 0.9;
     private double _memoryPressureTrimFraction = 0.1;
@@ -203,6 +204,22 @@ public sealed class CacheBuilder<TKey, TValue>
     public CacheBuilder<TKey, TValue> EnableExpirationScheduler()
     {
         _enableExpirationScheduler = true;
+        return this;
+    }
+
+    /// <summary>
+    /// Uses a shared coarse clock for eligible lock-free expire-after-write hits.
+    /// Disabled by default; requires <see cref="System.TimeProvider.System"/>.
+    /// </summary>
+    /// <remarks>
+    /// Only fixed TTL without TTI uses this clock. Other read paths, writes,
+    /// refresh, load timeout and expiration scheduling retain precise timestamps.
+    /// Expiration detection may be delayed without an upper bound. The shared
+    /// background ticker starts on demand and runs for the process lifetime.
+    /// </remarks>
+    public CacheBuilder<TKey, TValue> EnableCoarseExpirationChecks()
+    {
+        _enableCoarseExpirationChecks = true;
         return this;
     }
 
@@ -417,6 +434,7 @@ public sealed class CacheBuilder<TKey, TValue>
                 EnableMetrics = _enableMetrics,
                 MetricsName = _metricsName,
                 EnableExpirationScheduler = _enableExpirationScheduler,
+                EnableCoarseExpirationChecks = _enableCoarseExpirationChecks,
                 MemoryPressureSamplingInterval = _memoryPressureSamplingInterval,
                 MemoryPressureThreshold = _memoryPressureThreshold,
                 MemoryPressureTrimFraction = _memoryPressureTrimFraction,
@@ -430,6 +448,16 @@ public sealed class CacheBuilder<TKey, TValue>
 
     private void ValidateBuild(bool hasFixedLoader)
     {
+        if (
+            _enableCoarseExpirationChecks
+            && !ReferenceEquals(_timeProvider, System.TimeProvider.System)
+        )
+        {
+            throw new InvalidOperationException(
+                "EnableCoarseExpirationChecks requires TimeProvider.System; custom time providers are not supported."
+            );
+        }
+
         if (_weakKeys && _hasCustomComparer)
         {
             throw new InvalidOperationException(
