@@ -750,12 +750,25 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
     private int EnterBulkLoadChain(TKey[] keys)
     {
+        // Owned keys are already comparer-distinct; only ancestors can repeat.
+        LoadChainContext.Node? parent = LoadChainContext.Current;
         int entered = 0;
         try
         {
             for (int index = 1; index < keys.Length; index++)
             {
-                EnterLoadChain(keys[index]);
+                if (LoadChainContext.Contains(this, keys[index], parent))
+                {
+                    throw new LoadingCacheReentrancyException(
+                        "A loading delegate attempted to start an equivalent key in its own logical load chain."
+                    );
+                }
+
+                LoadChainContext.Current = new LoadChainContext.Node(
+                    _loadChainOwner,
+                    keys[index],
+                    LoadChainContext.Current
+                );
                 entered++;
             }
 
