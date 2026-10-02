@@ -18,7 +18,7 @@ Start with the [project README](../README.md) for installation and an example. T
 - [MemoryCache comparison](benchmarks/parallel-resident-put-20260916/README.md), [Caffeine matrix](benchmarks/latest-20260914/README.md), [Guava read comparison](benchmarks/guava-read-20260913/README.md)
 - [Benchmark methodology](benchmark-methodology.md), [simulator results](simulator-results.md), [benchmark tools](../benchmarks/LoadingCache.Benchmarks/README.md)
 - [V1 acceptance gates](v1-performance-gates.md), [endurance protocol](v1-endurance-profile.md), [stability results](v1-stability-results-20260918.md)
-- [Resident service precision limits](v1-service-precision-diagnostic-20260918.md), [release readiness and remaining gaps](release-readiness.md), [performance gaps and next steps](performance-gaps-20260930.md)
+- [Resident service precision limits](v1-service-precision-diagnostic-20260918.md), [release readiness and remaining gaps](release-readiness.md), [performance gaps and next steps](performance-gaps-20260930.md), [write-path options](write-path-options-20261002.md)
 
 Dated evidence retains its original source identity, including failed runs. Older results do not qualify later code; stress totals are not throughput comparisons.
 
