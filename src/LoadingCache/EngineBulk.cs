@@ -235,7 +235,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         ApplyBulkReadyReadsSafely(plan, reloadFactory);
         StartPendingSyncFlights(plan);
 
-        var result = new Dictionary<TKey, TValue>(Comparer);
+        var result = new Dictionary<TKey, TValue>(requested.Length, Comparer);
         foreach (TKey key in requested)
         {
             if (plan.ReadyValues.TryGetValue(key, out TValue? ready))
@@ -370,7 +370,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         }
 
         TValue[] values = await Task.WhenAll(callerWaits).ConfigureAwait(false);
-        var result = new Dictionary<TKey, TValue>(Comparer);
+        var result = new Dictionary<TKey, TValue>(requested.Length, Comparer);
         for (int index = 0; index < requested.Length; index++)
         {
             result[requested[index]] = values[index];
@@ -423,6 +423,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             }
 
             EnsureBulkCapacityLocked(plan.OwnedKeys.Count);
+            plan.PendingFlights.EnsureCapacity(plan.PendingFlights.Count + plan.OwnedKeys.Count);
             BeginBulkMutationTrackingLocked();
             BulkSyncGroup group = new(
                 [.. plan.OwnedKeys],
@@ -479,6 +480,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             }
 
             EnsureBulkCapacityLocked(plan.OwnedKeys.Count);
+            plan.PendingFlights.EnsureCapacity(plan.PendingFlights.Count + plan.OwnedKeys.Count);
             BeginBulkMutationTrackingLocked();
             BulkAsyncGroup group = new(
                 [.. plan.OwnedKeys],
@@ -577,7 +579,6 @@ internal sealed partial class CacheEngine<TKey, TValue>
             }
 
             plan.OwnedKeys.Add(key);
-            plan.PendingFlights[key] = null!;
             RecordMiss();
         }
     }
@@ -708,10 +709,9 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
     private TValue ExecuteSyncBulk(BulkSyncGroup group, TKey _)
     {
-        int enteredKeys = 0;
+        LoadChainContext.Node? parent = EnterBulkLoadChain(group.OwnedKeys);
         try
         {
-            enteredKeys = EnterBulkLoadChain(group.OwnedKeys);
             RecordCounter(CacheCounterKind.BulkLoads);
             IReadOnlyDictionary<TKey, TValue> values =
                 group.Loader(group.LoaderKeys)
@@ -721,7 +721,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         }
         finally
         {
-            ExitBulkLoadChain(enteredKeys);
+            LoadChainContext.Current = parent;
         }
     }
 
@@ -730,10 +730,9 @@ internal sealed partial class CacheEngine<TKey, TValue>
         CancellationToken cancellationToken
     )
     {
-        int enteredKeys = 0;
+        LoadChainContext.Node? parent = EnterBulkLoadChain(group.OwnedKeys);
         try
         {
-            enteredKeys = EnterBulkLoadChain(group.OwnedKeys);
             RecordCounter(CacheCounterKind.BulkLoads);
             Task<IReadOnlyDictionary<TKey, TValue>> operation =
                 group.Loader(group.LoaderKeys, cancellationToken)
@@ -744,49 +743,30 @@ internal sealed partial class CacheEngine<TKey, TValue>
         }
         finally
         {
-            ExitBulkLoadChain(enteredKeys);
+            LoadChainContext.Current = parent;
         }
     }
 
-    private int EnterBulkLoadChain(TKey[] keys)
+    private LoadChainContext.Node? EnterBulkLoadChain(TKey[] keys)
     {
-        // Owned keys are already comparer-distinct; only ancestors can repeat.
+        // The owner key is already installed by InvokeSyncFactory/InvokeAsyncFactory.
+        // Owned keys are comparer-distinct, so only the saved parent can repeat.
+        // Build locally so failure leaves the caller's ambient chain intact.
         LoadChainContext.Node? parent = LoadChainContext.Current;
-        int entered = 0;
-        try
+        LoadChainContext.Node? chain = parent;
+        for (int index = 1; index < keys.Length; index++)
         {
-            for (int index = 1; index < keys.Length; index++)
+            if (LoadChainContext.Contains(this, keys[index], parent))
             {
-                if (LoadChainContext.Contains(this, keys[index], parent))
-                {
-                    throw new LoadingCacheReentrancyException(
-                        "A loading delegate attempted to start an equivalent key in its own logical load chain."
-                    );
-                }
-
-                LoadChainContext.Current = new LoadChainContext.Node(
-                    _loadChainOwner,
-                    keys[index],
-                    LoadChainContext.Current
+                throw new LoadingCacheReentrancyException(
+                    "A loading delegate attempted to start an equivalent key in its own logical load chain."
                 );
-                entered++;
             }
+            chain = new LoadChainContext.Node(_loadChainOwner, keys[index], chain);
+        }
 
-            return entered;
-        }
-        catch
-        {
-            ExitBulkLoadChain(entered);
-            throw;
-        }
-    }
-
-    private static void ExitBulkLoadChain(int count)
-    {
-        for (int index = 0; index < count; index++)
-        {
-            ExitLoadChain();
-        }
+        LoadChainContext.Current = chain;
+        return parent;
     }
 
     private BulkPrepared PrepareBulkResult(
@@ -794,7 +774,9 @@ internal sealed partial class CacheEngine<TKey, TValue>
         IReadOnlyDictionary<TKey, TValue> values
     )
     {
-        var snapshot = new Dictionary<TKey, TValue>(Comparer);
+        // Only the already validated owned-key count is trusted for a capacity hint.
+        // The loader's result remains a single bounded enumeration, including extras.
+        var snapshot = new Dictionary<TKey, TValue>(ownedKeys.Length, Comparer);
         int limit = BulkInputKeyLimit;
         int count = 0;
         foreach (KeyValuePair<TKey, TValue> pair in values)
@@ -826,7 +808,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             }
         }
 
-        var prepared = new Dictionary<TKey, BulkPublication>(Comparer);
+        var prepared = new Dictionary<TKey, BulkPublication>(snapshot.Count, Comparer);
         foreach (KeyValuePair<TKey, TValue> pair in snapshot)
         {
             long weight = ComputeWeight(pair.Key, pair.Value);
@@ -880,6 +862,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
                     && Volatile.Read(ref group.Owner.PublishRevoked) == 0;
                 if (canPublish && group.Prepared is not null)
                 {
+                    bool createSharedTask = group is BulkAsyncGroup;
                     foreach (BulkPublication publication in group.Prepared.Publications.Values)
                     {
                         if (
@@ -890,7 +873,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
                             && ownedEntry.Generation == group.Owner.Generation
                         )
                         {
-                            PublishBulkEntryLocked(ownedEntry, publication);
+                            PublishBulkEntryLocked(ownedEntry, publication, createSharedTask);
                         }
                         else if (
                             !group.IsOwnedKey(publication.Key)
@@ -898,7 +881,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
                             && !_entries.TryGetValue(publication.Key, out _)
                         )
                         {
-                            PublishBulkPrefetchLocked(publication);
+                            PublishBulkPrefetchLocked(publication, createSharedTask);
                         }
                     }
                 }
@@ -930,7 +913,11 @@ internal sealed partial class CacheEngine<TKey, TValue>
         }
     }
 
-    private void PublishBulkEntryLocked(Entry entry, BulkPublication publication)
+    private void PublishBulkEntryLocked(
+        Entry entry,
+        BulkPublication publication,
+        bool createSharedTask
+    )
     {
         long timestamp = _timeProvider.GetTimestamp();
         lock (entry.Sync)
@@ -949,7 +936,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
             publication.PublishedEntry = entry;
             publication.PublishedRevision = entry.PublicationRevision;
             entry.Flight = null;
-            entry.SharedTask = _weakValues ? null : Task.FromResult(publication.Value);
+            entry.SharedTask =
+                createSharedTask && !_weakValues ? Task.FromResult(publication.Value) : null;
             entry.PolicyToken = new WindowTinyLfuEnginePolicy.EngineEntryToken(
                 entry,
                 GetPolicyHash(publication.Key)
@@ -973,7 +961,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         }
     }
 
-    private void PublishBulkPrefetchLocked(BulkPublication publication)
+    private void PublishBulkPrefetchLocked(BulkPublication publication, bool createSharedTask)
     {
         Entry entry = Entry.Ready(
             publication.Key,
@@ -985,6 +973,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
             publication.Duration,
             _weakKeys,
             _weakValues,
+            createSharedTask: createSharedTask,
             createWriteSnapshot: _useFixedWriteSnapshots
         );
         entry.PolicyToken = new WindowTinyLfuEnginePolicy.EngineEntryToken(
