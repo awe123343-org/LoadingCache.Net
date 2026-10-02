@@ -11,6 +11,10 @@ internal sealed partial class CacheEngine<TKey, TValue>
 {
     private abstract class Flight(TKey key, long epoch, long generation)
     {
+        // Like Entry, use an immutable field hash so the active-flight set does not
+        // install an identity hash in the header used by the sync completion monitor.
+        private readonly int _identityHash = generation.GetHashCode();
+
         internal TKey Key { get; } = key;
 
         internal long Epoch { get; } = epoch;
@@ -78,6 +82,10 @@ internal sealed partial class CacheEngine<TKey, TValue>
         // ReSharper disable once NotAccessedField.Local
         internal Task? CancellationTask;
 
+        public override int GetHashCode() => _identityHash;
+
+        public override bool Equals(object? obj) => ReferenceEquals(this, obj);
+
         internal abstract void SetDisposed();
     }
 
@@ -119,7 +127,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
     private sealed class SyncFlight : Flight
     {
-        private readonly object _completion = new();
+        private TaskCompletionSource<TValue>? _completion;
         private bool _completed;
         private TValue _value = default!;
         private Exception? _exception;
@@ -128,23 +136,52 @@ internal sealed partial class CacheEngine<TKey, TValue>
             : base(key, epoch, generation)
         {
             Factory = factory;
-            Completion = new TaskCompletionSource<TValue>(
-                TaskCreationOptions.RunContinuationsAsynchronously
-            );
         }
 
         internal Func<TKey, TValue> Factory { get; }
 
-        internal TaskCompletionSource<TValue> Completion { get; }
+        internal TaskCompletionSource<TValue> Completion
+        {
+            get
+            {
+                lock (this)
+                {
+                    if (_completion is null)
+                    {
+                        _completion = new TaskCompletionSource<TValue>(
+                            TaskCreationOptions.RunContinuationsAsynchronously
+                        );
+                        if (_completed)
+                        {
+                            if (_exception is null)
+                            {
+                                _completion.TrySetResult(_value);
+                            }
+                            else
+                            {
+                                _completion.TrySetException(_exception);
+                                _ = _completion.Task.Exception;
+                            }
+                        }
+                    }
+
+                    return _completion;
+                }
+            }
+        }
+
+        // Retirement must not create a task mirror, or run before an existing mirror
+        // has completed. Set publishes this flag after completing that mirror.
+        internal bool IsCompleted => Volatile.Read(ref _completed);
 
         internal TValue Wait()
         {
             Exception? exception;
-            lock (_completion)
+            lock (this)
             {
                 while (!_completed)
                 {
-                    Monitor.Wait(_completion);
+                    Monitor.Wait(this);
                 }
 
                 exception = _exception;
@@ -160,7 +197,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
         internal void Set(TValue value)
         {
-            lock (_completion)
+            lock (this)
             {
                 if (_completed)
                 {
@@ -168,15 +205,15 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 }
 
                 _value = value;
-                _completed = true;
-                Monitor.PulseAll(_completion);
-                Completion.TrySetResult(value);
+                _completion?.TrySetResult(value);
+                Volatile.Write(ref _completed, true);
+                Monitor.PulseAll(this);
             }
         }
 
         internal void Set(Exception exception)
         {
-            lock (_completion)
+            lock (this)
             {
                 if (_completed)
                 {
@@ -184,10 +221,13 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 }
 
                 _exception = exception;
-                _completed = true;
-                Monitor.PulseAll(_completion);
-                Completion.TrySetException(exception);
-                _ = Completion.Task.Exception;
+                if (_completion is not null)
+                {
+                    _completion.TrySetException(exception);
+                    _ = _completion.Task.Exception;
+                }
+                Volatile.Write(ref _completed, true);
+                Monitor.PulseAll(this);
             }
         }
 

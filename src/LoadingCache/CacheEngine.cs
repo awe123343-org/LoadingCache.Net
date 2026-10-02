@@ -62,6 +62,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     private readonly TaskCompletionSource<object?> _disposeCompletion = new(
         TaskCreationOptions.RunContinuationsAsynchronously
     );
+    private readonly WeakReference<object> _loadChainOwner;
+    private readonly WeakReference<CacheEngine<TKey, TValue>> _observationOwner;
 
     private long _nextEpoch;
     private long _nextGeneration;
@@ -108,6 +110,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             ? ReferenceIdentityComparer<TKey>.Instance
             : options.Comparer ?? EqualityComparer<TKey>.Default;
         _entries = new EntryStore(_weakKeys, Comparer);
+        _loadChainOwner = new WeakReference<object>(this);
+        _observationOwner = new WeakReference<CacheEngine<TKey, TValue>>(this);
 
         if (_weakKeys && typeof(TKey).IsValueType)
         {
@@ -1633,7 +1637,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         }
 
         LoadChainContext.Current = new LoadChainContext.Node(
-            new WeakReference<object>(this),
+            _loadChainOwner,
             key,
             LoadChainContext.Current
         );
@@ -1646,7 +1650,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
 
     private void ScheduleObservation(AsyncFlight flight, Task<TValue> load)
     {
-        WeakReference<CacheEngine<TKey, TValue>> owner = new(this);
+        WeakReference<CacheEngine<TKey, TValue>> owner = _observationOwner;
         if (ExecutionContext.IsFlowSuppressed())
         {
             _ = ObserveAsync(owner, flight, load);
@@ -2198,7 +2202,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         bool promiseCompleted = flight switch
         {
             AsyncFlight asyncFlight => asyncFlight.Completion.Task.IsCompleted,
-            SyncFlight syncFlight => syncFlight.Completion.Task.IsCompleted,
+            SyncFlight syncFlight => syncFlight.IsCompleted,
             _ => false,
         };
         if (flight.Retired != 0 || flight.RetirementCleanupCompleted == 0 || !promiseCompleted)
