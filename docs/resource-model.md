@@ -46,6 +46,10 @@ Disposal detaches storage under the consumer gate and clears all slot values in 
 
 The no-expiry atomic value read adds no per-read snapshot or per-put box. Fixed write-only entries contain one publication reference: reference/Int32/Int64 initial values need no separate snapshot until refresh; other structs use an immutable snapshot from initial publication. Old snapshots live only as long as readers, with no version registry. Prepared bulk publication adds exact-entry/revision metadata (16 bytes for the two fields on a 64-bit runtime), still within K/F bounds.
 
+## Coarse TTL clock
+
+The opt-in coarse TTL check adds one shared clock and one process-wide background thread, independent of cache or entry count. It starts lazily only for an enabled eligible cache, retains no cache/entries or creating execution context, and stays alive until process exit. The thread is background, so it cannot keep the process alive; cache disposal does not stop it for other caches. Each engine holds at most one clock reference. There is no per-cache ticker, timer, registration or pending tick queue. The ticker requests a one-millisecond sleep, with no upper bound on wake-up delay. It affects only eligible TTL value checks, never the precise expiry scheduler or load timeout. See [ADR-0017](adr/0017-coarse-ttl-checks.md).
+
 ## Expiration, pressure, bulk and ownership
 
 A hard-expiry cache owns one TimerWheel; each pass visits at most 128 due nodes and preserves remaining work. Without a prompt scheduler, idle expired references remain until activity/cleanup/clear/disposal. Lookup freshness never depends on physical removal.

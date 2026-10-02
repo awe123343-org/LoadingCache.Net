@@ -2,6 +2,10 @@ namespace LoadingCache;
 
 internal sealed class LoadingCacheTestHooks
 {
+    // Per-engine frozen clock for deterministic coarse-TTL tests. It does not
+    // replace the precise provider or mutate the process-wide production ticker.
+    internal Expiration.CoarseExpirationClock? CoarseExpirationClock { get; init; }
+
     internal Action? AfterFlightInstalled { get; init; }
 
     internal Action? BeforePublish { get; init; }

@@ -51,7 +51,21 @@ Manual synchronous factories and synchronous loading use genuine synchronous wor
 
 ## Expiration and refresh
 
-Freshness uses monotonic `TimeProvider` timestamps/elapsed time, not wall-clock differences or loader start time. Timestamp zero is valid. `elapsed >= duration` from the recorded timestamp is expired. Successful value publication resets write/access timestamps; successful access advances access time without regression, subject to the fixed-TTI coalescing rule below. When TTL and TTI coexist, either can expire the value. An old/lost read event cannot revive it. Freshness is a read-time guarantee, not a guarantee throughout the caller's use.
+By default, freshness uses precise monotonic `TimeProvider` timestamps/elapsed time, not wall-clock differences or loader start time. Timestamp zero is valid. `elapsed >= duration` from the recorded timestamp is expired. Successful value publication resets write/access timestamps; successful access advances access time without regression, subject to the fixed-TTI coalescing rule below. When TTL and TTI coexist, either can expire the value. An old/lost read event cannot revive it. Freshness is a read-time guarantee, not a guarantee throughout the caller's use, with the explicit coarse-TTL exception below.
+
+`.EnableCoarseExpirationChecks()` opts eligible lock-free fixed expire-after-write (TTL) value hits into a shared cached timestamp:
+
+```csharp
+using var cache = CacheBuilder.Create<string, string>()
+    .MaximumSize(1_000)
+    .ExpireAfterWrite(TimeSpan.FromMinutes(10))
+    .EnableCoarseExpirationChecks()
+    .Build();
+```
+
+It is off by default and requires `TimeProvider.System`; every Build variant rejects a custom provider. The cached time is monotonic and never ahead of precise time, so a hit can detect expiration late, with **no maximum delay guarantee**. The ticker requests a one-millisecond sleep between updates, but scheduling, GC and system suspension can freeze it arbitrarily long. In the [macOS measurements](benchmarks/coarse-ttl-20261001/README.md), typical observed lag was about 0.63 ms (median), with p99 about 1.25 ms. Sleep cadence depends on the platform; these observations and nominal timer-granularity estimates are not upper bounds. Windows/Linux lag was not measured.
+
+The option has no effect on TTI or TTL+TTI, variable expiry, weak/owned values, automatic-refresh configurations or task lookups. Their current precise-clock behaviour, including bounded TTI access coalescing, remains unchanged. Writes and refresh publication timestamps, load timeout, explicit cleanup, quiet/policy views and the expiration scheduler always use precise time. A quiet lookup can therefore miss while a coarse value lookup still hits; physical cleanup or removal wins over the cached timestamp. The option neither revives removed entries nor changes publication/epoch checks. See [ADR-0017](adr/0017-coarse-ttl-checks.md).
 
 Only the lock-free fixed expire-after-access (TTI) hit path coalesces nearby accesses. It skips advancing the recorded timestamp when `now - recordedAccess <= tolerance`, where `tolerance = min(accessBound >> 20, floor(TimestampFrequency / 1000))` in raw timestamp units. `accessBound` is the guarded freshness bound for the duration observed by that read. This is at most duration / 2^20 and never more than one millisecond. With an unchanged duration, a value may expire up to this tolerance early; `AgeOf` can overstate age and `GetExpiresAfter` can understate remaining time by the same amount. The error does not accumulate across consecutive coalesced hits: each compares with the recorded timestamp. Other read paths, including task views, near-deadline fallback, 32-bit access reads, automatic refresh, weak references and owned values, retain exact touches. TTL is unchanged. This is a deliberate change from recording every successful access, separate from the pre-existing guard band used for exact freshness fallback; see [ADR-0016](adr/0016-bounded-tti-access-coalescing.md).
 

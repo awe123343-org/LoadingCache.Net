@@ -330,6 +330,9 @@ Method: public global::LoadingCache.AsyncCacheDictionary<TKey, TValue> global::L
 Method: public global::LoadingCache.CacheBuilder<TKey, TValue> global::LoadingCache.CacheBuilder<TKey, TValue>.Comparer(global::System.Collections.Generic.IEqualityComparer<TKey> comparer)
 Method: public global::LoadingCache.CacheBuilder<TKey, TValue> global::LoadingCache.CacheBuilder<TKey, TValue>.Comparer(global::System.Collections.Generic.IEqualityComparer<TKey> comparer) | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Method: public global::LoadingCache.CacheBuilder<TKey, TValue> global::LoadingCache.CacheBuilder<TKey, TValue>.Comparer(global::System.Collections.Generic.IEqualityComparer<TKey> comparer) | init-only: False
+Method: public global::LoadingCache.CacheBuilder<TKey, TValue> global::LoadingCache.CacheBuilder<TKey, TValue>.EnableCoarseExpirationChecks()
+Method: public global::LoadingCache.CacheBuilder<TKey, TValue> global::LoadingCache.CacheBuilder<TKey, TValue>.EnableCoarseExpirationChecks() | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
+Method: public global::LoadingCache.CacheBuilder<TKey, TValue> global::LoadingCache.CacheBuilder<TKey, TValue>.EnableCoarseExpirationChecks() | init-only: False
 Method: public global::LoadingCache.CacheBuilder<TKey, TValue> global::LoadingCache.CacheBuilder<TKey, TValue>.EnableExpirationScheduler()
 Method: public global::LoadingCache.CacheBuilder<TKey, TValue> global::LoadingCache.CacheBuilder<TKey, TValue>.EnableExpirationScheduler() | accessibility: Public; abstract: False; sealed: False; static: False; virtual: False; override: False
 Method: public global::LoadingCache.CacheBuilder<TKey, TValue> global::LoadingCache.CacheBuilder<TKey, TValue>.EnableExpirationScheduler() | init-only: False

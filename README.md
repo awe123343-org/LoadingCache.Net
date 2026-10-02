@@ -70,16 +70,16 @@ synchronous loader; it does not block on the asynchronous implementation.
 
 ## Features
 
-| Capability              | What is available                                                                                                         |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Capacity                | Adaptive Window TinyLFU; size or weight limits; runtime maximum adjustment                                                |
-| Expiration              | After write, after access, or variable expiry; monotonic `TimeProvider`; TimerWheel; optional idle cleanup scheduler      |
-| Loading                 | Same-generation single-flight; independent waiter cancellation; load timeout; true bulk loading and fenced prefetch       |
-| Refresh                 | Request-triggered background refresh, explicit refresh, reload with the old value, failure backoff                        |
-| References              | Identity-based weak keys; weak values in synchronous caches                                                               |
-| Inspection and mutation | Quiet lookup, approximate hot/cold snapshots, mutable `IDictionary` views with conditional updates and compute operations |
-| Diagnostics             | Synchronous eviction listener, bounded asynchronous removal listener, optional striped statistics and BCL Metrics         |
-| .NET integration        | Typed/named DI registration, opt-in memory-pressure eviction, lease-based automatic disposal through `OwnedCache`         |
+| Capability              | What is available                                                                                                                                                               |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Capacity                | Adaptive Window TinyLFU; size or weight limits; runtime maximum adjustment                                                                                                      |
+| Expiration              | After write, after access, or variable expiry; precise clocks by default; opt-in [coarse TTL checks](docs/semantics.md#expiration-and-refresh); optional idle cleanup scheduler |
+| Loading                 | Same-generation single-flight; independent waiter cancellation; load timeout; true bulk loading and fenced prefetch                                                             |
+| Refresh                 | Request-triggered background refresh, explicit refresh, reload with the old value, failure backoff                                                                              |
+| References              | Identity-based weak keys; weak values in synchronous caches                                                                                                                     |
+| Inspection and mutation | Quiet lookup, approximate hot/cold snapshots, mutable `IDictionary` views with conditional updates and compute operations                                                       |
+| Diagnostics             | Synchronous eviction listener, bounded asynchronous removal listener, optional striped statistics and BCL Metrics                                                               |
+| .NET integration        | Typed/named DI registration, opt-in memory-pressure eviction, lease-based automatic disposal through `OwnedCache`                                                               |
 
 Statistics are disabled by default. Call `RecordStatistics()` on the builder to enable them.
 

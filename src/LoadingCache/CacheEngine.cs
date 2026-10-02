@@ -35,6 +35,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     private readonly long _refreshFailureBackoffTicks;
     private readonly IExpiry<TKey, TValue>? _expiry;
     private readonly TimeProvider _timeProvider;
+    private readonly CoarseExpirationClock? _coarseExpirationClock;
     private readonly bool _requiresReadTime;
     private readonly bool _useAtomicResidentReads;
     private readonly bool _useConcurrentResidentWrites;
@@ -266,6 +267,12 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             _useFixedWriteSnapshots && options.ExpireAfterAccess.HasValue
                 ? _timeProvider.TimestampFrequency / 1_000
                 : 0;
+        _coarseExpirationClock =
+            options.EnableCoarseExpirationChecks
+            && _useFixedWriteSnapshots
+            && options.ExpireAfterAccess is null
+                ? options.TestHooks?.CoarseExpirationClock ?? CoarseExpirationClock.Shared
+                : null;
         _recordStatistics = options.RecordStatistics;
         _enableExpirationScheduler = options.EnableExpirationScheduler;
         _testHooks = options.TestHooks;
@@ -2545,7 +2552,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         // Writers replace the publication with a full fence before changing access time, so an
         // unchanged non-updating publication proves this access time belongs to its value.
         long accessTimestamp = accessBound < 0 ? 0 : Volatile.Read(ref entry.AccessTimestamp);
-        long now = _timeProvider.GetTimestamp();
+        long now = _coarseExpirationClock?.GetTimestamp() ?? _timeProvider.GetTimestamp();
         if (
             (writeBound >= 0 && unchecked(now - writeTimestamp) >= writeBound)
             || (
@@ -2570,8 +2577,9 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             );
         }
 
-        // Duration was observed while this publication was current. Sampling time
-        // afterwards is conservative; revalidation prevents combining an old value
+        // Duration was observed while this publication was current. Precise time
+        // sampled afterwards is conservative; opt-in coarse TTL checks may detect
+        // expiration late. Revalidation prevents combining an old value
         // with a duration extended only after refresh/replacement. Rollback always
         // publishes a new reference, so it cannot conceal an intervening version.
         // Coalesce nearby accesses only on this validated fixed-expiry path. The

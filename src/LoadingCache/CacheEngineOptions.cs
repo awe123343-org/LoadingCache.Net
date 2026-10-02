@@ -32,6 +32,7 @@ internal sealed class CacheEngineOptions<TKey, TValue>
     internal TimeProvider TimeProvider { get; init; } = TimeProvider.System;
     internal bool RecordStatistics { get; init; }
     internal bool EnableExpirationScheduler { get; init; }
+    internal bool EnableCoarseExpirationChecks { get; init; }
     internal TimeSpan? MemoryPressureSamplingInterval { get; init; }
     internal double MemoryPressureThreshold { get; init; } = 0.9;
     internal double MemoryPressureTrimFraction { get; init; } = 0.1;

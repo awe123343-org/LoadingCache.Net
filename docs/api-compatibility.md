@@ -84,6 +84,8 @@ a major version; compatible API additions use minor versions, and fixes that
 preserve those contracts use patch versions. An internal performance optimisation
 does not authorize changing expiration, cancellation, identity or ownership.
 
+`CacheBuilder<TKey,TValue>.EnableCoarseExpirationChecks()` is an additive, explicit opt-in API. Default expiration semantics remain unchanged. Eligible fixed-TTL value lookups can detect expiry late without an upper bound; TTI and all precise engine work retain their existing contracts. Custom `TimeProvider` combinations fail at Build. The compiler API baseline includes this method; its behaviour and example are in [semantics](semantics.md), with the decision in [ADR-0017](adr/0017-coarse-ttl-checks.md).
+
 Existing behaviour acceptance remains authoritative:
 
 | Contract                                                          | Documentation and representative regressions                                                                                                                                                  |
