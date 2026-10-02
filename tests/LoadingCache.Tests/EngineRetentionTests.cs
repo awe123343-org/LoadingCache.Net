@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
 
@@ -6,6 +7,34 @@ namespace LoadingCache.Tests;
 /// <summary>Checks selected live-root boundaries without relying on allocation counts.</summary>
 public sealed class EngineRetentionTests
 {
+    [Test]
+    public async Task PendingBackendAndCapturedLoadChainDoNotKeepTheirCacheAlive()
+    {
+        var loader = new CapturedLoad();
+        (WeakReference cache, WeakReference engine, Task<Payload> pending) = StartDetachedLoad(
+            loader
+        );
+        try
+        {
+            loader.Context.Should().NotBeNull();
+            pending.IsCompleted.Should().BeFalse();
+            CollectTargets([cache, engine]);
+            cache.IsAlive.Should().BeFalse();
+            engine.IsAlive.Should().BeFalse();
+        }
+        finally
+        {
+            loader.Completion.TrySetResult(new Payload());
+            if (cache.Target is IAsyncLoadingCache<int, Payload> retained)
+            {
+                await retained.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+            }
+        }
+
+        (await pending.WaitAsync(TimeSpan.FromSeconds(10))).Should().NotBeNull();
+        GC.KeepAlive(loader.Context);
+    }
+
     /// <summary>A retired load must not keep unrelated values from its old epoch alive.</summary>
     [Test]
     public async Task RetiredLoadDoesNotRetainOtherValuesFromClearedEpoch()
@@ -134,6 +163,39 @@ public sealed class EngineRetentionTests
         {
             GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
             GC.WaitForPendingFinalizers();
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (
+        WeakReference Cache,
+        WeakReference Engine,
+        Task<Payload> Pending
+    ) StartDetachedLoad(CapturedLoad loader)
+    {
+        IAsyncLoadingCache<int, Payload> cache = CacheBuilder
+            .Create<int, Payload>()
+            .MaximumSize(4)
+            .BuildAsyncLoading(loader.Load);
+        object engine = cache
+            .GetType()
+            .GetField("_engine", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(cache)!;
+        Task<Payload> pending = cache.GetAsync(1).AsTask();
+        return (new WeakReference(cache), new WeakReference(engine), pending);
+    }
+
+    private sealed class CapturedLoad
+    {
+        internal readonly TaskCompletionSource<Payload> Completion = new(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        internal ExecutionContext? Context;
+
+        internal Task<Payload> Load(int key, CancellationToken cancellationToken)
+        {
+            Context = ExecutionContext.Capture();
+            return Completion.Task;
         }
     }
 
