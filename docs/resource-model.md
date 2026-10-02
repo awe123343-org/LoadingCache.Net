@@ -23,6 +23,8 @@ Let N be `MaximumSize` or weighted `MaximumResidentCount`, W the weight maximum,
 
 Authoritative commit, reliable enqueue and cooperative drain share the engine gate, so at most one publisher has committed but not enqueued. B defaults to 256.
 
+With the default scheduler and an eligible count-bounded policy without TTL, TTI or variable expiration, an initial write tail may wait below `max(1,B/4)` for the non-sliding backstop; capacity pressure starts maintenance immediately. These scheduling choices do not establish the numerical bounds: shared publication/enqueue coordination and full-buffer assistance do. The 1 ms timer target is not a completion bound (typically about 15.6 ms default Windows granularity, potentially later under scheduling pressure). Weighted mode and all configured expiration keep immediate scheduling. Eligible default-scheduler caches without expiration lazily own one holder, weak owner and reusable one-shot timer, detached during sync/async disposal. No per-write timer or event object is added.
+
 - After an eviction batch, policy nodes ≤ N and queue ≤ B. Every resident not yet reflected in policy has a pending latest publish. Thus resident count ≤ N+B at completed mutation boundaries, and ≤ N+B+1 during a publication.
 - With no new publishers, cleanup leaves writes=0, count ≤ N and weight ≤ W. Check map/node identity, links, membership and accounting together.
 - Applied weight ≤ W and at most B unapplied latest values each ≤ W yield authoritative weight ≤ (B+1)W at completed boundaries. This is a mathematical bound, not a safe `long` multiplication. A currently publishing oversized value adds at most `long.MaxValue` before forced flush/rejection.

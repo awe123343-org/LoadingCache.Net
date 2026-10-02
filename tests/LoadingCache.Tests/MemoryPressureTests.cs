@@ -500,8 +500,11 @@ public sealed class MemoryPressureTests
             TimeSpan period
         )
         {
-            _timer = new ContextCapturingTimer(callback, state);
-            return _timer;
+            var timer = new ContextCapturingTimer(callback, state);
+            // The write-maintenance backstop is a separate one-shot timer.
+            if (period != Timeout.InfiniteTimeSpan)
+                _timer = timer;
+            return timer;
         }
 
         internal Task<bool> FireTimerAsync() =>

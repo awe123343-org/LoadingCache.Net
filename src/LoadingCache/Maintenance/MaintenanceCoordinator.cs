@@ -32,7 +32,7 @@ internal sealed class MaintenanceCoordinator : IDisposable, IThreadPoolWorkItem
     private readonly Action? _rejectedRemainderFallback;
     private readonly int _maxPassesPerInvocation;
 
-    private MaintenanceCoordinatorState _state = MaintenanceCoordinatorState.Idle;
+    private volatile MaintenanceCoordinatorState _state = MaintenanceCoordinatorState.Idle;
     private bool _fallbackRequired;
     private bool _inlineCallbackObserved;
     private long _ownerGeneration;
@@ -61,6 +61,10 @@ internal sealed class MaintenanceCoordinator : IDisposable, IThreadPoolWorkItem
         _maxPassesPerInvocation = maxPassesPerInvocation;
         _rejectedRemainderFallback = rejectedRemainderFallback;
     }
+
+    // Deferring a small initial tail must not suppress a request racing an active owner's exit.
+    // State transitions still belong to _gate; this snapshot never claims or releases ownership.
+    internal bool IsIdle => _state == MaintenanceCoordinatorState.Idle;
 
     internal MaintenanceCoordinatorState State
     {
