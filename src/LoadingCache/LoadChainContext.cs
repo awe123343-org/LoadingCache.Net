@@ -10,9 +10,12 @@ internal static class LoadChainContext
         set => CurrentContext.Value = value;
     }
 
-    internal static bool Contains(object owner, object key)
+    internal static bool Contains(object owner, object key) =>
+        Contains(owner, key, CurrentContext.Value);
+
+    internal static bool Contains(object owner, object key, Node? node)
     {
-        for (Node? node = CurrentContext.Value; node is not null; node = node.Parent)
+        for (; node is not null; node = node.Parent)
         {
             if (
                 node.Owner.TryGetTarget(out object? candidate)
