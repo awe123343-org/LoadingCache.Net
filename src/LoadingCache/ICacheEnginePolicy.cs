@@ -37,6 +37,10 @@ internal interface ICacheEnginePolicy
     // policies without buffered writes retain their synchronous contract.
     bool HasPendingWrites => false;
 
+    // Only an initial, non-urgent tail may wait for the engine's one-shot backstop.
+    // An active owner continues to service every reliable pending write.
+    bool ShouldDeferWriteMaintenance => false;
+
     // A queued batch needs one request; the drain owner re-arms the signal.
     bool TryRequestWriteMaintenance() => HasPendingWrites;
 

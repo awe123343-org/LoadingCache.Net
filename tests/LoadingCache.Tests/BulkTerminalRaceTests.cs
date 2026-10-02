@@ -506,6 +506,9 @@ public sealed class BulkTerminalRaceTests
                     return;
                 }
 
+                // This gate controls the first load-timeout timer, not unrelated cache timers.
+                if (!ReferenceEquals(Volatile.Read(ref owner._timer), this))
+                    return;
                 owner.DisposeEntered.TrySetResult(true);
                 if (!owner.ReleaseDispose.Task.Wait(owner._disposeWatchdog))
                 {

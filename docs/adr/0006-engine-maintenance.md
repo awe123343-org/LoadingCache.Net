@@ -10,8 +10,8 @@ The authoritative key/value map and flight ownership live in `CacheEngine`, whil
 policy owns only identity-bearing resident nodes. A resident hit must not acquire the engine or
 policy mutation lock. Policy recency and frequency observations therefore need a bounded,
 best-effort transport and a coalesced maintenance owner. Publication, removal, clear, and
-eviction decisions remain correctness-relevant and are processed synchronously under the engine to
-policy lock order.
+eviction decisions remain correctness-relevant. Authoritative map commit and reliable enqueue share
+the engine gate; policy replay follows [ADR-0013](0013-bounded-write-maintenance.md).
 
 ## Decision
 
@@ -27,7 +27,7 @@ policy gate, in that order. It drains at most the configured per-pass read budge
 whether more eligible work remains. Following the 30 September 2026 revision in
 [ADR-0014 R1-R3](0014-cas-read-transport.md), background passes re-arm for reads only when a stripe
 has a published head and is at least a quarter full. A smaller readable tail waits for a later full
-offer, write or explicit cleanup. The worker clears its signal and re-checks this condition;
+offer, activated write maintenance or explicit cleanup. The worker clears its signal and re-checks this condition;
 a full stripe with a published head always qualifies, preserving the full-offer handoff.
 
 If the injected scheduler rejects an initial request, the producer performs one coordinator
@@ -36,14 +36,21 @@ cleanup invocation. It requests a read drain under the policy gate, so this clea
 finite pass budget; the engine does not wrap it in an unbounded loop. If a lossy read batch remains,
 the adapter clears its signal so a later hit or explicit `CleanUp` may retry. Mapping writes do not
 rely on the lossy transport:
-`OnPublish` and `OnRemove` synchronously drain a bounded batch and apply exact node identity under
-the policy gate. Eviction callbacks are invoked through the existing engine fencing path, never
-from the ordinary hit path.
+`OnPublish` and `OnRemove` enqueue reliable exact-token events under the shared gate, assisting a
+bounded drain when full. For the default scheduler and eligible count-bounded policy without
+TTL, TTI or variable expiration, an idle owner starts at `max(1,B/4)` pending events, capacity pressure or a lazy one-shot backstop. The requested
+1 ms delay is not an SLA; typical default Windows timer granularity is about 15.6 ms. Active owners
+continue servicing any reliable pending write. Eligibility is fixed at construction. Injected
+schedulers, weighted/custom policy, any configured expiration and listeners retain immediate
+behaviour, including synchronous rejection fallback.
+Eviction callbacks use the existing engine fencing path, never the ordinary hit path.
 
 `Clear` removes all current policy nodes and replaces the policy state. Pending read tokens retain
 their old node identity; replay after clear or set therefore sees a retired/null node and cannot
 touch or evict a newer generation. Disposal stops the coordinator and disposes the read transport
-and policy roots; it does not wait for arbitrary user-owned loader work.
+and policy roots; it does not wait for arbitrary user-owned loader work. The optional write backstop
+uses a weak owner without captured ExecutionContext. Clear can leave its old deadline armed to
+process only current work; sync/async disposal closes it and late callbacks are no-ops.
 
 The engine's resident size and weighted-size bounds remain soft during concurrent publication and
 maintenance. `CleanUp` performs expiration while holding the engine gate, requests a read drain

@@ -387,9 +387,9 @@ internal sealed partial class CacheEngine<TKey, TValue>
         EvictionScope? scope
     ) : IDisposable
     {
-        internal void Dispatch()
+        internal void Dispatch(bool force = false)
         {
-            mutationOwner?.CompletePolicyWriteBoundary();
+            mutationOwner?.CompletePolicyWriteBoundary(force);
             scope?.Dispatch();
         }
 

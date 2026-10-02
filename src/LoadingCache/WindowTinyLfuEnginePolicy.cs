@@ -33,6 +33,8 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
     private long _nextWriteSequence;
     private int _maintenanceSignal;
     private int _writeMaintenanceSignal;
+    private readonly int _writeMaintenanceThreshold;
+    private int _writeCapacityPressure;
     private bool _readDrainRequested;
     private bool _evictionPending;
     private bool _skipReadBuffer;
@@ -49,7 +51,8 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
         int writeBufferCapacity = 256,
         object? coordinationGate = null,
         bool enableColdStart = false,
-        bool recordReadStatistics = true
+        bool recordReadStatistics = true,
+        bool deferWriteMaintenance = false
     )
     {
         Maximum = maximum;
@@ -69,6 +72,9 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
             recordReadStatistics
         );
         _pendingWrites = new BoundedWriteBuffer<PolicyWriteEvent>(writeBufferCapacity, _policyGate);
+        _writeMaintenanceThreshold = deferWriteMaintenance
+            ? Math.Max(1, writeBufferCapacity / 4)
+            : 1;
     }
 
     public long Maximum { get; private set; }
@@ -324,6 +330,12 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
     /// </summary>
     public bool HasPendingWrites => _pendingWrites.Queued != 0;
 
+    public bool ShouldDeferWriteMaintenance =>
+        _writeMaintenanceThreshold > 1
+        && Volatile.Read(ref _writeMaintenanceSignal) == 0
+        && _pendingWrites.Queued < _writeMaintenanceThreshold
+        && Volatile.Read(ref _writeCapacityPressure) == 0;
+
     /// <summary>
     /// Drains one bounded snapshot of queued writes.  The caller must invoke this only at an engine
     /// boundary where policy callbacks are allowed to enqueue their own exact removal events; a
@@ -468,6 +480,19 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
             if (_pendingWrites.TryEnqueueLocked(write))
             {
                 write.Token.PendingPolicyWrites = checked(write.Token.PendingPolicyWrites + 1);
+                if (_writeMaintenanceThreshold > 1)
+                {
+                    // Deferral uses unit weights, so the maintained size equals resident count.
+                    // Pending updates/removes still conservatively overestimate residency.
+                    int pressure =
+                        _policy.WeightedSize + _pendingWrites.Queued > _maximumResidentCount
+                            ? 1
+                            : 0;
+                    if (_writeCapacityPressure != pressure)
+                    {
+                        Volatile.Write(ref _writeCapacityPressure, pressure);
+                    }
+                }
                 return;
             }
 

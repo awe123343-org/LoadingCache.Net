@@ -40,6 +40,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     private readonly bool _useAtomicResidentReads;
     private readonly bool _useConcurrentResidentWrites;
     private readonly bool _useFixedWriteSnapshots;
+    private readonly bool _deferWriteMaintenance;
     private readonly bool _recordStatistics;
     private readonly bool _enableExpirationScheduler;
     private readonly ITimer? _expirationTimer;
@@ -279,6 +280,18 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             options.MaintenanceReadStripeCount ?? DefaultMaintenanceReadStripeCount();
         int maintenanceReadStripeCapacity = options.MaintenanceReadStripeCapacity ?? 64;
         bool enableColdStart = CanUseColdStartPolicy(options);
+        _deferWriteMaintenance =
+            options
+                is {
+                    MaintenanceScheduler: null,
+                    MaximumWeight: null,
+                    ExpireAfterWrite: null,
+                    ExpireAfterAccess: null,
+                    Expiry: null,
+                    EnableExpirationScheduler: false,
+                    RemovalListener: null,
+                    EvictionListener: null,
+                };
         _policy =
             options.Policy
             ?? new WindowTinyLfuEnginePolicy(
@@ -293,7 +306,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 options.MaintenanceWriteBufferCapacity,
                 coordinationGate: _gate,
                 enableColdStart: enableColdStart,
-                recordReadStatistics: options.RecordStatistics || options.EnableMetrics
+                recordReadStatistics: options.RecordStatistics || options.EnableMetrics,
+                deferWriteMaintenance: _deferWriteMaintenance
             );
         _maintenanceCoordinator = new MaintenanceCoordinator(
             DrainPolicyMaintenance,
@@ -963,8 +977,24 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             return;
         }
         bool replacedResidentValue;
-        lock (_gate)
+        bool lockTaken = false;
+        bool forceWriteMaintenance = false;
+        try
         {
+            if (_deferWriteMaintenance)
+            {
+                Monitor.TryEnter(_gate, ref lockTaken);
+                if (!lockTaken)
+                {
+                    // Contention while no maintenance owner is active should not enlarge its next batch.
+                    forceWriteMaintenance = _maintenanceCoordinator.IsIdle;
+                    Monitor.Enter(_gate, ref lockTaken);
+                }
+            }
+            else
+            {
+                Monitor.Enter(_gate, ref lockTaken);
+            }
             ThrowIfDisposedLocked();
             MarkDictionaryTransformMutation(key);
             RecordBulkMutationLocked(key);
@@ -1009,13 +1039,18 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 }
             }
         }
+        finally
+        {
+            if (lockTaken)
+                Monitor.Exit(_gate);
+        }
 
         if (replacedResidentValue)
         {
             _policy.OnAccess(replacementPolicyToken);
         }
 
-        evictionScope.Dispatch();
+        evictionScope.Dispatch(force: forceWriteMaintenance);
         if (_expirationTimer is not null)
         {
             RequestExpirationTimer();
@@ -1187,7 +1222,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
     // Called by mutation scopes only after releasing their coordination locks.
     // An inline/rejected scheduler must never dispatch a callback beneath an
     // outer engine lock. A nested internal step leaves the request to its owner.
-    private void CompletePolicyWriteBoundary()
+    private void CompletePolicyWriteBoundary(bool force = false)
     {
         if (
             Volatile.Read(ref _disposed) != 0
@@ -1210,6 +1245,10 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                     _policy.FlushWrites();
                 }
             }
+        }
+        else if (!force && _policy.ShouldDeferWriteMaintenance && _maintenanceCoordinator.IsIdle)
+        {
+            DeferPolicyWriteMaintenance();
         }
         else if (
             _policy.TryRequestWriteMaintenance()
@@ -1294,6 +1333,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             }
         }
 
+        // A custom timer may block in Dispose. Terminal promises must be visible first.
+        Volatile.Read(ref _writeMaintenanceBackstop)?.Dispose();
         DisposeFlightTimeoutTimers(timeoutTimers);
 
         if (Interlocked.Exchange(ref _shutdownStarted, 1) == 0)
@@ -1342,6 +1383,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             }
         }
 
+        // A custom timer may block in Dispose. Terminal promises must be visible first.
+        Volatile.Read(ref _writeMaintenanceBackstop)?.Dispose();
         DisposeFlightTimeoutTimers(timeoutTimers);
 
         if (Interlocked.Exchange(ref _shutdownStarted, 1) == 0)
@@ -1726,6 +1769,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
 
         using SynchronousEvictionScope evictionScope = BeginSynchronousEvictionScope();
         bool claimed = false;
+        bool forceWriteMaintenance = false;
         Entry? publishedEntry = null;
         long publishedRevision = 0;
         try
@@ -1740,8 +1784,22 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             long weight = ComputeWeight(flight.Key, value);
             TimeSpan variableDuration = ComputeCreateDuration(flight.Key, value);
 
-            lock (_gate)
+            bool lockTaken = false;
+            try
             {
+                if (_deferWriteMaintenance)
+                {
+                    Monitor.TryEnter(_gate, ref lockTaken);
+                    if (!lockTaken)
+                    {
+                        forceWriteMaintenance = _maintenanceCoordinator.IsIdle;
+                        Monitor.Enter(_gate, ref lockTaken);
+                    }
+                }
+                else
+                {
+                    Monitor.Enter(_gate, ref lockTaken);
+                }
                 claimed = Interlocked.CompareExchange(ref flight.TerminalClaimed, 1, 0) == 0;
                 if (
                     claimed
@@ -1808,10 +1866,15 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                     RecordFlightResult(flight, CacheCounterKind.LoadSuccesses);
                 }
             }
+            finally
+            {
+                if (lockTaken)
+                    Monitor.Exit(_gate);
+            }
 
             if (!claimed)
             {
-                evictionScope.Dispatch();
+                evictionScope.Dispatch(force: forceWriteMaintenance);
                 RetireFlight(flight, underlyingCompleted: true);
                 return;
             }
@@ -1820,7 +1883,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         }
         catch (Exception exception)
         {
-            evictionScope.Dispatch();
+            evictionScope.Dispatch(force: forceWriteMaintenance);
             if (claimed)
             {
                 CompleteClaimedFailure(flight, exception, publishedEntry, publishedRevision);
@@ -1832,7 +1895,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
             return;
         }
 
-        evictionScope.Dispatch();
+        evictionScope.Dispatch(force: forceWriteMaintenance);
         CompletePromise(
             flight,
             static (asyncFlight, value) => asyncFlight.Completion.TrySetResult(value),
