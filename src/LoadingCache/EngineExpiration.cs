@@ -479,8 +479,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
     private void AdvanceExpirationLocked(ulong now)
     {
         TimerWheel<Entry>? wheel = _expirationWheel;
-        Dictionary<Entry, IdentityTimerNode<Entry>>? nodes = _expirationNodes;
-        if (wheel is null || nodes is null)
+        if (wheel is null)
         {
             return;
         }
@@ -495,18 +494,18 @@ internal sealed partial class CacheEngine<TKey, TValue>
         foreach (IdentityTimerNode<Entry> node in advanced.DueNodes)
         {
             Entry entry = node.Value;
-            if (
-                !nodes.TryGetValue(entry, out IdentityTimerNode<Entry>? currentNode)
-                || !ReferenceEquals(currentNode, node)
-                || !_entries.IsCurrent(entry)
-            )
+            if (!ReferenceEquals(entry.TimerNode, node) || !_entries.IsCurrent(entry))
             {
                 if (!node.IsRetired)
                 {
                     wheel.Retire(node);
                 }
 
-                nodes.Remove(entry);
+                // A stale due node must not clear a newer schedule on the same entry.
+                if (ReferenceEquals(entry.TimerNode, node))
+                {
+                    entry.TimerNode = null;
+                }
                 continue;
             }
 
@@ -590,8 +589,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
     private void ScheduleExpirationNodeLocked(Entry entry, ulong normalizedNow)
     {
         TimerWheel<Entry>? wheel = _expirationWheel;
-        Dictionary<Entry, IdentityTimerNode<Entry>>? nodes = _expirationNodes;
-        if (wheel is null || nodes is null)
+        if (wheel is null)
         {
             return;
         }
@@ -645,10 +643,11 @@ internal sealed partial class CacheEngine<TKey, TValue>
         }
 
         ulong deadline = AddExpirationTicks(now, remaining);
-        if (!nodes.TryGetValue(entry, out IdentityTimerNode<Entry>? node) || node.IsRetired)
+        IdentityTimerNode<Entry>? node = entry.TimerNode;
+        if (node is null || node.IsRetired)
         {
             node = new IdentityTimerNode<Entry>(entry);
-            nodes[entry] = node;
+            entry.TimerNode = node;
             wheel.Schedule(node, deadline);
         }
         else if (node.IsScheduled)
@@ -680,16 +679,12 @@ internal sealed partial class CacheEngine<TKey, TValue>
     private void RetireExpirationNodeLocked(Entry entry)
     {
         TimerWheel<Entry>? wheel = _expirationWheel;
-        Dictionary<Entry, IdentityTimerNode<Entry>>? nodes = _expirationNodes;
-        if (
-            wheel is null
-            || nodes is null
-            || !nodes.Remove(entry, out IdentityTimerNode<Entry>? node)
-        )
+        if (wheel is null || entry.TimerNode is not { } node)
         {
             return;
         }
 
+        entry.TimerNode = null;
         if (!node.IsRetired)
         {
             wheel.Retire(node);
@@ -699,23 +694,47 @@ internal sealed partial class CacheEngine<TKey, TValue>
     private void ResetExpirationStateLocked()
     {
         TimerWheel<Entry>? wheel = _expirationWheel;
-        Dictionary<Entry, IdentityTimerNode<Entry>>? nodes = _expirationNodes;
-        if (wheel is null || nodes is null)
+        if (wheel is null)
         {
             return;
         }
 
-        foreach (IdentityTimerNode<Entry> node in nodes.Values)
+        // Clear/Dispose retire each current entry before clearing the map. Drain any
+        // remaining bucket links and continuation work without relying on that map.
+        // Due batches are consumed synchronously under this same engine gate.
+        wheel.RetireAll();
+        ulong now = GetExpirationNowLocked();
+        _expirationWheel = new TimerWheel<Entry>(now);
+    }
+
+    private void AssertExpirationInvariantsLocked()
+    {
+        _expirationWheel?.AssertInvariants();
+        int scheduled = 0;
+        foreach (Entry entry in _entries.Values)
         {
-            if (!node.IsRetired)
+            if (entry.TimerNode is not { } node)
             {
-                wheel.Retire(node);
+                continue;
+            }
+
+            if (node.IsRetired || !ReferenceEquals(node.Value, entry))
+            {
+                throw new InvalidOperationException(
+                    "An entry retained an invalid expiration node."
+                );
+            }
+
+            if (node.IsScheduled)
+            {
+                scheduled++;
             }
         }
 
-        nodes.Clear();
-        ulong now = GetExpirationNowLocked();
-        _expirationWheel = new TimerWheel<Entry>(now);
+        if (scheduled != (_expirationWheel?.Count ?? 0))
+        {
+            throw new InvalidOperationException("Entry and timer wheel membership differ.");
+        }
     }
 
     private TimeSpan GetEntryExpirationDuration(Entry entry, ulong normalizedNow)

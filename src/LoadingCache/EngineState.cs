@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
+using LoadingCache.Expiration;
 using LoadingCache.ReferenceStorage;
 
 namespace LoadingCache;
@@ -264,8 +265,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
             Generation = generation;
         }
 
-        // The private entry is its own monitor, saving one lock object per entry. Identity maps
-        // (expiration nodes) use a field hash so a runtime header hash never inflates the lock.
+        // The private entry is its own monitor, saving one lock object per entry. Its field
+        // hash avoids inflating that monitor when identity-based bookkeeping hashes it.
         internal object Sync => this;
         private readonly TKey? _strongKey;
         internal readonly ReferenceKey<TKey>? WeakKey;
@@ -283,6 +284,9 @@ internal sealed partial class CacheEngine<TKey, TValue>
         internal bool RemovalNotified;
         private TValue _strongValue = default!;
         internal FixedWritePublication? PublishedWrite;
+
+        // Fixed and variable expiration share one identity node, owned under the engine gate.
+        internal IdentityTimerNode<Entry>? TimerNode;
 
         // Reference, Int32, and Int64 have BCL volatile primitives. Other value types retain
         // the entry lock instead of adding a per-Put box or assuming struct copies are atomic.

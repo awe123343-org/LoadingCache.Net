@@ -7,6 +7,92 @@ namespace LoadingCache.Tests;
 public sealed class TimerWheelTests
 {
     [Test]
+    public void RetireAllDetachesEveryLevelAndRejectsReuseOfRetiredNodes()
+    {
+        TimerWheel<int> wheel = new();
+        ulong[] deadlines = [1, 64, 4_096, 131_072, 524_288];
+        IdentityTimerNode<int>[] nodes =
+        [
+            .. deadlines.Select((_, index) => new IdentityTimerNode<int>(index)),
+        ];
+        for (int index = 0; index < nodes.Length; index++)
+        {
+            wheel.Schedule(nodes[index], deadlines[index]);
+        }
+
+        wheel.RetireAll();
+        wheel.RetireAll();
+        foreach (IdentityTimerNode<int> node in nodes)
+        {
+            node.IsRetired.Should().BeTrue();
+            node.IsScheduled.Should().BeFalse();
+            node.OwnerId.Should().Be(0);
+            node.LinkSequence.Should().Be(0);
+            node.Previous.Should().BeNull();
+            node.Next.Should().BeNull();
+            Action schedule = () => new TimerWheel<int>().Schedule(node, 1);
+            schedule.Should().ThrowExactly<InvalidOperationException>();
+        }
+        wheel.Count.Should().Be(0);
+        wheel.GetNextDelay().Should().Be(ulong.MaxValue);
+        wheel.Advance(524_288, 1).DueNodes.Should().BeEmpty();
+        wheel.AssertInvariants();
+    }
+
+    [Test]
+    public void RetireAllClearsPendingFrontiersIncludingARescheduledDueNode()
+    {
+        TimerWheel<int> wheel = new();
+        IdentityTimerNode<int>[] nodes =
+        [
+            .. Enumerable.Range(0, 8).Select(value => new IdentityTimerNode<int>(value)),
+        ];
+        foreach (IdentityTimerNode<int> node in nodes)
+        {
+            wheel.Schedule(node, 1);
+        }
+        TimerAdvanceResult<int> first = wheel.Advance(1, 1);
+        first.HasPending.Should().BeTrue();
+        IdentityTimerNode<int> due = first.DueNodes.Should().ContainSingle().Which;
+        wheel.Schedule(due, 2);
+
+        wheel.RetireAll();
+        nodes.Should().OnlyContain(node => node.IsRetired && !node.IsScheduled);
+        wheel.Count.Should().Be(0);
+        wheel.GetNextDelay().Should().Be(ulong.MaxValue);
+        TimerAdvanceResult<int> drained = wheel.Advance(2, 1);
+        drained.DueNodes.Should().BeEmpty();
+        drained.HasPending.Should().BeFalse();
+
+        IdentityTimerNode<int> fresh = new(9);
+        wheel.Schedule(fresh, 2);
+        wheel.Advance(2, 1).DueNodes.Should().ContainSingle().Which.Should().BeSameAs(fresh);
+        wheel.AssertInvariants();
+    }
+
+    [Test]
+    public void RetireAllLeavesDetachedDueNodesWithTheirCaller()
+    {
+        TimerWheel<string> wheel = new();
+        IdentityTimerNode<string> due = new("due");
+        IdentityTimerNode<string> future = new("future");
+        wheel.Schedule(due, 1);
+        wheel.Schedule(future, 100);
+        wheel.Advance(1, 8).DueNodes.Should().ContainSingle().Which.Should().BeSameAs(due);
+        wheel.RetireAll();
+
+        future.IsRetired.Should().BeTrue();
+        due.IsRetired.Should().BeFalse();
+        due.IsScheduled.Should().BeFalse();
+        due.Previous.Should().BeNull();
+        due.Next.Should().BeNull();
+        wheel.Retire(due).Should().BeTrue();
+        due.IsRetired.Should().BeTrue();
+        wheel.Count.Should().Be(0);
+        wheel.AssertInvariants();
+    }
+
+    [Test]
     public void ExpiresNodesAtEachHierarchyBoundary()
     {
         TimerWheel<string> wheel = new();

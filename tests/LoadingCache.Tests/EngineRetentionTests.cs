@@ -68,22 +68,38 @@ public sealed class EngineRetentionTests
 
     /// <summary>A detached refresh may retain its old value, but not an old policy chain.</summary>
     [Test]
-    public async Task RetiredRefreshDoesNotRetainUnrelatedPolicyValues()
+    [Arguments("none")]
+    [Arguments("write")]
+    [Arguments("access")]
+    [Arguments("variable")]
+    public async Task RetiredRefreshDoesNotRetainUnrelatedPolicyValues(string expiration)
     {
         var release = new TaskCompletionSource<Payload>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
         int calls = 0;
-        await using IAsyncLoadingCache<int, Payload> cache = CacheBuilder
+        CacheBuilder<int, Payload> builder = CacheBuilder
             .Create<int, Payload>()
             .MaximumSize(64)
-            .MaxConcurrentLoads(1)
-            .BuildAsyncLoading(
-                (_, _) =>
-                    Interlocked.Increment(ref calls) == 1
-                        ? Task.FromResult(new Payload())
-                        : release.Task
-            );
+            .MaxConcurrentLoads(1);
+        switch (expiration)
+        {
+            case "write":
+                builder.ExpireAfterWrite(TimeSpan.FromHours(1));
+                break;
+            case "access":
+                builder.ExpireAfterAccess(TimeSpan.FromHours(1));
+                break;
+            case "variable":
+                builder.ExpireAfter(new RetentionExpiry());
+                break;
+        }
+        await using IAsyncLoadingCache<int, Payload> cache = builder.BuildAsyncLoading(
+            (_, _) =>
+                Interlocked.Increment(ref calls) == 1
+                    ? Task.FromResult(new Payload())
+                    : release.Task
+        );
         _ = await cache.GetAsync(0);
         Task<Payload> refresh = cache.RefreshAsync(0).AsTask();
         WeakReference[] retiredValues = PopulateAndClear(cache);
@@ -200,4 +216,16 @@ public sealed class EngineRetentionTests
     }
 
     private sealed class Payload;
+
+    private sealed class RetentionExpiry : IExpiry<int, Payload>
+    {
+        public TimeSpan ExpireAfterCreate(int key, Payload value, TimeSpan currentDuration) =>
+            TimeSpan.FromHours(1);
+
+        public TimeSpan ExpireAfterUpdate(int key, Payload value, TimeSpan currentDuration) =>
+            TimeSpan.FromHours(1);
+
+        public TimeSpan ExpireAfterRead(int key, Payload value, TimeSpan currentDuration) =>
+            currentDuration;
+    }
 }

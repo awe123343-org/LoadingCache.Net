@@ -129,6 +129,25 @@ internal sealed class TimerWheel<T>
         return true;
     }
 
+    // Teardown only: unlike Advance, retiring the entire wheel is deliberately unbounded.
+    // Detached due nodes already belong to the caller and are not reachable through buckets.
+    internal void RetireAll()
+    {
+        foreach (Bucket bucket in _buckets)
+        {
+            while (bucket.Head is { } node)
+            {
+                Retire(node);
+            }
+        }
+
+        _work.Clear();
+        foreach (bool[] queued in _queued)
+        {
+            Array.Clear(queued);
+        }
+    }
+
     /// <summary>
     /// Advances to a monotonic normalized timestamp and returns due nodes.
     /// </summary>
