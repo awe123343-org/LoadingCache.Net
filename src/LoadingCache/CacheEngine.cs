@@ -1879,7 +1879,10 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                 return;
             }
 
-            RequestExpirationTimer();
+            if (_expirationTimer is not null)
+            {
+                RequestExpirationTimer();
+            }
         }
         catch (Exception exception)
         {
