@@ -849,8 +849,10 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
         private Action<Action>? _afterShutdownSnapshotForTesting;
         private long _readCounter;
         private long _writeCounter;
-        private long _enqueued;
+        private long _enqueuedBase;
+        private long _enqueuedSnapshot;
         private long _dequeued;
+        private long _publishedShutdown;
         private long _droppedShutdown;
         private int _forcedCasFailuresForTesting;
         private int _disposed;
@@ -879,10 +881,6 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
             _slots[0].Value = value;
             Volatile.Write(ref _slots[0].Sequence, 1);
             Volatile.Write(ref _writeCounter, 1);
-            if (_recordStatistics)
-            {
-                SaturatingIncrement(ref _enqueued);
-            }
         }
 
         internal void SetHooks(Action? beforeReserve, Action? beforePublish)
@@ -911,8 +909,10 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
 
             Volatile.Write(ref _readCounter, counter);
             Volatile.Write(ref _writeCounter, counter);
-            Volatile.Write(ref _enqueued, 0);
+            _enqueuedBase = counter;
+            Volatile.Write(ref _enqueuedSnapshot, 0);
             Volatile.Write(ref _dequeued, 0);
+            Volatile.Write(ref _publishedShutdown, 0);
             Volatile.Write(ref _droppedShutdown, 0);
         }
 
@@ -1029,10 +1029,6 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
 
             Volatile.Read(ref _beforePublishForTesting)?.Invoke();
             slot.Value = value;
-            if (_recordStatistics)
-            {
-                SaturatingIncrement(ref _enqueued);
-            }
             // Publication must precede the disposed read with full-fence ordering. A release
             // store followed by an acquire read can miss disposal while the publication is
             // still buffered, after the disposer has already cleared and inspected this slot.
@@ -1052,6 +1048,7 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
                 && TryClaimShutdownDrop(ref slot, tail)
             )
             {
+                SaturatingIncrement(ref _publishedShutdown);
                 SaturatingIncrement(ref _droppedShutdown);
             }
 
@@ -1172,7 +1169,70 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
             }
         }
 
-        internal long Enqueued => Volatile.Read(ref _enqueued);
+        internal long Enqueued
+        {
+            get
+            {
+                if (!_recordStatistics)
+                {
+                    return 0;
+                }
+
+                long enqueued = 0;
+                Slot[]? slots = Volatile.Read(ref _slots);
+                if (Volatile.Read(ref _disposed) == 0 && slots is not null)
+                {
+                    // Count reservations minus unpublished slots, including publications beyond
+                    // a paused head. Capture tail first and scan its bounded suffix: a consumer
+                    // can advance arbitrarily far while diagnostics read the counters.
+                    long tail = Volatile.Read(ref _writeCounter);
+                    long head = Volatile.Read(ref _readCounter);
+                    int count = (int)Math.Min(unchecked((ulong)(tail - head)), (ulong)_capacity);
+                    ulong published = unchecked((ulong)(tail - _enqueuedBase));
+                    for (int offset = 0; offset < count; offset++)
+                    {
+                        long position = unchecked(tail - count + offset);
+                        ref Slot slot = ref slots[unchecked((int)position) & _mask];
+                        if (Volatile.Read(ref slot.Sequence) == position)
+                        {
+                            published--;
+                        }
+                    }
+
+                    enqueued = (long)Math.Min(published, (ulong)long.MaxValue);
+                    // A complete unsigned counter wrap requires enough consumption to have
+                    // saturated Dequeued already. The cumulative count must remain saturated.
+                    enqueued = Math.Max(enqueued, Volatile.Read(ref _dequeued));
+                }
+
+                if (Volatile.Read(ref _disposed) != 0 || slots is null)
+                {
+                    // Slots are detached at shutdown without waiting for producers. Only the
+                    // existing once-only shutdown claim counts a late publication; rejected
+                    // offers and still-paused reservations must never enter this total.
+                    enqueued = SaturatingAdd(
+                        Volatile.Read(ref _dequeued),
+                        Volatile.Read(ref _publishedShutdown)
+                    );
+                }
+
+                // Keep previously observed totals through a concurrent scan or shutdown hand-off.
+                // Exactly one CAS, on the diagnostic path only: on contention return the value
+                // actually stored by that reader, never a larger, unrecorded local candidate.
+                long previous = Volatile.Read(ref _enqueuedSnapshot);
+                if (enqueued <= previous)
+                {
+                    return previous;
+                }
+
+                long observed = Interlocked.CompareExchange(
+                    ref _enqueuedSnapshot,
+                    enqueued,
+                    previous
+                );
+                return observed == previous ? enqueued : observed;
+            }
+        }
         internal long Dequeued => Volatile.Read(ref _dequeued);
         internal long DroppedShutdown => Volatile.Read(ref _droppedShutdown);
 
@@ -1217,6 +1277,7 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
                     dropped++;
                 }
             }
+            SaturatingAdd(ref _publishedShutdown, dropped);
             SaturatingAdd(ref _droppedShutdown, dropped);
         }
 
