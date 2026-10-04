@@ -83,5 +83,8 @@ public static class Program
         }
     }
 
+    // Keep every report property: System.Text.Json emits this schema for the external allocation-gate reader.
+    // ReSharper disable NotAccessedPositionalProperty.Local
     private sealed record Report(string Scenario, string Runtime, bool Success);
+    // ReSharper restore NotAccessedPositionalProperty.Local
 }

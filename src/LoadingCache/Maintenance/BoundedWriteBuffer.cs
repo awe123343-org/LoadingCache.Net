@@ -57,6 +57,8 @@ internal sealed class BoundedWriteBuffer<TEvent> : IDisposable
     /// </summary>
     internal bool TryEnqueueLocked(TEvent value)
     {
+        // Keep this debug-only monitor check: Release callers already own the gate; do not add hot-path runtime validation.
+        // ReSharper disable once InvocationIsSkipped
         Debug.Assert(Monitor.IsEntered(_gate));
         if (_disposed != 0)
         {
@@ -89,6 +91,8 @@ internal sealed class BoundedWriteBuffer<TEvent> : IDisposable
     /// </summary>
     internal bool TryDequeueLocked(out TEvent value)
     {
+        // Keep this debug-only monitor check: Release callers already own the gate; do not add hot-path runtime validation.
+        // ReSharper disable once InvocationIsSkipped
         Debug.Assert(Monitor.IsEntered(_gate));
         if (_queue.Count == 0)
         {

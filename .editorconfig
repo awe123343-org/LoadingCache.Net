@@ -44,3 +44,13 @@ csharp_style_var_when_type_is_apparent = true:suggestion
 dotnet_style_qualification_for_field = false:suggestion
 dotnet_style_qualification_for_method = false:suggestion
 dotnet_style_qualification_for_property = false:suggestion
+
+[tests/{LoadingCache.Tests,LoadingCache.StressTests,LoadingCache.DependencyInjection.Tests}/**.cs]
+# Keep TUnit tests as public instance methods: each case owns its test class and test hooks.
+# Do not make test methods static; mirror TUnit's CA1822 DiagnosticSuppressor in Rider.
+dotnet_diagnostic.CA1822.severity = none
+
+[src/LoadingCache/{PersonalityApi,PublicApi}.cs]
+# Keep the published Get/Set cache interface operations; renaming breaks consumers and implementations.
+# Do not rename API operations for keyword style; Rider does not honour their member-level CA1716 pragmas.
+dotnet_diagnostic.CA1716.severity = none

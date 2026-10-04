@@ -68,7 +68,8 @@ public interface ILoadingCache<TKey, TValue> : ICache<TKey, TValue>
     where TValue : notnull
 {
     /// <summary>Gets a value, computing it with the fixed loader when absent.</summary>
-#pragma warning disable CA1716 // The LoadingCache API intentionally uses Get as its primary operation.
+    // Keep the published Get operation: renaming it breaks cache implementations and consumers.
+#pragma warning disable CA1716
     TValue Get(TKey key);
 #pragma warning restore CA1716
 

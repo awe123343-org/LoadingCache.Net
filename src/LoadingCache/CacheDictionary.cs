@@ -139,9 +139,13 @@ public class CacheDictionary<TKey, TValue>
     public int Count => Engine.DictionaryCount();
 
     /// <summary>Gets a snapshot of the current keys.</summary>
+    // Keep ToArray: the snapshot's ICollection remains fixed-size rather than becoming a mutable list.
+    // ReSharper disable once UseCollectionExpression
     public ICollection<TKey> Keys => Snapshot().Select(static pair => pair.Key).ToArray();
 
     /// <summary>Gets a snapshot of the current values.</summary>
+    // Keep ToArray: the snapshot's ICollection remains fixed-size rather than becoming a mutable list.
+    // ReSharper disable once UseCollectionExpression
     public ICollection<TValue> Values => Snapshot().Select(static pair => pair.Value).ToArray();
 
     IEnumerable<TKey> IReadOnlyDictionary<TKey, TValue>.Keys => Keys;

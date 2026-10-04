@@ -1140,6 +1140,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         TKey[] snapshot = SnapshotBulkKeys(keys, BulkFallbackInputLimit);
         int count = 0;
 
+        // Keep explicit invalidation: a LINQ predicate would allocate a delegate on each bulk call.
+        // ReSharper disable once LoopCanBeConvertedToQuery
         foreach (TKey key in snapshot)
         {
             if (Invalidate(key))
@@ -1699,6 +1701,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
 
     private void ScheduleObservation(AsyncFlight flight, Task<TValue> load)
     {
+        // Snapshot the weak owner before scheduling; do not extend this engine's strong lifetime with a later field read.
+        // ReSharper disable once InlineTemporaryVariable
         WeakReference<CacheEngine<TKey, TValue>> owner = _observationOwner;
         if (ExecutionContext.IsFlowSuppressed())
         {

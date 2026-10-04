@@ -13,6 +13,8 @@ public sealed class SyncFlightCompletionTests
         object first = new FlightProbe().Identity;
         object second = new FlightProbe().Identity;
 
+        // Keep the same-object comparison: this assertion checks reflexive flight identity, separately from distinct flights.
+        // ReSharper disable once EqualExpressionComparison
         first.Equals(first).Should().BeTrue();
         first.Equals(second).Should().BeFalse();
         new HashSet<object> { first, second }
@@ -48,7 +50,7 @@ public sealed class SyncFlightCompletionTests
         flight.Set(failure);
 
         var waitFailure = FluentActions
-            .Invoking(() => flight.Wait())
+            .Invoking(flight.Wait)
             .Should()
             .Throw<TargetInvocationException>();
         waitFailure.Which.InnerException.Should().BeSameAs(failure);
@@ -84,21 +86,25 @@ public sealed class SyncFlightCompletionTests
     {
         var flight = new FlightProbe();
         using var start = new ManualResetEventSlim();
-        Task<object>[] requests = Enumerable
-            .Range(0, 8)
-            .Select(_ =>
-                Task.Factory.StartNew(
-                    () =>
-                    {
-                        start.Wait(Watchdog).Should().BeTrue();
-                        return (object)flight.Task;
-                    },
-                    CancellationToken.None,
-                    TaskCreationOptions.LongRunning,
-                    TaskScheduler.Default
-                )
-            )
-            .ToArray();
+        Task<object>[] requests =
+        [
+            .. Enumerable
+                .Range(0, 8)
+                .Select(_ =>
+                    Task.Factory.StartNew<object>(
+                        () =>
+                        {
+                            // Keep the shared start gate: Task.WhenAll joins every requester before the gate is disposed.
+                            // ReSharper disable once AccessToDisposedClosure
+                            start.Wait(Watchdog).Should().BeTrue();
+                            return flight.Task;
+                        },
+                        CancellationToken.None,
+                        TaskCreationOptions.LongRunning,
+                        TaskScheduler.Default
+                    )
+                ),
+        ];
 
         start.Set();
         flight.Set("value");
@@ -114,6 +120,8 @@ public sealed class SyncFlightCompletionTests
         cache = CacheBuilder
             .Create<int, string>()
             .MaximumSize(4)
+            // Keep the self-reference: invocation follows assignment and must re-enter this same cache to test inherited load-chain detection.
+            // ReSharper disable once AccessToModifiedClosure
             .BuildLoading(key => Task.Run(() => cache.Get(key)).GetAwaiter().GetResult());
         using (cache)
         {
@@ -138,35 +146,34 @@ public sealed class SyncFlightCompletionTests
         private static readonly Type FlightType = typeof(CacheEngine<,>)
             .GetNestedType("SyncFlight", BindingFlags.NonPublic)!
             .MakeGenericType(typeof(int), typeof(string));
-        private readonly object _flight = Activator.CreateInstance(
-            FlightType,
-            Members,
-            binder: null,
-            args: [1, 1L, 1L, (Func<int, string>)(static _ => "unused")],
-            culture: null
-        )!;
-
-        internal object Identity => _flight;
+        internal object Identity { get; } =
+            Activator.CreateInstance(
+                FlightType,
+                Members,
+                binder: null,
+                args: [1, 1L, 1L, (Func<int, string>)(static _ => "unused")],
+                culture: null
+            )!;
 
         internal Task<string> Task =>
             (
                 (TaskCompletionSource<string>)
-                    FlightType.GetProperty("Completion", Members)!.GetValue(_flight)!
+                    FlightType.GetProperty("Completion", Members)!.GetValue(Identity)!
             ).Task;
 
         internal string Wait() =>
-            (string)FlightType.GetMethod("Wait", Members)!.Invoke(_flight, null)!;
+            (string)FlightType.GetMethod("Wait", Members)!.Invoke(Identity, null)!;
 
         internal void Set(string value) => Set(typeof(string), value);
 
         internal void Set(Exception exception) => Set(typeof(Exception), exception);
 
         internal void Dispose() =>
-            FlightType.GetMethod("SetDisposed", Members)!.Invoke(_flight, null);
+            FlightType.GetMethod("SetDisposed", Members)!.Invoke(Identity, null);
 
         private void Set(Type argumentType, object value) =>
             FlightType
                 .GetMethod("Set", Members, null, [argumentType], null)!
-                .Invoke(_flight, [value]);
+                .Invoke(Identity, [value]);
     }
 }

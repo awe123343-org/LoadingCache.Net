@@ -41,6 +41,8 @@ public sealed class ReadBufferEnqueuedCountTests
         {
             await pause.Entered.WaitAsync(TestTimeout);
             buffer.GetStatistics().Enqueued.Should().Be(recordStatistics ? 1 : 0);
+            // Dispose while publication is paused to test shutdown accounting; retain the using guard for failure cleanup.
+            // ReSharper disable once DisposeOnUsingVariable
             buffer.Dispose();
             ReadBufferStatistics paused = buffer.GetStatistics();
             paused.Enqueued.Should().Be(recordStatistics ? 1 : 0);
@@ -77,6 +79,8 @@ public sealed class ReadBufferEnqueuedCountTests
             buffer.TryEnqueue(value).Should().BeTrue();
         }
 
+        // Keep this capture: DrainTo invokes the statistics callback synchronously before buffer cleanup.
+        // ReSharper disable once AccessToDisposedClosure
         buffer.DrainTo(_ => buffer.GetStatistics().Enqueued.Should().Be(4), 4).Should().Be(4);
         buffer.GetStatistics().Enqueued.Should().Be(4);
         buffer.GetStatistics().Dequeued.Should().Be(4);
@@ -90,8 +94,13 @@ public sealed class ReadBufferEnqueuedCountTests
         await using BlockingTestHook shutdown = new(TestTimeout);
         buffer.TryEnqueue(1).Should().BeTrue();
         buffer.GetStatistics().Enqueued.Should().Be(1);
+        // Keep the shutdown hook capture: finally releases and joins disposal before the hook scope ends.
+        // ReSharper disable once AccessToDisposedClosure
         buffer.SetShutdownHookForTesting(_ => shutdown.Invoke());
+        // Keep these captures: finally releases both hooks and joins the snapshot before their scopes end.
+        // ReSharper disable AccessToDisposedClosure
         Task<ReadBufferStatistics> snapshot = Task.Run(() => buffer.GetStatistics(capture.Invoke));
+        // ReSharper restore AccessToDisposedClosure
         Task? disposer = null;
         try
         {
@@ -123,28 +132,36 @@ public sealed class ReadBufferEnqueuedCountTests
         const int publications = 4000;
         int finished = 0;
         using Barrier start = new(4);
-        Task[] readers = Enumerable
-            .Range(0, 3)
-            .Select(_ =>
-                Task.Factory.StartNew(
-                    () =>
-                    {
-                        start.SignalAndWait(TestTimeout).Should().BeTrue();
-                        long previous = 0;
-                        do
+        Task[] readers =
+        [
+            .. Enumerable
+                .Range(0, 3)
+                .Select(_ =>
+                    Task.Factory.StartNew(
+                        () =>
                         {
-                            long current = buffer.GetStatistics().Enqueued;
-                            current.Should().BeGreaterThanOrEqualTo(previous);
-                            current.Should().BeLessThanOrEqualTo(publications);
-                            previous = current;
-                        } while (Volatile.Read(ref finished) == 0);
-                    },
-                    CancellationToken.None,
-                    TaskCreationOptions.LongRunning,
-                    TaskScheduler.Default
-                )
-            )
-            .ToArray();
+                            // Keep the shared barrier: all readers join in finally before its using scope ends.
+                            // ReSharper disable once AccessToDisposedClosure
+                            start.SignalAndWait(TestTimeout).Should().BeTrue();
+                            long previous = 0;
+                            // Keep one shared flag: the publisher uses Volatile.Write and these joined observers must see that same cell.
+                            // ReSharper disable once AccessToModifiedClosure
+                            do
+                            {
+                                // Keep the captured buffer: all reader tasks join in finally before buffer cleanup.
+                                // ReSharper disable once AccessToDisposedClosure
+                                long current = buffer.GetStatistics().Enqueued;
+                                current.Should().BeGreaterThanOrEqualTo(previous);
+                                current.Should().BeLessThanOrEqualTo(publications);
+                                previous = current;
+                            } while (Volatile.Read(ref finished) == 0);
+                        },
+                        CancellationToken.None,
+                        TaskCreationOptions.LongRunning,
+                        TaskScheduler.Default
+                    )
+                ),
+        ];
         try
         {
             start.SignalAndWait(TestTimeout).Should().BeTrue();

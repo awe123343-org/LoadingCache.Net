@@ -817,6 +817,8 @@ internal static class Program
             int stripes = 0;
             lock (_consumerGate)
             {
+                // Keep optional-table traversal under the consumer lock; a disposed table must not skip the other snapshot counters.
+                // ReSharper disable once InvertIf
                 if (_table.GetValue(_buffer) is Array table)
                 {
                     foreach (object? ring in table)

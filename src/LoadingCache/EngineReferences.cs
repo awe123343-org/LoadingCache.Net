@@ -52,6 +52,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
             where TDictionaryKey : notnull
         {
             long count = 0;
+            // Keep volatile readiness checks inline; a capturing LINQ predicate adds a delegate to this count path.
+            // ReSharper disable once LoopCanBeConvertedToQuery
             foreach (KeyValuePair<TDictionaryKey, Entry> pair in entries)
             {
                 Entry entry = pair.Value;

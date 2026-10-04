@@ -19,13 +19,6 @@ internal static class LoadingProfile
 
     internal static async Task RunAsync(string[] args)
     {
-        string Read(string name, string fallback)
-        {
-            int index = Array.IndexOf(args, name);
-            return index < 0 ? fallback
-                : index + 1 < args.Length ? args[index + 1]
-                : throw new ArgumentException($"Missing value after {name}.");
-        }
         string output = Read("--output", "loading-result.json");
         string fault = Read("--loading-fault", "none");
         if (fault is not ("none" or "backend-error" or "wrong-value" or "stuck-backend"))
@@ -108,43 +101,50 @@ internal static class LoadingProfile
                 )
                 .ConfigureAwait(false);
         }
+        return;
+
+        string Read(string name, string fallback)
+        {
+            int index = Array.IndexOf(args, name);
+            return index < 0 ? fallback
+                : index + 1 < args.Length ? args[index + 1]
+                : throw new ArgumentException($"Missing value after {name}.");
+        }
     }
 
     private static async Task RunCaseAsync(LoadingState state, bool smoke)
     {
-        if (state.Name == "normal")
+        switch (state.Name)
         {
-            await state.ScheduleAsync("warmup", 400, 200, 1000).ConfigureAwait(false);
-            await state.DrainAsync("warmup-drained").ConfigureAwait(false);
-            await state
-                .ScheduleAsync("normal", smoke ? 400 : 6000, 200, 10000)
-                .ConfigureAwait(false);
-            await state.DrainAsync("normal-drained").ConfigureAwait(false);
-            return;
-        }
-        if (state.Name == "expiry-refresh")
-        {
-            state.Cache.Set(42, -1);
-            state.Clock.Advance(TimeSpan.FromSeconds(6));
-            await state.SendAsync("stale", 42, Stopwatch.GetTimestamp()).ConfigureAwait(false);
-            await UntilAsync(() => state.Active == 1).ConfigureAwait(false);
-            state.Clock.Advance(TimeSpan.FromSeconds(5));
-        }
-        if (state.Name is "fan-in" or "expiry-refresh")
-        {
-            Task[] callers =
-            [
-                .. Enumerable
-                    .Range(0, 64)
-                    .Select(_ => state.SendAsync("fan-in", 42, Stopwatch.GetTimestamp())),
-            ];
-            await UntilAsync(() => state.Invoked.Count == (state.Name == "fan-in" ? 64 : 65))
-                .ConfigureAwait(false);
-            state.Observe("before-release");
-            state.Release();
-            await Task.WhenAll(callers).WaitAsync(Watchdog).ConfigureAwait(false);
-            await state.DrainAsync("fan-in-drained").ConfigureAwait(false);
-            return;
+            case "normal":
+                await state.ScheduleAsync("warmup", 400, 200, 1000).ConfigureAwait(false);
+                await state.DrainAsync("warmup-drained").ConfigureAwait(false);
+                await state
+                    .ScheduleAsync("normal", smoke ? 400 : 6000, 200, 10000)
+                    .ConfigureAwait(false);
+                await state.DrainAsync("normal-drained").ConfigureAwait(false);
+                return;
+            case "expiry-refresh":
+                state.Cache.Set(42, -1);
+                state.Clock.Advance(TimeSpan.FromSeconds(6));
+                await state.SendAsync("stale", 42, Stopwatch.GetTimestamp()).ConfigureAwait(false);
+                await UntilAsync(() => state.Active == 1).ConfigureAwait(false);
+                state.Clock.Advance(TimeSpan.FromSeconds(5));
+                goto case "fan-in";
+            case "fan-in":
+                Task[] callers =
+                [
+                    .. Enumerable
+                        .Range(0, 64)
+                        .Select(_ => state.SendAsync("fan-in", 42, Stopwatch.GetTimestamp())),
+                ];
+                await UntilAsync(() => state.Invoked.Count == (state.Name == "fan-in" ? 64 : 65))
+                    .ConfigureAwait(false);
+                state.Observe("before-release");
+                state.Release();
+                await Task.WhenAll(callers).WaitAsync(Watchdog).ConfigureAwait(false);
+                await state.DrainAsync("fan-in-drained").ConfigureAwait(false);
+                return;
         }
 
         Task[] admitted =
@@ -226,13 +226,18 @@ internal sealed class LoadingState : IAsyncDisposable
             builder.MaxConcurrentLoads(limit).MaxPendingLoadKeys(limit);
         if (statistics)
             builder.RecordStatistics();
-        if (name == "expiry-refresh")
-            builder
-                .TimeProvider(Clock)
-                .ExpireAfterWrite(TimeSpan.FromSeconds(10))
-                .RefreshAfterWrite(TimeSpan.FromSeconds(5));
-        if (name == "burst")
-            builder.TimeProvider(TimeoutClock).LoadTimeout(TimeSpan.FromSeconds(2));
+        switch (name)
+        {
+            case "expiry-refresh":
+                builder
+                    .TimeProvider(Clock)
+                    .ExpireAfterWrite(TimeSpan.FromSeconds(10))
+                    .RefreshAfterWrite(TimeSpan.FromSeconds(5));
+                break;
+            case "burst":
+                builder.TimeProvider(TimeoutClock).LoadTimeout(TimeSpan.FromSeconds(2));
+                break;
+        }
         Cache = builder.BuildAsyncLoading(LoadAsync);
         _hasActiveFlights = LoadingFlightDiagnostics.Bind(Cache);
     }

@@ -281,6 +281,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 return 0;
             }
 
+            // Keep indexed traversal: foreach over IReadOnlyList allocates an interface enumerator during clean-up.
+            // ReSharper disable once ForCanBeConvertedToForeach
             for (int index = 0; index < candidates.Count; index++)
             {
                 MemoryPressureCandidate candidate = candidates[index];

@@ -216,6 +216,8 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
 
     public void OnPublishLocked(object? entryToken, long weight)
     {
+        // Keep this debug-only monitor check: Release callers already own the gate; do not add hot-path runtime validation.
+        // ReSharper disable once InvocationIsSkipped
         Debug.Assert(Monitor.IsEntered(_policyGate));
         if (entryToken is EngineEntryToken token)
         {
@@ -246,6 +248,8 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
 
     public void OnRemoveLocked(object? entryToken)
     {
+        // Keep this debug-only monitor check: Release callers already own the gate; do not add hot-path runtime validation.
+        // ReSharper disable once InvocationIsSkipped
         Debug.Assert(Monitor.IsEntered(_policyGate));
         if (entryToken is EngineEntryToken token)
         {
@@ -480,6 +484,8 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
             if (_pendingWrites.TryEnqueueLocked(write))
             {
                 write.Token.PendingPolicyWrites = checked(write.Token.PendingPolicyWrites + 1);
+                // Keep deferred pressure checks under the measured eligibility branch; immediate writes must not arm the backstop (ADR 0013).
+                // ReSharper disable once InvertIf
                 if (_writeMaintenanceThreshold > 1)
                 {
                     // Deferral uses unit weights, so the maintained size equals resident count.
@@ -779,6 +785,8 @@ internal sealed class WindowTinyLfuEnginePolicy : ICacheEnginePolicy, IDisposabl
     private void Process(IReadOnlyList<PolicyNode<object>> changed)
     {
         Exception? firstFailure = null;
+        // Keep indexed traversal: foreach over IReadOnlyList allocates an interface enumerator during policy maintenance.
+        // ReSharper disable once ForCanBeConvertedToForeach
         for (int index = 0; index < changed.Count; index++)
         {
             PolicyNode<object> node = changed[index];

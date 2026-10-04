@@ -59,19 +59,21 @@ public sealed class ExpirationNodeOwnershipTests
             ReadProperty<bool>(node, "IsScheduled").Should().Be(nodeState == "bucket");
         }
 
-        if (operation == "clear")
+        switch (operation)
         {
-            cache.Clear();
-            cache.Put(1, "new");
-            cache.CleanUp();
-        }
-        else if (operation == "dispose")
-        {
-            cache.Dispose();
-        }
-        else
-        {
-            await engine.DisposeAsync();
+            case "clear":
+                cache.Clear();
+                cache.Put(1, "new");
+                cache.CleanUp();
+                break;
+            case "dispose":
+                // Dispose at this phase to test orphan-node teardown; the using guard also cleans up failed assertions.
+                // ReSharper disable once DisposeOnUsingVariable
+                cache.Dispose();
+                break;
+            default:
+                await engine.DisposeAsync();
+                break;
         }
 
         lock (gate)
@@ -193,12 +195,16 @@ public sealed class ExpirationNodeOwnershipTests
         using var cache = new Cache<int, string>(engine);
         cache.Put(1, "old");
         clock.Advance(Duration);
+        // Keep this captured cache: the test disposes it while the read is paused, then joins the read in finally.
+        // ReSharper disable once AccessToDisposedClosure
         Task<bool> read = Task.Run(() => cache.TryGet(1, out _));
         try
         {
             await cleanup.Entered.WaitAsync(Watchdog);
             if (operation == "dispose")
             {
+                // Dispose while the expired read is paused to test late cleanup; retain the using guard for failure cleanup.
+                // ReSharper disable once DisposeOnUsingVariable
                 cache.Dispose();
             }
             else
@@ -225,6 +231,8 @@ public sealed class ExpirationNodeOwnershipTests
 
         if (operation == "dispose")
         {
+            // Keep this post-disposal call: the synchronous assertion verifies the cache rejects a late write.
+            // ReSharper disable once AccessToDisposedClosure
             Action put = () => cache.Put(1, "late");
             put.Should().ThrowExactly<ObjectDisposedException>();
         }

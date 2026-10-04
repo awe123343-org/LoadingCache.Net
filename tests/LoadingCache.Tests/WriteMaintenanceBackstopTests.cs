@@ -21,13 +21,15 @@ public sealed class WriteMaintenanceBackstopTests
         await using var factory = new BlockingTestHook(Watchdog);
         using var factoryReturning = new ManualResetEventSlim();
         int publications = 0;
-        using var engine = CreateEngine(
+        await using var engine = CreateEngine(
             clock,
             hooks: new LoadingCacheTestHooks
             {
                 BeforeEntryPublicationCommit = _ =>
                 {
                     if (Interlocked.Increment(ref publications) == 1)
+                        // Keep the publication hook: engine cleanup runs before the hook scope ends, after the writer is joined.
+                        // ReSharper disable once AccessToDisposedClosure
                         publication.Invoke();
                 },
             }
@@ -42,11 +44,17 @@ public sealed class WriteMaintenanceBackstopTests
             {
                 if (load)
                 {
+                    // Keep the captured engine: finally releases the hooks and joins this contender before engine cleanup.
+                    // ReSharper disable once AccessToDisposedClosure
                     engine.GetOrAdd(
                         1,
                         _ =>
                         {
+                            // Keep the factory hook: finally releases it and joins this contender before hook cleanup.
+                            // ReSharper disable once AccessToDisposedClosure
                             factory.Invoke();
+                            // Keep the shared return gate: finally joins this contender before the gate is disposed.
+                            // ReSharper disable once AccessToDisposedClosure
                             factoryReturning.Set();
                             return "second";
                         }
@@ -54,6 +62,8 @@ public sealed class WriteMaintenanceBackstopTests
                 }
                 else
                 {
+                    // Keep the captured cache: finally releases the hooks and joins this contender before cache cleanup.
+                    // ReSharper disable once AccessToDisposedClosure
                     cache.Put(1, "second");
                 }
                 completed.SetResult();
@@ -78,6 +88,8 @@ public sealed class WriteMaintenanceBackstopTests
                 await factory.Entered.WaitAsync(Watchdog, CancellationToken.None);
             }
 
+            // Keep the captured cache: finally releases publication and awaits this writer before cache cleanup.
+            // ReSharper disable once AccessToDisposedClosure
             first = Task.Run(() => cache.Put(0, "first"));
             await publication.Entered.WaitAsync(Watchdog, CancellationToken.None);
             engine.GetMaintenanceStatistics().State.Should().Be(MaintenanceCoordinatorState.Idle);
@@ -179,13 +191,17 @@ public sealed class WriteMaintenanceBackstopTests
     {
         await using var hook = new BlockingTestHook(Watchdog);
         var clock = new TrackingClock { BeforeCreate = hook.Invoke };
-        using var engine = CreateEngine(clock);
+        await using var engine = CreateEngine(clock);
         using var cache = new Cache<int, string>(engine);
+        // Keep the captured cache: finally releases timer creation and awaits this writer before cache cleanup.
+        // ReSharper disable once AccessToDisposedClosure
         Task first = Task.Run(() => cache.Put(0, "first"));
         try
         {
             await hook.Entered.WaitAsync(Watchdog, CancellationToken.None);
             await Task.WhenAll(
+                    // Keep the captured cache: Task.WhenAll joins these contending writers before cache cleanup.
+                    // ReSharper disable once AccessToDisposedClosure
                     Enumerable.Range(1, 16).Select(key => Task.Run(() => cache.Put(key, "value")))
                 )
                 .WaitAsync(Watchdog, CancellationToken.None);
@@ -212,7 +228,7 @@ public sealed class WriteMaintenanceBackstopTests
     public async Task LoadPublicationUsesTheSameBackstop(bool asynchronous)
     {
         var clock = new TrackingClock();
-        using var engine = CreateEngine(clock);
+        await using var engine = CreateEngine(clock);
         if (asynchronous)
         {
             var release = new TaskCompletionSource<string>(
@@ -241,6 +257,8 @@ public sealed class WriteMaintenanceBackstopTests
             cache.Get(1).Should().Be("loaded");
             AssertDeferredLoad();
         }
+
+        return;
 
         void AssertDeferredLoad()
         {
@@ -316,13 +334,15 @@ public sealed class WriteMaintenanceBackstopTests
         long initialTimestamp = clock.GetTimestamp();
         await using var hook = new BlockingTestHook(Watchdog);
         int passes = 0;
-        using var engine = CreateEngine(
+        await using var engine = CreateEngine(
             clock,
             hooks: new LoadingCacheTestHooks
             {
                 AfterPolicyMaintenance = () =>
                 {
                     if (Interlocked.Increment(ref passes) == 1)
+                        // Keep the maintenance hook: drain and engine cleanup precede the hook scope ending.
+                        // ReSharper disable once AccessToDisposedClosure
                         hook.Invoke();
                 },
             }
@@ -355,6 +375,8 @@ public sealed class WriteMaintenanceBackstopTests
         var clock = new TrackingClock();
         var scheduler = new TestScheduler(reject);
         using var engine = CreateEngine(clock, scheduler: scheduler);
+        // Keep this engine capture: the injected scheduler runs within the engine scope to check lock ownership.
+        // ReSharper disable once AccessToDisposedClosure
         scheduler.IsLockHeld = () => engine.IsCoordinationLockHeldForTesting;
         using var cache = new Cache<int, string>(engine);
         cache.Put(1, "value");
@@ -441,6 +463,8 @@ public sealed class WriteMaintenanceBackstopTests
     {
         var clock = new TrackingClock { FireOnCreate = true, FireOnChange = true };
         using var engine = CreateEngine(clock);
+        // Keep this engine capture: the fake timer runs synchronously within the engine scope to check lock ownership.
+        // ReSharper disable once AccessToDisposedClosure
         clock.IsLockHeld = () => engine.IsCoordinationLockHeldForTesting;
         using var cache = new Cache<int, string>(engine);
         cache.Put(1, "value");
@@ -478,8 +502,12 @@ public sealed class WriteMaintenanceBackstopTests
     {
         await using var hook = new BlockingTestHook(Watchdog);
         var clock = new TrackingClock { BeforeCreate = hook.Invoke };
+        // Keep synchronous scope cleanup: this test compares Dispose and DisposeAsync while timer creation is paused.
+        // ReSharper disable once UseAwaitUsing
         using var engine = CreateEngine(clock);
         using var cache = new Cache<int, string>(engine);
+        // Keep this captured cache: disposal races paused timer creation and finally joins the writer.
+        // ReSharper disable once AccessToDisposedClosure
         Task put = Task.Run(() => cache.Put(1, "value"));
         try
         {
@@ -487,6 +515,8 @@ public sealed class WriteMaintenanceBackstopTests
             if (asynchronous)
                 await engine.DisposeAsync();
             else
+                // Dispose here to test synchronous teardown during timer creation; retain the using guard for failure cleanup.
+                // ReSharper disable once DisposeOnUsingVariable
                 cache.Dispose();
         }
         finally
@@ -509,6 +539,8 @@ public sealed class WriteMaintenanceBackstopTests
     {
         await using var hook = new BlockingTestHook(Watchdog);
         var clock = new TrackingClock { BeforeDispose = hook.Invoke };
+        // Keep synchronous scope cleanup: the test compares blocking Dispose and DisposeAsync with a pending load.
+        // ReSharper disable once UseAwaitUsing
         using var engine = CreateEngine(clock);
         using var manual = new Cache<int, string>(engine);
         manual.Put(1, "ready");
@@ -523,8 +555,12 @@ public sealed class WriteMaintenanceBackstopTests
         Task dispose = Task.Run(async () =>
         {
             if (asynchronous)
+                // Keep the captured engine: this task exercises async disposal and is joined in finally before scope cleanup.
+                // ReSharper disable once AccessToDisposedClosure
                 await engine.DisposeAsync();
             else
+                // Keep this explicit synchronous disposal: the test pauses timer teardown and joins the task before scope cleanup.
+                // ReSharper disable once AccessToDisposedClosure, DisposeOnUsingVariable
                 engine.Dispose();
         });
         try
@@ -558,11 +594,13 @@ public sealed class WriteMaintenanceBackstopTests
         WeakReference retired = PutAndClear(cache);
         Collect(retired);
         retired.IsAlive.Should().BeFalse();
-        var replacement = new object();
+        object replacement = new();
         cache.Put(1, replacement);
         clock.Timers[0].Arms.Should().Be(1);
         clock.Advance(TimeSpan.FromMilliseconds(1));
         SpinWait
+            // Keep the captured engine: SpinUntil reads synchronously before the engine scope ends.
+            // ReSharper disable once AccessToDisposedClosure
             .SpinUntil(() => engine.GetPolicyWriteBufferStatistics().Queued == 0, Watchdog)
             .Should()
             .BeTrue();
@@ -616,7 +654,7 @@ public sealed class WriteMaintenanceBackstopTests
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static WeakReference PutAndClear(Cache<int, object> cache)
     {
-        var value = new object();
+        object value = new();
         cache.Put(1, value);
         var weak = new WeakReference(value);
         cache.Clear();
@@ -636,7 +674,13 @@ public sealed class WriteMaintenanceBackstopTests
             var cache = new Cache<int, object>(engine);
             object value = new();
             cache.Put(1, value);
-            return [new(cache), new(engine), new(value), new(ambient)];
+            return
+            [
+                new WeakReference(cache),
+                new WeakReference(engine),
+                new WeakReference(value),
+                new WeakReference(ambient),
+            ];
         }
         finally
         {
@@ -733,17 +777,19 @@ public sealed class WriteMaintenanceBackstopTests
         public bool Change(TimeSpan dueTime, TimeSpan period)
         {
             clock.SawLock |= clock.IsLockHeld?.Invoke() == true;
-            if (clock.Failure == "change")
-                throw new InvalidOperationException("timer change failure");
-            if (clock.Failure == "reject-change")
-                return false;
-            if (dueTime != Timeout.InfiniteTimeSpan)
+            switch (clock.Failure)
             {
-                Arms++;
-                Delays.Add(dueTime);
-                if (clock.FireOnChange)
-                    callback(state);
+                case "change":
+                    throw new InvalidOperationException("timer change failure");
+                case "reject-change":
+                    return false;
             }
+            if (dueTime == Timeout.InfiniteTimeSpan)
+                return timer.Change(dueTime, period);
+            Arms++;
+            Delays.Add(dueTime);
+            if (clock.FireOnChange)
+                callback(state);
             return timer.Change(dueTime, period);
         }
 

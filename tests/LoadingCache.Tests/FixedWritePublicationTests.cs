@@ -44,6 +44,8 @@ public sealed class FixedWritePublicationTests
                 () =>
                     clock.ReadAtNextTimestamp(() =>
                     {
+                        // Keep the captured cache: finally releases both gates and joins the reader before async cleanup.
+                        // ReSharper disable once AccessToDisposedClosure
                         cache.TryGet(1, out string? value).Should().BeTrue();
                         return value!;
                     }),
