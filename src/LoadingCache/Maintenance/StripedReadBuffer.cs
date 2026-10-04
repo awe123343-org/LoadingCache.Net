@@ -1040,6 +1040,8 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
             }
 
             slot.Value = default!;
+            // Keep the measured statistics-disabled fast path; do not rearrange the guarded single shutdown-drop claim (ADR 0014).
+            // ReSharper disable once InvertIf
             if (
                 _recordStatistics
                 // A producer can be delayed after its event was consumed. In a one-slot
@@ -1199,7 +1201,7 @@ internal sealed class StripedReadBuffer<TEvent> : IDisposable
                         }
                     }
 
-                    enqueued = (long)Math.Min(published, (ulong)long.MaxValue);
+                    enqueued = (long)Math.Min(published, long.MaxValue);
                     // A complete unsigned counter wrap requires enough consumption to have
                     // saturated Dequeued already. The cumulative count must remain saturated.
                     enqueued = Math.Max(enqueued, Volatile.Read(ref _dequeued));

@@ -683,6 +683,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
     private void EnsureBulkReentrancy(IEnumerable<TKey> requested)
     {
+        // Keep the short-circuiting loop: a capturing LINQ predicate adds an allocation to bulk admission.
+        // ReSharper disable once LoopCanBeConvertedToQuery
         foreach (TKey key in requested)
         {
             if (LoadChainContext.Contains(this, key))
@@ -798,6 +800,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
             }
         }
 
+        // Keep validation inline and allocation-free; a LINQ predicate adds a delegate to each bulk result.
+        // ReSharper disable once LoopCanBeConvertedToQuery
         foreach (TKey key in ownedKeys)
         {
             if (!snapshot.ContainsKey(key))

@@ -13,10 +13,16 @@
     <Project Path="benchmarks/LoadingCache.Benchmarks/LoadingCache.Benchmarks.csproj" />
   </Folder>
   <Folder Name="/tools/">
+    <Project Path="tools/LoadingCache.ApiBaseline/LoadingCache.ApiBaseline.csproj" />
+    <Project Path="tools/LoadingCache.EnduranceProbe/LoadingCache.EnduranceProbe.csproj" />
     <Project Path="tools/LoadingCache.HitProbe/LoadingCache.HitProbe.csproj" />
     <Project Path="tools/LoadingCache.LoadHarness/LoadingCache.LoadHarness.csproj" />
     <Project Path="tools/LoadingCache.MemoryCacheProbe/LoadingCache.MemoryCacheProbe.csproj" />
+    <Project Path="tools/LoadingCache.ReadProbe/LoadingCache.ReadProbe.csproj" />
+    <Project Path="tools/LoadingCache.ScenarioProbe/LoadingCache.ScenarioProbe.csproj" />
+    <Project Path="tools/LoadingCache.ServiceProbe/LoadingCache.ServiceProbe.csproj" />
     <Project Path="tools/LoadingCache.Simulator/LoadingCache.Simulator.csproj" />
+    <Project Path="tools/LoadingCache.WriteProbe/LoadingCache.WriteProbe.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/LoadingCache.AllocationProbe/LoadingCache.AllocationProbe.csproj" />

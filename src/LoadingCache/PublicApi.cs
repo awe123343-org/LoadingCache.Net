@@ -43,7 +43,8 @@ public interface IAsyncLoadingCache<TKey, TValue> : IAsyncCache<TKey, TValue>
     /// </summary>
     /// <param name="key">The key to update.</param>
     /// <param name="value">The value to store.</param>
-#pragma warning disable CA1716 // The public cache contract intentionally exposes the Set operation.
+    // Keep the published Set operation: renaming it breaks cache implementations and consumers.
+#pragma warning disable CA1716
     void Set(TKey key, TValue value);
 #pragma warning restore CA1716
 

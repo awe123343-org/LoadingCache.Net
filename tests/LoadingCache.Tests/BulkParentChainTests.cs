@@ -14,36 +14,7 @@ public sealed class BulkParentChainTests
         CancellationToken cancellationToken
     )
     {
-        using var engine = CreateEngine<string, string>(StringComparer.OrdinalIgnoreCase);
-        async Task<IReadOnlyDictionary<string, string>> Loader(
-            IReadOnlyCollection<string> keys,
-            CancellationToken token
-        )
-        {
-            keys.Should().Equal("owner", "sibling", "tail");
-            await Task.Yield();
-            await Task.Run(
-                async () =>
-                {
-                    // Check before joining a pending flight, so a broken chain cannot hang.
-                    LoadChainContext.Contains(engine, "SIBLING").Should().BeTrue();
-                    if (asynchronous)
-                    {
-                        await engine.GetAsync(
-                            "SIBLING",
-                            static (key, _) => Task.FromResult(key),
-                            token
-                        );
-                    }
-                    else
-                    {
-                        engine.GetOrAdd("SIBLING", static key => key, token);
-                    }
-                },
-                token
-            );
-            return keys.ToDictionary(static key => key, static key => key);
-        }
+        await using var engine = CreateEngine<string, string>(StringComparer.OrdinalIgnoreCase);
 
         Task<IReadOnlyDictionary<string, string>> operation = Load(
             engine,
@@ -58,6 +29,43 @@ public sealed class BulkParentChainTests
             .ThrowExactlyAsync<LoadingCacheReentrancyException>();
         engine.EstimatedCount.Should().Be(0);
         engine.AssertInvariants();
+        return;
+
+        async Task<IReadOnlyDictionary<string, string>> Loader(
+            IReadOnlyCollection<string> keys,
+            CancellationToken token
+        )
+        {
+            keys.Should().Equal("owner", "sibling", "tail");
+            await Task.Yield();
+            await Task.Run(
+                async () =>
+                {
+                    // Check before joining a pending flight, so a broken chain cannot hang.
+                    // Keep the captured engine identity: the load awaits this nested task before async cleanup.
+                    // ReSharper disable once AccessToDisposedClosure
+                    LoadChainContext.Contains(engine, "SIBLING").Should().BeTrue();
+                    if (asynchronous)
+                    {
+                        // Keep the captured engine: the load awaits this nested task before async cleanup.
+                        // ReSharper disable once AccessToDisposedClosure
+                        await engine.GetAsync(
+                            "SIBLING",
+                            static (key, _) => Task.FromResult(key),
+                            token
+                        );
+                    }
+                    else
+                    {
+                        // Keep the captured engine: the load awaits this nested task before async cleanup.
+                        // ReSharper disable once AccessToDisposedClosure
+                        engine.GetOrAdd("SIBLING", static key => key, token);
+                    }
+                },
+                token
+            );
+            return keys.ToDictionary(static key => key, static key => key);
+        }
     }
 
     [Test]
@@ -68,31 +76,17 @@ public sealed class BulkParentChainTests
         CancellationToken cancellationToken
     )
     {
-        using var engine = CreateEngine<string, string>(StringComparer.OrdinalIgnoreCase);
+        await using var engine = CreateEngine<string, string>(StringComparer.OrdinalIgnoreCase);
         int bulkCalls = 0;
-        async Task<string> OuterLoader(string key, CancellationToken token)
-        {
-            await Task.Yield();
-            await Load(
-                engine,
-                asynchronous,
-                ["left", "ANCESTOR", "right"],
-                (keys, _) =>
-                {
-                    bulkCalls++;
-                    return Task.FromResult<IReadOnlyDictionary<string, string>>(
-                        keys.ToDictionary(static key => key, static key => key)
-                    );
-                },
-                token
-            );
-            return key;
-        }
 
         Task<string> operation = Task.Run(
             async () =>
                 asynchronous
+                    // Keep this engine capture: the load task is awaited before async scope cleanup.
+                    // ReSharper disable once AccessToDisposedClosure
                     ? await engine.GetAsync("ancestor", OuterLoader, cancellationToken)
+                    // Keep this engine capture: the load task is awaited before async scope cleanup.
+                    // ReSharper disable once AccessToDisposedClosure
                     : engine.GetOrAdd(
                         "ancestor",
                         key => OuterLoader(key, cancellationToken).GetAwaiter().GetResult(),
@@ -107,6 +101,28 @@ public sealed class BulkParentChainTests
         bulkCalls.Should().Be(0);
         engine.EstimatedCount.Should().Be(0);
         engine.AssertInvariants();
+        return;
+
+        async Task<string> OuterLoader(string key, CancellationToken token)
+        {
+            await Task.Yield();
+            await Load(
+                // Keep the outer engine capture: the loader is awaited before async scope cleanup.
+                // ReSharper disable once AccessToDisposedClosure
+                engine,
+                asynchronous,
+                ["left", "ANCESTOR", "right"],
+                (keys, _) =>
+                {
+                    bulkCalls++;
+                    return Task.FromResult<IReadOnlyDictionary<string, string>>(
+                        keys.ToDictionary(static key => key, static key => key)
+                    );
+                },
+                token
+            );
+            return key;
+        }
     }
 
     [Test]
@@ -117,24 +133,10 @@ public sealed class BulkParentChainTests
         CancellationToken cancellationToken
     )
     {
-        using var engine = CreateEngine<int, int>();
+        await using var engine = CreateEngine<int, int>();
         int[] requested = [.. Enumerable.Range(0, 4096)];
         var expected = requested.ToDictionary(static key => key, static key => key * 10);
         int bulkCalls = 0;
-        async Task<IReadOnlyDictionary<int, int>> Loader(
-            IReadOnlyCollection<int> keys,
-            CancellationToken token
-        )
-        {
-            keys.Should().Equal(requested);
-            bulkCalls++;
-            await Task.Yield();
-            LoadChainContext.Contains(engine, 1).Should().BeTrue();
-            LoadChainContext.Contains(engine, 2048).Should().BeTrue();
-            LoadChainContext.Contains(engine, 4095).Should().BeTrue();
-            token.ThrowIfCancellationRequested();
-            return expected;
-        }
 
         IReadOnlyDictionary<int, int> result = await Load(
                 engine,
@@ -158,6 +160,28 @@ public sealed class BulkParentChainTests
         cached.Should().Equal(expected);
         bulkCalls.Should().Be(1);
         engine.AssertInvariants();
+        return;
+
+        async Task<IReadOnlyDictionary<int, int>> Loader(
+            IReadOnlyCollection<int> keys,
+            CancellationToken token
+        )
+        {
+            keys.Should().Equal(requested);
+            bulkCalls++;
+            await Task.Yield();
+            // Keep the engine identity: both calls await this loader before async scope cleanup.
+            // ReSharper disable once AccessToDisposedClosure
+            LoadChainContext.Contains(engine, 1).Should().BeTrue();
+            // Keep the engine identity: both calls await this loader before async scope cleanup.
+            // ReSharper disable once AccessToDisposedClosure
+            LoadChainContext.Contains(engine, 2048).Should().BeTrue();
+            // Keep the engine identity: both calls await this loader before async scope cleanup.
+            // ReSharper disable once AccessToDisposedClosure
+            LoadChainContext.Contains(engine, 4095).Should().BeTrue();
+            token.ThrowIfCancellationRequested();
+            return expected;
+        }
     }
 
     private static CacheEngine<TKey, TValue> CreateEngine<TKey, TValue>(

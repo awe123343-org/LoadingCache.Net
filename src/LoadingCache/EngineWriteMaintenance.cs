@@ -42,6 +42,9 @@ internal sealed partial class CacheEngine<TKey, TValue>
         private const int Armed = 1;
         private const int Disabled = 2;
         private const int Disposed = 3;
+
+        // Keep the immutable delay shared instead of adding a TimeSpan to every backstop; owner and timer state remain instance-owned.
+        // ReSharper disable once StaticMemberInGenericType
         private static readonly TimeSpan Delay = TimeSpan.FromMilliseconds(1);
         private readonly WeakReference<CacheEngine<TKey, TValue>> _owner = new(owner);
         private ITimer? _timer;
@@ -50,6 +53,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
         internal bool TryArm()
         {
             int state = Volatile.Read(ref _state);
+            // Keep these measured state gates in order before CAS; disabled owners must not arm timers (ADR 0013).
+            // ReSharper disable once MergeIntoLogicalPattern, ConvertIfStatementToSwitchStatement
             if (state == Armed || state == Disposed)
                 return true;
             if (state == Disabled)

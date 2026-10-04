@@ -147,11 +147,15 @@ internal sealed partial class CacheEngine<TKey, TValue>
             {
                 lock (this)
                 {
+                    // Keep the measured lazy-allocation branch: creation and completed-state replay share this private monitor.
+                    // ReSharper disable once InvertIf
                     if (_completion is null)
                     {
                         _completion = new TaskCompletionSource<TValue>(
                             TaskCreationOptions.RunContinuationsAsynchronously
                         );
+                        // Keep replay nested under first creation; an existing promise must not be completed a second time here.
+                        // ReSharper disable once InvertIf
                         if (_completed)
                         {
                             if (_exception is null)

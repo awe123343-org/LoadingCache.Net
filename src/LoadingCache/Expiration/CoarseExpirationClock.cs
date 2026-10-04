@@ -35,6 +35,8 @@ internal sealed class CoarseExpirationClock(long initialTimestamp)
         return clock;
     }
 
+    // Keep this process-lifetime background loop: caches share one clock without per-cache timers or owner retention.
+    // ReSharper disable once FunctionNeverReturns
     private void Run()
     {
         while (true)

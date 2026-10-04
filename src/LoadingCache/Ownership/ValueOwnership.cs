@@ -351,6 +351,8 @@ internal sealed class ValueOwnership<TValue> : IDisposable
             ];
         }
         int accepted = 0;
+        // Keep scheduling side effects explicit; a capturing LINQ predicate adds a delegate during disposal.
+        // ReSharper disable once LoopCanBeConvertedToQuery
         foreach (LeaseState state in pending)
         {
             if (TryScheduleDisposal(state))

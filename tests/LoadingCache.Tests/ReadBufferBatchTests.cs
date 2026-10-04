@@ -103,6 +103,8 @@ public sealed class ReadBufferBatchTests
         buffer.HasBacklog.Should().BeTrue();
         buffer.DrainTo(_ => { }, 1).Should().Be(1);
         buffer.HasBacklog.Should().BeFalse();
+        // Dispose here to assert shutdown clears backlog; retain the using guard for failure cleanup.
+        // ReSharper disable once DisposeOnUsingVariable
         buffer.Dispose();
         buffer.HasBacklog.Should().BeFalse();
     }

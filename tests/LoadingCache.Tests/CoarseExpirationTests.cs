@@ -64,12 +64,11 @@ public sealed class CoarseExpirationTests
         clock.Advance(Duration + Duration);
 
         cache.TryGet("key", out string? value).Should().Be(enabled);
-        if (enabled)
-        {
-            value.Should().Be("value");
-            coarse.Advance(clock.GetTimestamp());
-            cache.TryGet("key", out _).Should().BeFalse();
-        }
+        if (!enabled)
+            return;
+        value.Should().Be("value");
+        coarse.Advance(clock.GetTimestamp());
+        cache.TryGet("key", out _).Should().BeFalse();
     }
 
     [Test]
@@ -85,18 +84,19 @@ public sealed class CoarseExpirationTests
         );
         cache.Put("key", "value");
         clock.Advance(Duration);
-        if (operation == "cleanup")
+        switch (operation)
         {
-            cache.TryGet("key", out _).Should().BeTrue();
-            cache.CleanUp();
-        }
-        else if (operation == "quiet")
-        {
-            cache.TryGet("key", out _).Should().BeTrue();
-            cache.Policy.TryGetQuietly("key", out _).Should().BeFalse();
-            // A quiet miss does not physically remove an expired entry.
-            cache.EstimatedCount.Should().Be(1);
-            cache.CleanUp();
+            case "cleanup":
+                cache.TryGet("key", out _).Should().BeTrue();
+                cache.CleanUp();
+                break;
+            case "quiet":
+                cache.TryGet("key", out _).Should().BeTrue();
+                cache.Policy.TryGetQuietly("key", out _).Should().BeFalse();
+                // A quiet miss does not physically remove an expired entry.
+                cache.EstimatedCount.Should().Be(1);
+                cache.CleanUp();
+                break;
         }
         cache.EstimatedCount.Should().Be(0);
         cache.TryGet("key", out _).Should().BeFalse();
@@ -252,9 +252,15 @@ public sealed class CoarseExpirationTests
             .Build();
         second.Put(1, "resident");
         CoarseExpirationClock clock = CoarseExpirationClock.Shared;
-        long previous = clock.GetTimestamp();
+        long initialTimestamp = clock.GetTimestamp();
+        // Dispose this cache now to verify the shared ticker survives it; retain the using guard for failure cleanup.
+        // ReSharper disable once DisposeOnUsingVariable
         first.Dispose();
-        SpinWait.SpinUntil(() => clock.GetTimestamp() > previous, Watchdog).Should().BeTrue();
+        SpinWait
+            .SpinUntil(() => clock.GetTimestamp() > initialTimestamp, Watchdog)
+            .Should()
+            .BeTrue();
+        long previous = initialTimestamp;
         for (int sample = 0; sample < 1_000; sample++)
         {
             long timestamp = clock.GetTimestamp();

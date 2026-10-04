@@ -12,7 +12,7 @@ public sealed class BulkAllocationSemanticsTests
         CancellationToken cancellationToken
     )
     {
-        using var engine = CreateEngine<int, object>();
+        await using var engine = CreateEngine<int, object>();
         object first = new();
         object second = new();
         engine.GetAll(
@@ -28,6 +28,8 @@ public sealed class BulkAllocationSemanticsTests
             views.Length,
             index =>
             {
+                // Keep the captured engine: Parallel.For joins every reader before the engine scope ends.
+                // ReSharper disable once AccessToDisposedClosure
                 engine.TryGetTask(2, out Task<object>? task).Should().BeTrue();
                 views[index] = task!;
             }
@@ -50,35 +52,13 @@ public sealed class BulkAllocationSemanticsTests
         CancellationToken cancellationToken
     )
     {
-        using var engine = CreateEngine<string, string>(StringComparer.OrdinalIgnoreCase);
-        async Task<IReadOnlyDictionary<string, string>> Loader(
-            IReadOnlyCollection<string> keys,
-            CancellationToken token
-        )
-        {
-            await Task.Yield();
-            await Task.Run(
-                async () =>
-                {
-                    // A broken chain must fail here before joining its own pending flight.
-                    LoadChainContext.Contains(engine, "B").Should().BeTrue();
-                    if (asynchronous)
-                    {
-                        await engine.GetAsync("B", static (key, _) => Task.FromResult(key), token);
-                    }
-                    else
-                    {
-                        engine.GetOrAdd("B", static key => key, token);
-                    }
-                },
-                token
-            );
-            return keys.ToDictionary(static key => key, static key => key);
-        }
+        await using var engine = CreateEngine<string, string>(StringComparer.OrdinalIgnoreCase);
 
         Task<IReadOnlyDictionary<string, string>> operation = Task.Run(
             async () =>
                 asynchronous
+                    // Keep this engine capture: the load task is awaited before async scope cleanup.
+                    // ReSharper disable once AccessToDisposedClosure
                     ? await engine.GetAllAsync(
                         static (key, _) => Task.FromResult(key),
                         null,
@@ -86,6 +66,8 @@ public sealed class BulkAllocationSemanticsTests
                         ["a", "b"],
                         cancellationToken
                     )
+                    // Keep this engine capture: the load task is awaited before async scope cleanup.
+                    // ReSharper disable once AccessToDisposedClosure
                     : engine.GetAll(
                         ["a", "b"],
                         static key => key,
@@ -100,6 +82,38 @@ public sealed class BulkAllocationSemanticsTests
             .ThrowExactlyAsync<LoadingCacheReentrancyException>();
         engine.EstimatedCount.Should().Be(0);
         engine.AssertInvariants();
+        return;
+
+        async Task<IReadOnlyDictionary<string, string>> Loader(
+            IReadOnlyCollection<string> keys,
+            CancellationToken token
+        )
+        {
+            await Task.Yield();
+            await Task.Run(
+                async () =>
+                {
+                    // A broken chain must fail here before joining its own pending flight.
+                    // Keep the outer engine in the loader: its Task.Run is awaited by the load before scope cleanup.
+                    // ReSharper disable once AccessToDisposedClosure
+                    LoadChainContext.Contains(engine, "B").Should().BeTrue();
+                    if (asynchronous)
+                    {
+                        // Keep the outer engine in the loader: its Task.Run is awaited by the load before scope cleanup.
+                        // ReSharper disable once AccessToDisposedClosure
+                        await engine.GetAsync("B", static (key, _) => Task.FromResult(key), token);
+                    }
+                    else
+                    {
+                        // Keep the outer engine in the loader: its Task.Run is awaited by the load before scope cleanup.
+                        // ReSharper disable once AccessToDisposedClosure
+                        engine.GetOrAdd("B", static key => key, token);
+                    }
+                },
+                token
+            );
+            return keys.ToDictionary(static key => key, static key => key);
+        }
     }
 
     [Test]
@@ -107,24 +121,9 @@ public sealed class BulkAllocationSemanticsTests
         CancellationToken cancellationToken
     )
     {
-        using var outer = CreateEngine<string, string>(StringComparer.OrdinalIgnoreCase);
-        using var inner = CreateEngine<string, string>(StringComparer.OrdinalIgnoreCase);
+        await using var outer = CreateEngine<string, string>(StringComparer.OrdinalIgnoreCase);
+        await using var inner = CreateEngine<string, string>(StringComparer.OrdinalIgnoreCase);
         LoadChainContext.Node? ambient = LoadChainContext.Current;
-        async Task<IReadOnlyDictionary<string, string>> InnerLoader(
-            IReadOnlyCollection<string> keys,
-            CancellationToken token
-        )
-        {
-            await Task.Yield();
-            LoadChainContext.Contains(outer, "B").Should().BeTrue();
-            await FluentActions
-                .Awaiting(() =>
-                    outer.GetAsync("B", static (key, _) => Task.FromResult(key), token).AsTask()
-                )
-                .Should()
-                .ThrowExactlyAsync<LoadingCacheReentrancyException>();
-            return keys.ToDictionary(static key => key, static key => key);
-        }
 
         IReadOnlyDictionary<string, string> result = await outer
             .GetAllAsync(
@@ -132,6 +131,8 @@ public sealed class BulkAllocationSemanticsTests
                 null,
                 async (keys, token) =>
                 {
+                    // Keep the inner engine capture: the nested load is awaited before either engine scope ends.
+                    // ReSharper disable once AccessToDisposedClosure
                     IReadOnlyDictionary<string, string> nested = await inner.GetAllAsync(
                         static (key, _) => Task.FromResult(key),
                         null,
@@ -140,7 +141,11 @@ public sealed class BulkAllocationSemanticsTests
                         token
                     );
                     nested.Keys.Should().BeEquivalentTo("b", "c");
+                    // Keep the outer engine identity: the awaited loader checks the same logical chain before cleanup.
+                    // ReSharper disable once AccessToDisposedClosure
                     LoadChainContext.Contains(outer, "B").Should().BeTrue();
+                    // Keep the inner engine identity: the awaited loader checks chain restoration before cleanup.
+                    // ReSharper disable once AccessToDisposedClosure
                     LoadChainContext.Contains(inner, "b").Should().BeFalse();
                     return keys.ToDictionary(static key => key, static key => key);
                 },
@@ -153,6 +158,27 @@ public sealed class BulkAllocationSemanticsTests
         LoadChainContext.Current.Should().BeSameAs(ambient);
         outer.AssertInvariants();
         inner.AssertInvariants();
+        return;
+
+        async Task<IReadOnlyDictionary<string, string>> InnerLoader(
+            IReadOnlyCollection<string> keys,
+            CancellationToken token
+        )
+        {
+            await Task.Yield();
+            // Keep the outer engine identity: this loader is awaited by GetAllAsync before scope cleanup.
+            // ReSharper disable once AccessToDisposedClosure
+            LoadChainContext.Contains(outer, "B").Should().BeTrue();
+            await FluentActions
+                .Awaiting(() =>
+                    // Keep the outer engine capture: ThrowExactlyAsync awaits this reentrancy check before cleanup.
+                    // ReSharper disable once AccessToDisposedClosure
+                    outer.GetAsync("B", static (key, _) => Task.FromResult(key), token).AsTask()
+                )
+                .Should()
+                .ThrowExactlyAsync<LoadingCacheReentrancyException>();
+            return keys.ToDictionary(static key => key, static key => key);
+        }
     }
 
     [Test]
@@ -163,15 +189,12 @@ public sealed class BulkAllocationSemanticsTests
         LoadChainContext.Node? previous = LoadChainContext.Current;
         var ambient = new LoadChainContext.Node(new WeakReference<object>(engine), 99, previous);
         int loaderCalls = 0;
-        IReadOnlyDictionary<int, int> Loader(IReadOnlyCollection<int> keys)
-        {
-            loaderCalls++;
-            return keys.ToDictionary(static key => key, static key => key);
-        }
 
         LoadChainContext.Current = ambient;
         try
         {
+            // Keep this capture: the assertion invokes the load synchronously before engine cleanup.
+            // ReSharper disable once AccessToDisposedClosure
             Action load = () => engine.GetAll([1, 2, 3], static key => key, null, Loader);
             load.Should().ThrowExactly<ControlledEnumerationFailure>();
             comparer.AncestorFailures.Should().Be(1);
@@ -189,6 +212,13 @@ public sealed class BulkAllocationSemanticsTests
         {
             LoadChainContext.Current = previous;
         }
+        return;
+
+        IReadOnlyDictionary<int, int> Loader(IReadOnlyCollection<int> keys)
+        {
+            loaderCalls++;
+            return keys.ToDictionary(static key => key, static key => key);
+        }
     }
 
     [Test]
@@ -203,8 +233,11 @@ public sealed class BulkAllocationSemanticsTests
     )
     {
         // A large configured maximum is not a capacity hint for a two-key result.
-        using var engine = CreateEngine<int, int>(bulkLimit: int.MaxValue);
-        var source = new GuardedResult([new(1, 10), new(2, 20)], failMidway);
+        await using var engine = CreateEngine<int, int>(bulkLimit: int.MaxValue);
+        var source = new GuardedResult(
+            [new KeyValuePair<int, int>(1, 10), new KeyValuePair<int, int>(2, 20)],
+            failMidway
+        );
         Task<IReadOnlyDictionary<int, int>> operation = Load(
             engine,
             asynchronous,
@@ -238,7 +271,7 @@ public sealed class BulkAllocationSemanticsTests
         CancellationToken cancellationToken
     )
     {
-        using var engine = CreateEngine<int, int>(bulkLimit: int.MaxValue);
+        await using var engine = CreateEngine<int, int>(bulkLimit: int.MaxValue);
         for (int key = 0; key < 63; key++)
         {
             engine.Put(key, key * 10);
@@ -270,7 +303,7 @@ public sealed class BulkAllocationSemanticsTests
         CancellationToken cancellationToken
     )
     {
-        using var engine = CreateEngine<int, int>();
+        await using var engine = CreateEngine<int, int>();
         var keys = new ThrowingKeys();
         int calls = 0;
         Task<IReadOnlyDictionary<int, int>> operation = Load(
@@ -305,9 +338,16 @@ public sealed class BulkAllocationSemanticsTests
         CancellationToken cancellationToken
     )
     {
-        using var engine = CreateEngine<int, int>(bulkLimit: 2);
+        await using var engine = CreateEngine<int, int>(bulkLimit: 2);
         var source = new GuardedResult(
-            duplicate ? [new(1, 10), new(1, 20)] : [new(1, 10), new(2, 20), new(3, 30)]
+            duplicate
+                ? [new KeyValuePair<int, int>(1, 10), new KeyValuePair<int, int>(1, 20)]
+                :
+                [
+                    new KeyValuePair<int, int>(1, 10),
+                    new KeyValuePair<int, int>(2, 20),
+                    new KeyValuePair<int, int>(3, 30),
+                ]
         );
         Task<IReadOnlyDictionary<int, int>> operation = Load(
             engine,
@@ -385,13 +425,13 @@ public sealed class BulkAllocationSemanticsTests
                 _firstSiblingChecked = true;
             }
 
-            if (Fail && _firstSiblingChecked && first == 99 && second == 3)
+            if (!Fail || !_firstSiblingChecked || first != 99 || second != 3)
             {
-                AncestorFailures++;
-                throw new ControlledEnumerationFailure();
+                return first == second;
             }
 
-            return first == second;
+            AncestorFailures++;
+            throw new ControlledEnumerationFailure();
         }
 
         public int GetHashCode(int value) => value;
