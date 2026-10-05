@@ -2,6 +2,22 @@
 
 The four cache personalities share one engine and policy implementation. This document defines observable behaviour; [release readiness](release-readiness.md) records verification separately. A successful load need not still be resident when its waiter receives the result. Mapping visibility, flight ownership, maintenance and statistics are not one globally linearizable transaction.
 
+## Migration from published 0.1.0 packages
+
+The legacy non-generic static `LoadingCache.Create` factory and `LoadingCacheOptions`
+have been removed. This intentionally breaks source and binary compatibility with
+published 0.1.0 and 0.1.0-alpha.1.2 packages. Rebuild consumers using the typed builder and an explicit
+positive size or weight/resident bound; generic synchronous
+`LoadingCache<TKey, TValue>` remains supported.
+
+```csharp
+using var cache = CacheBuilder.Create<string, string>()
+    .MaximumSize(1_000)
+    .BuildAsyncLoading(static (key, _) => Task.FromResult(key));
+```
+
+Version 0.2.0 remains experimental, without an SLA, and APIs may still change.
+
 ## Inputs and failures
 
 Keys and values are `notnull`; null keys, explicit values, loaders, options and time providers are rejected at runtime. Capacity must be explicitly positive. `MaximumSize` and `MaximumWeight` are mutually exclusive; weighted caches also require a weigher and `MaximumResidentCount`. `MaxConcurrentLoads` is optional: omitted/null means no configured limit, while zero or negative values are invalid. Fixed durations are disabled by null and otherwise must be positive, including `TimeSpan.MaxValue`; negative infinity sentinels are not accepted. Variable expiry has different duration rules below.

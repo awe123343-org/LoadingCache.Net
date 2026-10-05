@@ -1,9 +1,10 @@
 # Security
 
-This is an experimental project without a stable release or a support SLA.
-A private security contact and disclosure channel have not yet been confirmed;
-establish them before publishing a release. Do not place secrets, real production
-keys, private traces or exploitable security details in a public issue.
+This is an experimental project without a stable release or a support SLA; public
+APIs may still change. Report security issues privately through
+[GitHub Private Vulnerability Reporting](https://github.com/awe123343-org/LoadingCache.Net/security):
+open the Security tab and select **Report a vulnerability**. Do not place secrets,
+real production keys, private traces or exploitable security details in a public issue.
 
 The cache does not isolate tenants automatically. Include necessary authorization
 dimensions in typed keys, and use trusted loaders and stable comparers. Resource
