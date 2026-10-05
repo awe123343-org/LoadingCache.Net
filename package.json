@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@12.9.1",
   "devDependencies": {
-    "oxfmt": "0.71.0"
+    "oxfmt": "0.72.0"
   },
   "scripts": {
     "fmt": "oxfmt --write .",
