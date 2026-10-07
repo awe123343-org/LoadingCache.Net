@@ -137,14 +137,14 @@ jobs:
           --version 0.1.0-alpha.localvalidation
       - name: Preserve test evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-results-${{ matrix.os }}
           path: artifacts/test-results
           if-no-files-found: warn
       - name: Preserve package and API evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: package-api-results-${{ matrix.os }}
           path: |
@@ -179,7 +179,7 @@ jobs:
           benchmarks/jvm/build/install/jvm-benchmarks/bin/jvm-benchmarks caffeine-scenarios --scenario all --cycles 8 --capacity 64 --fan-in 4 --warmups 0 --runs 1 --statistics on --output artifacts/jvm-smoke/scenarios.json
       - name: Preserve JVM smoke evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: jvm-smoke
           path: artifacts/jvm-smoke
@@ -201,7 +201,7 @@ jobs:
         run: dotnet run --project benchmarks/LoadingCache.Benchmarks/LoadingCache.Benchmarks.csproj -c Release -f net10.0 -- --job Dry --filter "*LookupBenchmarks*" --exporters json --artifacts artifacts/benchmarks/lookup-smoke
       - name: Preserve smoke evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: benchmark-smoke
           path: artifacts/benchmarks/lookup-smoke
