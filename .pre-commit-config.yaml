@@ -4,6 +4,7 @@ minimum_prek_version: "0.4.14"
 exclude: >-
   (?x)(^|/)(artifacts|bin|obj|node_modules|\.idea|\.git|__pycache__)/|
   ^pnpm-lock\.yaml$|^docs/research-evidence/|^docs/benchmarks/.*\.(json|csv)$|
+  ^gradlew\.bat$|
   ^docs/benchmarks/[^/]+-[0-9]{8}/|
   ^tools/LoadingCache\.Simulator/results/
 
