@@ -2,7 +2,7 @@
 # Manual edits can break the build and are not advised.
 # This file is expected to be part of source control.
 # To regenerate this file, run: ./gradlew :jvm-benchmarks:dependencies --write-locks
-com.github.ben-manes.caffeine:caffeine:3.3.0=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
+com.github.ben-manes.caffeine:caffeine:3.3.1=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 com.google.errorprone:error_prone_annotations:2.50.0=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 com.google.guava:failureaccess:1.0.3=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 com.google.guava:guava-bom:33.7.2-jre=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
