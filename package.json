@@ -1,7 +1,7 @@
 {
   "name": "loadingcache-repository-tools",
   "private": true,
-  "packageManager": "pnpm@12.11.2",
+  "packageManager": "pnpm@12.14.0",
   "devDependencies": {
     "oxfmt": "0.73.0"
   },
