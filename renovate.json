@@ -18,6 +18,22 @@
   ],
   "packageRules": [
     {
+      "description": "Allow six hours for Maven mirror propagation before creating updates.",
+      "matchDatasources": ["maven"],
+      "minimumReleaseAge": "6 hours",
+      "internalChecksFilter": "strict",
+      "registryUrls": [
+        "https://repo1.maven.org/maven2/",
+        "https://maven-central.storage-download.googleapis.com/maven2/"
+      ]
+    },
+    {
+      "description": "Resolve Gradle plugin markers through the Plugin Portal.",
+      "matchDatasources": ["maven"],
+      "matchPackageNames": ["/\\.gradle\\.plugin$/"],
+      "registryUrls": ["https://plugins.gradle.org/m2/"]
+    },
+    {
       "matchManagers": ["nuget"],
       "rangeStrategy": "bump"
     },

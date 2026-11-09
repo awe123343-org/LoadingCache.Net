@@ -3,10 +3,10 @@
 # This file is expected to be part of source control.
 # To regenerate this file, run: ./gradlew :jvm-benchmarks:dependencies --write-locks
 com.github.ben-manes.caffeine:caffeine:3.3.1=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
-com.google.errorprone:error_prone_annotations:2.50.0=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
+com.google.errorprone:error_prone_annotations:2.52.0=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 com.google.guava:failureaccess:1.0.3=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
-com.google.guava:guava-bom:33.7.2-jre=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
-com.google.guava:guava:33.7.2-jre=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
+com.google.guava:guava-bom:33.8.0-jre=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
+com.google.guava:guava:33.8.0-jre=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 com.google.guava:listenablefuture:9999.0-empty-to-avoid-conflict-with-guava=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 com.google.j2objc:j2objc-annotations:3.1=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 net.sf.jopt-simple:jopt-simple:5.0.4=compileClasspath,kapt,kaptClasspath_kaptKotlin,kaptClasspath_kaptTestKotlin,kaptTest,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
