@@ -8,13 +8,8 @@
   <ItemGroup>
     <PackageReference Include="FluentAssertions" PrivateAssets="all" />
     <PackageReference Include="TUnit" PrivateAssets="all" />
-    <!-- TUnit 1.83.0 omits this dependency from its netstandard2.0 engine package. -->
-    <PackageReference
-      Include="Microsoft.Bcl.AsyncInterfaces"
-      Condition="'$(TargetFramework)' == 'net8.0'"
-      PrivateAssets="all"
-    />
 
     <ProjectReference Include="../../src/LoadingCache/LoadingCache.csproj" />
   </ItemGroup>
+  <Import Project="../TUnit.Net8Compatibility.props" />
 </Project>

@@ -1,0 +1,16 @@
+<Project>
+  <!-- Temporary workaround for TUnit 1.83.0's netstandard2.0 engine, which omits
+       Microsoft.Bcl.AsyncInterfaces. Only test projects import this file.
+       VersionOverride keeps this net8.0-only dependency independent of any normal
+       centrally managed use of the package. Version 11 no longer supports net8.0.
+       After upstream fixes its dependency metadata and .NET 8 tests pass without
+       this workaround, remove these imports, this file and its file-scoped Renovate
+       rule. Preserve any independently required references and their version policy. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
+    <PackageReference
+      Include="Microsoft.Bcl.AsyncInterfaces"
+      VersionOverride="10.0.15"
+      PrivateAssets="all"
+    />
+  </ItemGroup>
+</Project>

@@ -69,6 +69,13 @@
       "matchPackageNames": ["dotnet-sdk"],
       "matchCurrentVersion": "/^10\\./",
       "allowedVersions": "<11"
+    },
+    {
+      "description": "Temporary net8.0-only TUnit packaging workaround. Limit only the VersionOverride in this file; normal references elsewhere remain independently upgradeable. Remove this rule and the workaround imports/file after upstream fixes its dependency metadata and .NET 8 tests pass without them. Preserve independently required references and their version policy.",
+      "matchManagers": ["nuget"],
+      "matchPackageNames": ["Microsoft.Bcl.AsyncInterfaces"],
+      "allowedVersions": "<11",
+      "matchFileNames": ["tests/TUnit.Net8Compatibility.props"]
     }
   ]
 }
