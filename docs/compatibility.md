@@ -38,9 +38,14 @@ SDK selected by global.json, and must stay on that runtime line.
 
 TUnit 1.83.0 selects its netstandard2.0 engine on net8.0. That assembly requires
 Microsoft.Bcl.AsyncInterfaces 9.0.0, which its NuGet dependency group omits.
-The three test projects explicitly reference that dependency only on net8.0,
-with PrivateAssets=all. Remove this workaround when the upstream package supplies
-it and actual .NET 8 test startup passes without the explicit reference.
+The three test projects import `tests/TUnit.Net8Compatibility.props`, which adds
+10.0.15 through a private net8.0-only PackageReference with VersionOverride.
+The override is independent of any future normal centrally managed reference.
+Renovate's below-11 cap matches only this workaround file; references elsewhere
+remain independently upgradeable. Version 11 no longer supports net8.0.
+Once upstream fixes its dependency metadata and .NET 8 tests pass without the
+workaround, remove the imports, workaround file and file-scoped Renovate rule.
+Keep any independently required references and their own compatibility policy.
 
 Correctness and package-consumer builds use -warnaserror so MSBuild dependency
 support warnings fail CI as well as compiler/analyzer warnings. No support-warning
