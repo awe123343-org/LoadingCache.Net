@@ -132,24 +132,19 @@ public sealed class ResidentReplacementTests
             TaskCreationOptions.RunContinuationsAsynchronously
         );
         int callbackCalls = 0;
-        Task<CacheMutation<int>> compute = Task.Run(() =>
-            dictionary.Compute(
-                1,
-                (_, current) =>
+        Task<CacheMutation<int>> compute = Task.Run(() => dictionary.Compute(1, (_, current) =>
+            {
+                int call = Interlocked.Increment(ref callbackCalls);
+                if (call != 1)
                 {
-                    int call = Interlocked.Increment(ref callbackCalls);
-                    if (call != 1)
-                    {
-                        return CacheMutation.Keep<int>();
-                    }
-
-                    current.Value.Should().Be(1);
-                    callbackEntered.TrySetResult(null);
-                    releaseCallback.Task.GetAwaiter().GetResult();
-                    return CacheMutation.Set(2);
+                    return CacheMutation.Keep<int>();
                 }
-            )
-        );
+
+                current.Value.Should().Be(1);
+                callbackEntered.TrySetResult(null);
+                releaseCallback.Task.GetAwaiter().GetResult();
+                return CacheMutation.Set(2);
+            }));
         try
         {
             await callbackEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));

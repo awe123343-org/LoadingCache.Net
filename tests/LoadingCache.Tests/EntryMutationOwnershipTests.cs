@@ -68,21 +68,18 @@ public sealed class EntryMutationOwnershipTests
         {
             CacheMutation<string> result = cache
                 .AsDictionary()
-                .Compute(
-                    1,
-                    (_, current) =>
+                .Compute(1, (_, current) =>
+                {
+                    current.HasValue.Should().BeTrue();
+                    current.Value.Should().Be("old");
+                    return kind switch
                     {
-                        current.HasValue.Should().BeTrue();
-                        current.Value.Should().Be("old");
-                        return kind switch
-                        {
-                            CacheMutationKind.Keep => CacheMutation.Keep<string>(),
-                            CacheMutationKind.Set => CacheMutation.Set("new"),
-                            CacheMutationKind.Remove => CacheMutation.Remove<string>(),
-                            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
-                        };
-                    }
-                );
+                        CacheMutationKind.Keep => CacheMutation.Keep<string>(),
+                        CacheMutationKind.Set => CacheMutation.Set("new"),
+                        CacheMutationKind.Remove => CacheMutation.Remove<string>(),
+                        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+                    };
+                });
             result.Kind.Should().Be(kind);
             if (kind == CacheMutationKind.Remove)
             {

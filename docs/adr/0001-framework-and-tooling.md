@@ -11,3 +11,13 @@ FluentAssertions was upgraded to 8.11.0 on 19 September 2026 with explicit maint
 CSharpier 1.3.0 is pinned in `.config/dotnet-tools.json`; use `dotnet tool restore` and `dotnet csharpier format/check .`. Its .NET 10 tool runtime affects development only. Published dependency metadata, frameworks, hashes and licences are recorded in [dependency evidence](../dependency-evidence.json); direct-package review does not replace transitive/security review.
 
 The support table consulted on 12 September 2026 listed .NET 8 end of support as 10 November 2026 and .NET 10 as 14 November 2028. Retain the requested .NET 8 minimum unless an explicit compatibility policy changes it. Reassess servicing and migration before releases; distinguish Microsoft runtime support from library binary compatibility. [Official support policy](https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core).
+
+## 2026-11-11: SDK 11 with retained consumer compatibility
+
+Development now uses SDK 11.0.100 and CSharpier 1.4.0; C# 12 and the single
+net8.0 library asset remain unchanged. Core, DI and short-stress tests, allocation
+children, source consumers and package consumers cover .NET 8, 10 and 11.
+Microsoft.Extensions versions follow the target-specific compatibility policy
+in [compatibility](../compatibility.md), including the net8.0-only TUnit 1.83.0
+packaging workaround. The SDK upgrade fixes CA2027 by cancelling the watchdog
+timer without changing the adversarial tests' exception-observation semantics.

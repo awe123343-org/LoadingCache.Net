@@ -263,51 +263,48 @@ internal sealed class LoadingState : IAsyncDisposable
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         _app = builder.Build();
-        _app.MapGet(
-            "/load/{key:int}/{id:int}",
-            async (int key, int id, HttpContext context) =>
+        _app.MapGet("/load/{key:int}/{id:int}", async (int key, int id, HttpContext context) =>
+        {
+            try
             {
+                // Observe after GetAsync has synchronously reserved/joined a flight.
+                ValueTask<int> pending;
+                if (Name == "burst")
+                    TimeoutClock.BeginRequest(id, key);
                 try
                 {
-                    // Observe after GetAsync has synchronously reserved/joined a flight.
-                    ValueTask<int> pending;
-                    if (Name == "burst")
-                        TimeoutClock.BeginRequest(id, key);
-                    try
-                    {
-                        pending = Cache.GetAsync(key, context.RequestAborted);
-                    }
-                    finally
-                    {
-                        if (Name == "burst")
-                            TimeoutClock.EndRequest();
-                    }
-                    Invoked[id] = Stopwatch.GetTimestamp();
-                    int value = await pending.ConfigureAwait(false);
-                    return Results.Json(value);
-                }
-                catch (CacheLoadRejectedException)
-                {
-                    return Results.StatusCode(StatusCodes.Status429TooManyRequests);
-                }
-                catch (TimeoutException)
-                {
-                    return Results.StatusCode(StatusCodes.Status504GatewayTimeout);
-                }
-                catch (OperationCanceledException)
-                {
-                    return Results.StatusCode(499);
-                }
-                catch (InvalidOperationException)
-                {
-                    return Results.StatusCode(StatusCodes.Status500InternalServerError);
+                    pending = Cache.GetAsync(key, context.RequestAborted);
                 }
                 finally
                 {
-                    Returned[id] = Stopwatch.GetTimestamp();
+                    if (Name == "burst")
+                        TimeoutClock.EndRequest();
                 }
+                Invoked[id] = Stopwatch.GetTimestamp();
+                int value = await pending.ConfigureAwait(false);
+                return Results.Json(value);
             }
-        );
+            catch (CacheLoadRejectedException)
+            {
+                return Results.StatusCode(StatusCodes.Status429TooManyRequests);
+            }
+            catch (TimeoutException)
+            {
+                return Results.StatusCode(StatusCodes.Status504GatewayTimeout);
+            }
+            catch (OperationCanceledException)
+            {
+                return Results.StatusCode(499);
+            }
+            catch (InvalidOperationException)
+            {
+                return Results.StatusCode(StatusCodes.Status500InternalServerError);
+            }
+            finally
+            {
+                Returned[id] = Stopwatch.GetTimestamp();
+            }
+        });
         await _app.StartAsync().ConfigureAwait(false);
         string address = _app
             .Services.GetRequiredService<IServer>()
@@ -582,18 +579,13 @@ internal static class LoadingFlightDiagnostics
     // The service probe is not an InternalsVisibleTo friend. Bind the existing
     // locked diagnostic once per cache, outside request paths, and fail closed
     // if a future core changes this internal layout. Do not inspect the registry.
-    private static readonly FieldInfo EngineField =
-        typeof(AsyncLoadingCache<int, int>).GetField(
-            "_engine",
-            BindingFlags.Instance | BindingFlags.NonPublic
-        ) ?? throw new InvalidOperationException("Cache engine diagnostic field is unavailable.");
-    private static readonly MethodInfo HasActiveFlightsGetter =
-        EngineField
-            .FieldType.GetProperty(
-                "HasActiveFlights",
-                BindingFlags.Instance | BindingFlags.NonPublic
-            )
-            ?.GetGetMethod(nonPublic: true)
+    private static readonly FieldInfo EngineField = typeof(AsyncLoadingCache<int, int>).GetField(
+        "_engine",
+        BindingFlags.Instance | BindingFlags.NonPublic
+    ) ?? throw new InvalidOperationException("Cache engine diagnostic field is unavailable.");
+    private static readonly MethodInfo HasActiveFlightsGetter = EngineField
+        .FieldType.GetProperty("HasActiveFlights", BindingFlags.Instance | BindingFlags.NonPublic)
+        ?.GetGetMethod(nonPublic: true)
         ?? throw new InvalidOperationException("Active-flight diagnostic getter is unavailable.");
 
     internal static Func<bool> Bind(IAsyncLoadingCache<int, int> cache) =>
@@ -668,8 +660,7 @@ internal sealed class LoadingTimeoutClock : TimeProvider
         // EngineTimeout.PrepareFlightExecution assigns TimeoutStartTimestamp
         // from its last GetTimestamp before synchronously calling CreateTimer.
         // This seam is pinned to the source/build manifest, not HTTP dispatch.
-        RequestScope request =
-            _request.Value
+        RequestScope request = _request.Value
             ?? throw new InvalidOperationException("Timeout timer has no request scope.");
         if (
             request.LastTimestamp == 0

@@ -29,16 +29,13 @@ public sealed class ReplacementCounterTests
             cache.Put(key, "same reference");
         }
 
-        await RunTogether(
-            workers,
-            worker =>
+        await RunTogether(workers, worker =>
+        {
+            for (int index = 0; index < replacements; index++)
             {
-                for (int index = 0; index < replacements; index++)
-                {
-                    cache.Put(sameKey ? 0 : worker, "same reference");
-                }
+                cache.Put(sameKey ? 0 : worker, "same reference");
             }
-        );
+        });
         cache.Statistics.ReplacedRemovals.Should().Be(workers * replacements);
         cache.Clear();
         cache.Statistics.ReplacedRemovals.Should().Be(workers * replacements);
@@ -156,9 +153,8 @@ public sealed class ReplacementCounterTests
                 },
             }
         );
-        await using var cache = new AsyncLoadingCache<int, string>(
-            engine,
-            static (_, _) => Task.FromResult("refreshed")
+        await using var cache = new AsyncLoadingCache<int, string>(engine, static (_, _) =>
+            Task.FromResult("refreshed")
         );
         cache.Set(1, "old");
         Task<string> refresh = Task

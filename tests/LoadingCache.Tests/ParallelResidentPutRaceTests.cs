@@ -23,9 +23,8 @@ public sealed class ParallelResidentPutRaceTests
                 BeforeResidentValuePublished = probe.Observe,
             }
         );
-        await using var cache = new AsyncLoadingCache<int, string>(
-            engine,
-            static (_, _) => Task.FromResult("v2")
+        await using var cache = new AsyncLoadingCache<int, string>(engine, static (_, _) =>
+            Task.FromResult("v2")
         );
         cache.Set(1, "v1");
         cache.CleanUp();
@@ -78,9 +77,8 @@ public sealed class ParallelResidentPutRaceTests
                 BeforeResidentValuePublished = probe.Observe,
             }
         );
-        await using var cache = new AsyncLoadingCache<int, string>(
-            engine,
-            static (_, _) => Task.FromResult("v1")
+        await using var cache = new AsyncLoadingCache<int, string>(engine, static (_, _) =>
+            Task.FromResult("v1")
         );
         Task<string> load = StartLoad(cache);
         Task<string>? original;

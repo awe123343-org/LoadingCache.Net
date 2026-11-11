@@ -27,8 +27,7 @@ public sealed class CacheLease<TValue> : IDisposable, IAsyncDisposable
     {
         get
         {
-            var registration =
-                Volatile.Read(ref _registration)
+            var registration = Volatile.Read(ref _registration)
                 ?? throw new ObjectDisposedException(nameof(CacheLease<TValue>));
             return registration.State.Value
                 ?? throw new ObjectDisposedException(nameof(CacheLease<TValue>));

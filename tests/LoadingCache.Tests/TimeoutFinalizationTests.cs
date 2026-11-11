@@ -135,9 +135,8 @@ public sealed class TimeoutFinalizationTests
             .TimeProvider(time)
             .RecordStatistics();
         CacheEngine<int, int> engine = builder.CreateEngine(hasFixedLoader: true);
-        var cache = new AsyncLoadingCache<int, int>(
-            engine,
-            (key, _) => key == 1 ? backend.Task : Task.FromResult(key)
+        var cache = new AsyncLoadingCache<int, int>(engine, (key, _) =>
+            key == 1 ? backend.Task : Task.FromResult(key)
         );
         Task<int> pending = cache.GetAsync(1).AsTask();
         try

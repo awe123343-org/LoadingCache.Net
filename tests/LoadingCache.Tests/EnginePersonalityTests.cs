@@ -368,9 +368,8 @@ public sealed class EnginePersonalityTests
         try
         {
             await installation.Entered.WaitAsync(TestTimeout, CancellationToken.None);
-            ValueTask<string> joined = cache.GetOrAddAsync(
-                1,
-                (_, _) => throw new AssertionFailedException("The stored task was not joined.")
+            ValueTask<string> joined = cache.GetOrAddAsync(1, (_, _) =>
+                throw new AssertionFailedException("The stored task was not joined.")
             );
             source.SetResult("stored");
             installation.Release();

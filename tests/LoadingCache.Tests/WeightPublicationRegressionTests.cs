@@ -39,22 +39,19 @@ public sealed class WeightPublicationRegressionTests
         var release = new TaskCompletionSource<WeightedPayload>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
-        var cache = new AsyncLoadingCache<int, WeightedPayload>(
-            engine,
-            async (_, _) =>
+        var cache = new AsyncLoadingCache<int, WeightedPayload>(engine, async (_, _) =>
+        {
+            Interlocked.Increment(ref active.Value);
+            started.TrySetResult();
+            try
             {
-                Interlocked.Increment(ref active.Value);
-                started.TrySetResult();
-                try
-                {
-                    return await release.Task.ConfigureAwait(false);
-                }
-                finally
-                {
-                    Interlocked.Decrement(ref active.Value);
-                }
+                return await release.Task.ConfigureAwait(false);
             }
-        );
+            finally
+            {
+                Interlocked.Decrement(ref active.Value);
+            }
+        });
         try
         {
             cache.Set(1, new WeightedPayload(3));

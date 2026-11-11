@@ -23,6 +23,7 @@ def main() -> int:
         parser.add_argument(f"--{name}", required=True)
     parser.add_argument("--runtime8-host", default="dotnet")
     parser.add_argument("--runtime10-host", default="dotnet")
+    parser.add_argument("--runtime11-host", default="dotnet")
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     output = (root / args.output).resolve()
@@ -83,7 +84,7 @@ def main() -> int:
             for key, value in {
                 "OutputType": "Exe",
                 "TargetFramework": "",
-                "TargetFrameworks": "net8.0;net10.0",
+                "TargetFrameworks": "net8.0;net10.0;net11.0",
                 "ManagePackageVersionsCentrally": "false",
                 "IsPackable": "false",
                 "GenerateDocumentationFile": "true",
@@ -99,7 +100,15 @@ def main() -> int:
                     items,
                     "PackageReference",
                     Include="Microsoft.Extensions.DependencyInjection",
-                    Version="10.0.12",
+                    Version="10.0.15",
+                    Condition="'$(TargetFramework)' == 'net8.0'",
+                )
+                ET.SubElement(
+                    items,
+                    "PackageReference",
+                    Include="Microsoft.Extensions.DependencyInjection",
+                    Version="11.0.0",
+                    Condition="'$(TargetFramework)' != 'net8.0'",
                 )
             path = directory / f"{role}Consumer.csproj"
             ET.ElementTree(project).write(path, encoding="unicode", xml_declaration=True)
@@ -128,10 +137,14 @@ def main() -> int:
                 if hashlib.sha256(cached.read_bytes()).hexdigest() != digest:
                     raise RuntimeError(f"{role} restored a different archive for {dependency}")
                 report["archives"][archive.name] = digest
-            run(role + "-build", ["dotnet", "build", str(path), "-c", "Release", "--no-restore"])
+            run(
+                role + "-build",
+                ["dotnet", "build", str(path), "-c", "Release", "--no-restore", "-warnaserror"],
+            )
             for framework, host in [
                 ("net8.0", args.runtime8_host),
                 ("net10.0", args.runtime10_host),
+                ("net11.0", args.runtime11_host),
             ]:
                 binary = directory / "bin/Release" / framework / f"{role}Consumer.dll"
                 run(role + "-" + framework, [host, str(binary)])

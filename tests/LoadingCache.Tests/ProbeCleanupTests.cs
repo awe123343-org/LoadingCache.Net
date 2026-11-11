@@ -19,16 +19,13 @@ public sealed class ProbeCleanupTests
         await using var hook = new BlockingTestHook(Watchdog);
         Action releaseHook = hook.Release;
         var engine = CreateEngine(scheduler, hook, statistics);
-        using var cache = new ObservedCache(
-            engine,
-            pass =>
+        using var cache = new ObservedCache(engine, pass =>
+        {
+            if (pass == 257)
             {
-                if (pass == 257)
-                {
-                    releaseHook();
-                }
+                releaseHook();
             }
-        );
+        });
         cache.Put(1, "ready");
         Task worker = Task.Run(scheduler.RunNext, CancellationToken.None);
         Task<int>? drain = null;

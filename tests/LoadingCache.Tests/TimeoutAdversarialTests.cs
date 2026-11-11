@@ -118,10 +118,8 @@ public sealed class TimeoutAdversarialTests
             .ExpireAfterWrite(TimeSpan.FromMinutes(1))
             .TimeProvider(clock);
         var engine = builder.CreateEngine(hooks, hasFixedLoader: true);
-        await using var cache = new AsyncLoadingCache<int, string>(
-            engine,
-            (_, _) =>
-                Task.FromResult(Interlocked.Increment(ref loads.Value) == 1 ? "first" : "retry")
+        await using var cache = new AsyncLoadingCache<int, string>(engine, (_, _) =>
+            Task.FromResult(Interlocked.Increment(ref loads.Value) == 1 ? "first" : "retry")
         );
         Task<string> first = cache.GetAsync(1).AsTask();
         await WaitForCompletion(first);
@@ -178,10 +176,18 @@ public sealed class TimeoutAdversarialTests
 
     private static async Task WaitForCompletion(Task task)
     {
-        Task completed = await Task.WhenAny(task, Task.Delay(Watchdog));
-        completed
-            .Should()
-            .BeSameAs(task, "the adversarial operation must complete within the watchdog");
+        using CancellationTokenSource watchdog = new();
+        try
+        {
+            Task completed = await Task.WhenAny(task, Task.Delay(Watchdog, watchdog.Token));
+            completed
+                .Should()
+                .BeSameAs(task, "the adversarial operation must complete within the watchdog");
+        }
+        finally
+        {
+            await watchdog.CancelAsync();
+        }
     }
 
     private static TaskCompletionSource<bool> Signal() =>

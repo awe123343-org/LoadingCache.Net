@@ -21,10 +21,8 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(
     new WebApplicationOptions { Args = args, ContentRootPath = AppContext.BaseDirectory }
 );
 builder.WebHost.ConfigureKestrel(options =>
-    options.Listen(
-        IPAddress.Loopback,
-        0,
-        listenOptions => listenOptions.Protocols = HttpProtocols.Http2
+    options.Listen(IPAddress.Loopback, 0, listenOptions =>
+        listenOptions.Protocols = HttpProtocols.Http2
     )
 );
 builder.Services.AddGrpc();
@@ -53,8 +51,8 @@ using CancellationTokenSource smokeTimeout = new(TimeSpan.FromSeconds(10));
 await app.StartAsync(smokeTimeout.Token).ConfigureAwait(false);
 try
 {
-    IServerAddressesFeature addresses =
-        app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()
+    IServerAddressesFeature addresses = app.Services.GetRequiredService<IServer>()
+        .Features.Get<IServerAddressesFeature>()
         ?? throw new InvalidOperationException("gRPC did not expose a server address feature.");
     string address = addresses.Addresses.Single();
     using GrpcChannel channel = GrpcChannel.ForAddress(address);

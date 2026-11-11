@@ -276,8 +276,8 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
         _recordStatistics = options.RecordStatistics;
         _enableExpirationScheduler = options.EnableExpirationScheduler;
         _testHooks = options.TestHooks;
-        int maintenanceReadStripeCount =
-            options.MaintenanceReadStripeCount ?? DefaultMaintenanceReadStripeCount();
+        int maintenanceReadStripeCount = options.MaintenanceReadStripeCount
+            ?? DefaultMaintenanceReadStripeCount();
         int maintenanceReadStripeCapacity = options.MaintenanceReadStripeCapacity ?? 64;
         bool enableColdStart = CanUseColdStartPolicy(options);
         _deferWriteMaintenance =
@@ -292,8 +292,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
                     RemovalListener: null,
                     EvictionListener: null,
                 };
-        _policy =
-            options.Policy
+        _policy = options.Policy
             ?? new WindowTinyLfuEnginePolicy(
                 options.MaximumWeight ?? options.MaximumSize!.Value,
                 options.MaximumResidentCount ?? options.MaximumSize,
@@ -953,8 +952,7 @@ internal sealed partial class CacheEngine<TKey, TValue> : ILoadingCacheKeyOwner,
 
         (bool isUpdate, TimeSpan currentDuration) = CaptureVariableUpdate(key);
         long weight = ComputeWeight(key, value);
-        TimeSpan variableDuration =
-            explicitDuration
+        TimeSpan variableDuration = explicitDuration
             ?? (
                 _expiry is null ? TimeSpan.MaxValue
                 : isUpdate ? ComputeUpdateDuration(key, value, currentDuration)

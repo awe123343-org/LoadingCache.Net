@@ -55,10 +55,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
 
         if (options.EnableMetrics)
         {
-            _metrics = new EngineMetrics(
-                options.MetricsName,
-                GetMetricsSnapshot,
-                () => Volatile.Read(ref _runningLoads)
+            _metrics = new EngineMetrics(options.MetricsName, GetMetricsSnapshot, () =>
+                Volatile.Read(ref _runningLoads)
             );
         }
     }

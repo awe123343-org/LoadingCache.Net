@@ -25,14 +25,12 @@ internal sealed partial class CacheEngine<TKey, TValue>
         ArgumentNullException.ThrowIfNull(addValueFactory);
         ArgumentNullException.ThrowIfNull(updateValueFactory);
 
-        CacheMutation<TValue> mutation = DictionaryComputeCore(
-            key,
-            (currentKey, current) =>
-                CacheMutation.Set(
-                    current.HasValue
-                        ? updateValueFactory(currentKey, current.Value)
-                        : addValueFactory(currentKey)
-                )
+        CacheMutation<TValue> mutation = DictionaryComputeCore(key, (currentKey, current) =>
+            CacheMutation.Set(
+                current.HasValue
+                    ? updateValueFactory(currentKey, current.Value)
+                    : addValueFactory(currentKey)
+            )
         );
         return mutation.Value;
     }
@@ -76,10 +74,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
         ArgumentNullException.ThrowIfNull(value);
         ArgumentNullException.ThrowIfNull(mergeFactory);
 
-        CacheMutation<TValue> mutation = DictionaryComputeCore(
-            key,
-            (_, current) =>
-                CacheMutation.Set(current.HasValue ? mergeFactory(current.Value, value) : value)
+        CacheMutation<TValue> mutation = DictionaryComputeCore(key, (_, current) =>
+            CacheMutation.Set(current.HasValue ? mergeFactory(current.Value, value) : value)
         );
         return mutation.Value;
     }

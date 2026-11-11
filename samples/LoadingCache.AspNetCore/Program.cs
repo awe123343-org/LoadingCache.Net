@@ -49,8 +49,8 @@ using CancellationTokenSource smokeTimeout = new(TimeSpan.FromSeconds(10));
 await app.StartAsync(smokeTimeout.Token).ConfigureAwait(false);
 try
 {
-    IServerAddressesFeature addresses =
-        app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()
+    IServerAddressesFeature addresses = app.Services.GetRequiredService<IServer>()
+        .Features.Get<IServerAddressesFeature>()
         ?? throw new InvalidOperationException(
             "ASP.NET Core did not expose a server address feature."
         );

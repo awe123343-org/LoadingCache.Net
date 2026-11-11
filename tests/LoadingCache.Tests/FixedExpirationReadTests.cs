@@ -33,14 +33,11 @@ public sealed class FixedExpirationReadTests
         using var cache = new Cache<int, string>(engine);
         int asyncCalls = 0;
         int syncCalls = 0;
-        await using var loading = new AsyncLoadingCache<int, string>(
-            engine,
-            (_, _) =>
-            {
-                Interlocked.Increment(ref asyncCalls);
-                return Task.FromResult("async loaded");
-            }
-        );
+        await using var loading = new AsyncLoadingCache<int, string>(engine, (_, _) =>
+        {
+            Interlocked.Increment(ref asyncCalls);
+            return Task.FromResult("async loaded");
+        });
         cache.Put(1, "resident");
         cache.Put(2, "resident");
         cache.Put(3, "resident");
@@ -94,10 +91,8 @@ public sealed class FixedExpirationReadTests
             }
         );
         using var cache = new Cache<int, string>(engine);
-        await using var loading = new AsyncLoadingCache<int, string>(
-            engine,
-            static (_, _) =>
-                throw new InvalidOperationException("A resident read invoked its loader.")
+        await using var loading = new AsyncLoadingCache<int, string>(engine, static (_, _) =>
+            throw new InvalidOperationException("A resident read invoked its loader.")
         );
         cache.Put(1, "resident");
         clock.Advance(TimeSpan.FromSeconds(9));
@@ -107,10 +102,8 @@ public sealed class FixedExpirationReadTests
         (await loading.GetAsync(1)).Should().Be("resident");
         clock.Advance(TimeSpan.FromSeconds(9));
         cache
-            .GetOrAdd(
-                1,
-                static _ =>
-                    throw new InvalidOperationException("A resident read invoked its factory.")
+            .GetOrAdd(1, static _ =>
+                throw new InvalidOperationException("A resident read invoked its factory.")
             )
             .Should()
             .Be("resident");

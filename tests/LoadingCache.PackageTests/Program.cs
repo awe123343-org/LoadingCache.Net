@@ -48,9 +48,8 @@ await using (
     completion.SetResult(42);
     Require(await flight! == 42, "manually supplied task result");
     Require(
-        await manualAsync.GetOrAddAsync(
-            1,
-            static (_, _) => throw new InvalidOperationException("Unexpected load")
+        await manualAsync.GetOrAddAsync(1, static (_, _) =>
+            throw new InvalidOperationException("Unexpected load")
         ) == 42,
         "manual async hit"
     );

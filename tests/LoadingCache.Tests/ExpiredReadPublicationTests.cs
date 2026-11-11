@@ -79,9 +79,7 @@ public sealed class ExpiredReadPublicationTests
             staleRead.IsCompleted.Should().BeFalse();
             // Explicit refresh of a physically resident value keeps its Entry.
             // The throwing cold loader ensures this exercises that path.
-            (await cache.RefreshAsync(1).AsTask().WaitAsync(Watchdog))
-                .Should()
-                .Be("refreshed");
+            (await cache.RefreshAsync(1).AsTask().WaitAsync(Watchdog)).Should().Be("refreshed");
             reloads.Should().Be(1);
             cache.TryGetTask(1, out publishedTask).Should().BeTrue();
             (await publishedTask!.WaitAsync(Watchdog)).Should().Be("refreshed");

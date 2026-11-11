@@ -476,8 +476,8 @@ public sealed class BulkTerminalRaceTests
 
         internal Task FireTimeoutAsync()
         {
-            BlockingTimer timer =
-                _timer ?? throw new InvalidOperationException("The timeout timer was not created.");
+            BlockingTimer timer = _timer
+                ?? throw new InvalidOperationException("The timeout timer was not created.");
             return Task.Run(timer.Fire);
         }
 

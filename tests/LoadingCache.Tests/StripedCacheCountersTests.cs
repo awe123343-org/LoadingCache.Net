@@ -13,18 +13,14 @@ public sealed class StripedCacheCountersTests
         StripedCacheCounters counters = new(8);
         const int workerCount = 8;
         const int incrementsPerWorker = 20_000;
-        Parallel.For(
-            0,
-            workerCount,
-            _ =>
+        Parallel.For(0, workerCount, _ =>
+        {
+            for (int index = 0; index < incrementsPerWorker; index++)
             {
-                for (int index = 0; index < incrementsPerWorker; index++)
-                {
-                    counters.Add(CacheCounterKind.Hits);
-                    counters.Add(CacheCounterKind.TotalLoadTimeTicks, 3);
-                }
+                counters.Add(CacheCounterKind.Hits);
+                counters.Add(CacheCounterKind.TotalLoadTimeTicks, 3);
             }
-        );
+        });
         CacheCounterSnapshot snapshot = counters.Snapshot();
         snapshot[CacheCounterKind.Hits].Should().Be(workerCount * incrementsPerWorker);
         snapshot[CacheCounterKind.TotalLoadTimeTicks]
@@ -115,9 +111,8 @@ public sealed class StripedCacheCountersTests
             await Task.WhenAll(workers).WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
         }
 
-        BigInteger sum = deltas.Aggregate(
-            (BigInteger)initialValue,
-            static (total, delta) => total + (BigInteger)incrementsPerWorker * (delta + 1)
+        BigInteger sum = deltas.Aggregate((BigInteger)initialValue, static (total, delta) =>
+            total + (BigInteger)incrementsPerWorker * (delta + 1)
         );
         long expected = (long)BigInteger.Min(sum, long.MaxValue);
         counters.Snapshot()[CacheCounterKind.TotalLoadTimeTicks].Should().Be(expected);
@@ -215,14 +210,10 @@ public sealed class StripedCacheCountersTests
     {
         StripedCacheCounters counters = new(8);
         int slotCount = counters.CounterSlotCount;
-        Parallel.For(
-            0,
-            256,
-            index =>
-            {
-                counters.Add(CacheCounterKind.Misses, index + 1L);
-            }
-        );
+        Parallel.For(0, 256, index =>
+        {
+            counters.Add(CacheCounterKind.Misses, index + 1L);
+        });
         counters.StripeCount.Should().Be(8);
         counters.CounterSlotCount.Should().Be(slotCount);
         counters.Snapshot()[CacheCounterKind.Misses].Should().Be(256L * 257 / 2);

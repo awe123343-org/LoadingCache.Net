@@ -25,9 +25,8 @@ public sealed class AtomicPublicationRaceTests
                 isAsync: true,
                 supportsBulkLoading: false
             );
-        await using var cache = new AsyncLoadingCache<int, string>(
-            engine,
-            static (_, _) => Task.FromResult("unexpected")
+        await using var cache = new AsyncLoadingCache<int, string>(engine, static (_, _) =>
+            Task.FromResult("unexpected")
         );
         await VerifyTaskLookupDuringResidentPut(cache, publication, materializeOldTask);
     }
@@ -119,9 +118,8 @@ public sealed class AtomicPublicationRaceTests
             new LoadingCacheTestHooks { BeforeCompletion = completion.Invoke },
             fixedExpiration
         );
-        await using var cache = new AsyncLoadingCache<int, TValue>(
-            engine,
-            (_, _) => Task.FromResult(refreshedValue)
+        await using var cache = new AsyncLoadingCache<int, TValue>(engine, (_, _) =>
+            Task.FromResult(refreshedValue)
         );
         cache.Set(1, oldValue);
         cache.TryGetTask(1, out Task<TValue>? oldTask).Should().BeTrue();
@@ -267,9 +265,8 @@ public sealed class AtomicPublicationRaceTests
             fixedExpiration,
             accessExpiration
         );
-        await using var cache = new AsyncLoadingCache<int, TValue>(
-            engine,
-            (_, _) => Task.FromResult(refreshedValue)
+        await using var cache = new AsyncLoadingCache<int, TValue>(engine, (_, _) =>
+            Task.FromResult(refreshedValue)
         );
         cache.Set(1, oldValue);
         cache.TryGetTask(1, out Task<TValue>? oldTask).Should().BeTrue();
@@ -327,9 +324,8 @@ public sealed class AtomicPublicationRaceTests
     {
         await using var publication = new BlockingTestHook(Watchdog);
         var engine = CreateEngine<string>(FailureHooks(publication));
-        await using var cache = new AsyncLoadingCache<int, string>(
-            engine,
-            static (_, _) => Task.FromResult("refresh")
+        await using var cache = new AsyncLoadingCache<int, string>(engine, static (_, _) =>
+            Task.FromResult("refresh")
         );
         cache.Set(1, "old");
         Task<string> refresh = Task
@@ -374,9 +370,8 @@ public sealed class AtomicPublicationRaceTests
         await using var transform = new BlockingTestHook(Watchdog);
         Action pauseTransform = transform.Invoke;
         var engine = CreateEngine<string>(FailureHooks(publication));
-        await using var cache = new AsyncLoadingCache<int, string>(
-            engine,
-            static (_, _) => Task.FromResult("refresh")
+        await using var cache = new AsyncLoadingCache<int, string>(engine, static (_, _) =>
+            Task.FromResult("refresh")
         );
         using var manual = new Cache<int, string>(engine);
         SyncCacheDictionary<int, string> dictionary = manual.AsDictionary();
@@ -396,23 +391,18 @@ public sealed class AtomicPublicationRaceTests
         try
         {
             await publication.Entered.WaitAsync(Watchdog);
-            compute = Task.Run(() =>
-                dictionary.Compute(
-                    1,
-                    (_, current) =>
+            compute = Task.Run(() => dictionary.Compute(1, (_, current) =>
+                {
+                    if (Interlocked.Increment(ref callbacks) == 1)
                     {
-                        if (Interlocked.Increment(ref callbacks) == 1)
-                        {
-                            current.Value.Should().Be("refresh");
-                            pauseTransform();
-                            return CacheMutation.Set("stale transform");
-                        }
-
-                        current.Value.Should().Be("new");
-                        return CacheMutation.Keep<string>();
+                        current.Value.Should().Be("refresh");
+                        pauseTransform();
+                        return CacheMutation.Set("stale transform");
                     }
-                )
-            );
+
+                    current.Value.Should().Be("new");
+                    return CacheMutation.Keep<string>();
+                }));
             await transform.Entered.WaitAsync(Watchdog);
             publication.Release();
             await ObserveControlledFailure(refresh);
@@ -466,12 +456,8 @@ public sealed class AtomicPublicationRaceTests
                 },
             }
         );
-        await using var cache = new AsyncLoadingCache<int, string>(
-            engine,
-            (_, _) =>
-                Task.FromResult(
-                    Interlocked.Increment(ref reloads) == 1 ? "failed refresh" : "retry"
-                )
+        await using var cache = new AsyncLoadingCache<int, string>(engine, (_, _) =>
+            Task.FromResult(Interlocked.Increment(ref reloads) == 1 ? "failed refresh" : "retry")
         );
         cache.Set(1, "old");
         long timestamp = clock.GetTimestamp();

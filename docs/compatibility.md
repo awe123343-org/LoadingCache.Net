@@ -1,13 +1,13 @@
 # Compatibility policy
 
 The minimum consumer runtime is .NET 8. The core produces a single `net8.0`
-assembly. Tests and the source consumer target `net8.0` and `net10.0`; actual
+assembly. Tests and the source consumer target `net8.0`, `net10.0` and `net11.0`; actual
 runtime and platform results are recorded in [release readiness](release-readiness.md).
-The repository build uses the .NET 10 SDK pinned in `global.json` and C# 12.
+The repository build uses the .NET 11 SDK pinned in `global.json` and C# 12.
 
-The same managed NuGet package serves .NET 8 and .NET 10 applications; consumers
+The same managed NuGet package serves .NET 8, .NET 10 and .NET 11 applications; consumers
 do not need a runtime-specific package. Core and the optional DI integration are
-separate packages. Normal package CI runs on Windows and Linux with both runtimes.
+separate packages. Normal package CI runs on Windows and Linux with all three runtimes.
 As agreed on 2026-09-18, Native AOT platform qualification is tracked separately
 from the initial managed NuGet release. Existing AOT analyzers and smoke samples
 remain; untested AOT platforms are not advertised as verified.
@@ -26,3 +26,23 @@ servicing support. Release verification must cover current supported patches.
 
 Local ARM64 correctness tests do not establish ARM64 stress, x64, Windows/Linux,
 trimming or Native AOT support. AOT requires actual publish-and-run evidence.
+
+## Dependency upgrades
+
+The SDK version does not change the minimum consumer runtime. Microsoft.Extensions
+10.x is selected for net8.0; newer targets use 11.x. The published net8.0 DI asset
+therefore retains a supported dependency group. Renovate keeps only the legacy
+10.x package declarations below 11; the newer declarations upgrade independently.
+The setup-dotnet 10.x entries install a consumer runtime, independently of the
+SDK selected by global.json, and must stay on that runtime line.
+
+TUnit 1.83.0 selects its netstandard2.0 engine on net8.0. That assembly requires
+Microsoft.Bcl.AsyncInterfaces 9.0.0, which its NuGet dependency group omits.
+The three test projects explicitly reference that dependency only on net8.0,
+with PrivateAssets=all. Remove this workaround when the upstream package supplies
+it and actual .NET 8 test startup passes without the explicit reference.
+
+Correctness and package-consumer builds use -warnaserror so MSBuild dependency
+support warnings fail CI as well as compiler/analyzer warnings. No support-warning
+suppression is used. New hosted .NET 11 coverage must pass before claiming Windows
+or Linux verification; Native AOT qualification remains separate.

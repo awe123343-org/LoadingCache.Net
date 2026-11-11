@@ -50,6 +50,25 @@
       "description": "Allow Node major upgrades while preserving the major-only version format.",
       "matchManagers": ["nodenv"],
       "rangeStrategy": "replace"
+    },
+    {
+      "description": "Keep the net8.0 Microsoft.Extensions dependencies on the compatible 10.x line; newer targets upgrade independently.",
+      "matchManagers": ["nuget"],
+      "matchPackageNames": [
+        "Microsoft.Extensions.Caching.Memory",
+        "Microsoft.Extensions.DependencyInjection",
+        "Microsoft.Extensions.DependencyInjection.Abstractions",
+        "Microsoft.Extensions.TimeProvider.Testing"
+      ],
+      "matchCurrentVersion": "/^10\\./",
+      "allowedVersions": "<11"
+    },
+    {
+      "description": "setup-dotnet also installs consumer runtimes; global.json independently controls the development SDK.",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["dotnet-sdk"],
+      "matchCurrentVersion": "/^10\\./",
+      "allowedVersions": "<11"
     }
   ]
 }
