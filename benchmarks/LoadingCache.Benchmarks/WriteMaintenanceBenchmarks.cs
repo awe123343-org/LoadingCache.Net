@@ -75,20 +75,15 @@ public class WriteMaintenanceBenchmarks : IDisposable
         }
         else
         {
-            Parallel.For(
-                0,
-                Workers,
-                _parallelOptions,
-                worker =>
+            Parallel.For(0, Workers, _parallelOptions, worker =>
+            {
+                int workerStart = start + worker * WritesPerWorker;
+                for (int index = 0; index < WritesPerWorker; index++)
                 {
-                    int workerStart = start + worker * WritesPerWorker;
-                    for (int index = 0; index < WritesPerWorker; index++)
-                    {
-                        int key = _keys[workerStart + index];
-                        _cache.Put(key, key);
-                    }
+                    int key = _keys[workerStart + index];
+                    _cache.Put(key, key);
                 }
-            );
+            });
         }
 
         Quiesce();

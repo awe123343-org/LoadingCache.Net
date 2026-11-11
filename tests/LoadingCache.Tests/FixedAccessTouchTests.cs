@@ -106,9 +106,8 @@ public sealed class FixedAccessTouchTests
                 ExpireAfterAccess = TimeSpan.FromDays(1),
             }
         );
-        await using var cache = new AsyncLoadingCache<int, string>(
-            engine,
-            static (_, _) => throw new InvalidOperationException("Unexpected load.")
+        await using var cache = new AsyncLoadingCache<int, string>(engine, static (_, _) =>
+            throw new InvalidOperationException("Unexpected load.")
         );
         cache.Set(1, "resident");
         clock.Advance(TimeSpan.FromTicks(1));

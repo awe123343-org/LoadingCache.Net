@@ -257,20 +257,17 @@ public sealed class MemoryPressureTests
             .MemoryPressureSource(source)
             .MemoryPressureEviction(TimeSpan.FromSeconds(1), maximumTrimCount: 8)
             .CreateEngine();
-        await using var cache = new AsyncLoadingCache<int, string>(
-            engine,
-            async (_, _) =>
+        await using var cache = new AsyncLoadingCache<int, string>(engine, async (_, _) =>
+        {
+            if (Interlocked.Increment(ref calls) == 1)
             {
-                if (Interlocked.Increment(ref calls) == 1)
-                {
-                    return "v1";
-                }
-
-                refreshEntered.TrySetResult(true);
-                await releaseRefresh.Task.ConfigureAwait(false);
-                return "v2";
+                return "v1";
             }
-        );
+
+            refreshEntered.TrySetResult(true);
+            await releaseRefresh.Task.ConfigureAwait(false);
+            return "v2";
+        });
         (await cache.GetAsync(1)).Should().Be("v1");
         Task<string> refresh = cache.RefreshAsync(1).AsTask();
         await refreshEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -381,15 +378,12 @@ public sealed class MemoryPressureTests
             .MemoryPressureSource(source)
             .MemoryPressureEviction(TimeSpan.FromSeconds(1))
             .CreateEngine();
-        await using var cache = new AsyncLoadingCache<int, string>(
-            engine,
-            async (_, _) =>
-            {
-                entered.TrySetResult(true);
-                await release.Task.ConfigureAwait(false);
-                return "loaded";
-            }
-        );
+        await using var cache = new AsyncLoadingCache<int, string>(engine, async (_, _) =>
+        {
+            entered.TrySetResult(true);
+            await release.Task.ConfigureAwait(false);
+            return "loaded";
+        });
         Task<string> load = cache.GetAsync(1).AsTask();
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         clock.Advance(TimeSpan.FromSeconds(1));

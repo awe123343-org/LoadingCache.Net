@@ -46,19 +46,16 @@ public sealed class WriteMaintenanceBackstopTests
                 {
                     // Keep the captured engine: finally releases the hooks and joins this contender before engine cleanup.
                     // ReSharper disable once AccessToDisposedClosure
-                    engine.GetOrAdd(
-                        1,
-                        _ =>
-                        {
-                            // Keep the factory hook: finally releases it and joins this contender before hook cleanup.
-                            // ReSharper disable once AccessToDisposedClosure
-                            factory.Invoke();
-                            // Keep the shared return gate: finally joins this contender before the gate is disposed.
-                            // ReSharper disable once AccessToDisposedClosure
-                            factoryReturning.Set();
-                            return "second";
-                        }
-                    );
+                    engine.GetOrAdd(1, _ =>
+                    {
+                        // Keep the factory hook: finally releases it and joins this contender before hook cleanup.
+                        // ReSharper disable once AccessToDisposedClosure
+                        factory.Invoke();
+                        // Keep the shared return gate: finally joins this contender before the gate is disposed.
+                        // ReSharper disable once AccessToDisposedClosure
+                        factoryReturning.Set();
+                        return "second";
+                    });
                 }
                 else
                 {
@@ -234,9 +231,8 @@ public sealed class WriteMaintenanceBackstopTests
             var release = new TaskCompletionSource<string>(
                 TaskCreationOptions.RunContinuationsAsynchronously
             );
-            await using var cache = new AsyncLoadingCache<int, string>(
-                engine,
-                (_, _) => release.Task
+            await using var cache = new AsyncLoadingCache<int, string>(engine, (_, _) =>
+                release.Task
             );
             Task<string> load = cache.GetAsync(1).AsTask();
             try
@@ -547,9 +543,8 @@ public sealed class WriteMaintenanceBackstopTests
         var backend = new TaskCompletionSource<string>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
-        await using var loading = new AsyncLoadingCache<int, string>(
-            engine,
-            (_, _) => backend.Task
+        await using var loading = new AsyncLoadingCache<int, string>(engine, (_, _) =>
+            backend.Task
         );
         Task<string> pending = loading.GetAsync(2).AsTask();
         Task dispose = Task.Run(async () =>

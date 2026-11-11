@@ -212,21 +212,16 @@ public sealed class NotificationDispatcherTests
         TaskCompletionSource<bool> firstHandoff = NewCompletionSource<bool>();
         TaskCompletionSource<bool> releaseFirstHandoff = NewCompletionSource<bool>();
         int handoffCount = 0;
-        using BoundedNotificationDispatcher<int> dispatcher = new(
-            4,
-            observed.Add,
-            scheduler,
-            () =>
+        using BoundedNotificationDispatcher<int> dispatcher = new(4, observed.Add, scheduler, () =>
+        {
+            if (Interlocked.Increment(ref handoffCount) != 1)
             {
-                if (Interlocked.Increment(ref handoffCount) != 1)
-                {
-                    return;
-                }
-
-                firstHandoff.SetResult(true);
-                releaseFirstHandoff.Task.GetAwaiter().GetResult();
+                return;
             }
-        );
+
+            firstHandoff.SetResult(true);
+            releaseFirstHandoff.Task.GetAwaiter().GetResult();
+        });
         dispatcher.TryEnqueue(1).Should().BeTrue();
         Task firstDrain = Task.Run(scheduler.RunNext);
         bool firstDrainCompleted;
@@ -252,9 +247,8 @@ public sealed class NotificationDispatcherTests
     public async Task DefaultSchedulerDoesNotFlowTriggeringExecutionContext()
     {
         TaskCompletionSource<string?> observed = NewCompletionSource<string?>();
-        using BoundedNotificationDispatcher<int> dispatcher = new(
-            1,
-            _ => observed.TrySetResult(Context.Value)
+        using BoundedNotificationDispatcher<int> dispatcher = new(1, _ =>
+            observed.TrySetResult(Context.Value)
         );
         Context.Value = "request-context";
         try

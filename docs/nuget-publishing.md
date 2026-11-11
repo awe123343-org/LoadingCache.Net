@@ -1,6 +1,6 @@
 # NuGet publishing
 
-One managed core package contains `lib/net8.0/LoadingCache.dll` for .NET 8 and .NET 10 consumers. The optional DI package depends on the same core/version. Managed prerelease publishing is active; that is not stable 1.0 approval. AOT qualification is tracked separately.
+One managed core package contains `lib/net8.0/LoadingCache.dll` for .NET 8, .NET 10 and .NET 11 consumers. The optional DI package depends on the same core/version. Managed prerelease publishing is active; that is not stable 1.0 approval. AOT qualification is tracked separately.
 
 ## Release triggers and versions
 
@@ -13,7 +13,7 @@ The root `VERSION` file contains the official base version, initially `0.1.0`.
 
 Both paths call the same correctness, pack, package-consumer and publication jobs. The version is selected once, then carried with the immutable artifact ID. Alpha is a development snapshot newer than the base, not a compatibility promise or a release candidate for that base. Publication is serialised; running publication is never cancelled by a newer request.
 
-The correctness matrix covers Windows, Linux and macOS 15 ARM64, running .NET 8/10 tests and smoke checks. Package consumers use an isolated NuGet cache and PackageReference only; DI resolves core transitively. Restored archives must match feed SHA-256. Preserve nupkg/snupkg and validation manifests. These checks do not replace long stress, performance, architecture or provenance qualification.
+The correctness matrix covers Windows, Linux and macOS 15 ARM64, configured to run .NET 8/10/11 tests and smoke checks. Package consumers use an isolated NuGet cache and PackageReference only; DI resolves core transitively. Restored archives must match feed SHA-256. Preserve nupkg/snupkg and validation manifests. These checks do not replace long stress, performance, architecture or provenance qualification.
 
 Only the publish job obtains OIDC permission, in the `nuget.org` environment. It rechecks the original repository/main/push context, downloads the already validated artifact and exchanges a short-lived credential with `NuGet/login`. It does not rebuild or persist credentials in manifests, packages or NuGet.Config.
 

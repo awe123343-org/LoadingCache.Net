@@ -93,8 +93,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
                     return;
                 }
 
-                ReferenceKey<TKey> slot =
-                    value.WeakKey
+                ReferenceKey<TKey> slot = value.WeakKey
                     ?? throw new InvalidOperationException(
                         "A weak-key entry must carry its weak identity slot."
                     );

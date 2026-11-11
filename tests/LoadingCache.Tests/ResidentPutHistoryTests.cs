@@ -124,15 +124,12 @@ public sealed class ResidentPutHistoryTests
         int calls = 0;
         cache
             .AsDictionary()
-            .Compute(
-                1,
-                (_, current) =>
-                {
-                    current.HasValue.Should().BeFalse();
-                    calls++;
-                    return CacheMutation.Set("new");
-                }
-            );
+            .Compute(1, (_, current) =>
+            {
+                current.HasValue.Should().BeFalse();
+                calls++;
+                return CacheMutation.Set("new");
+            });
         calls.Should().Be(1);
         cache.AsDictionary()[1].Should().Be("new");
     }

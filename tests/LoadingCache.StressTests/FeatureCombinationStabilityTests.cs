@@ -33,8 +33,7 @@ public sealed class FeatureCombinationStabilityTests
         );
         int seconds = configured is null ? 5 : int.Parse(configured, CultureInfo.InvariantCulture);
         seconds.Should().BeInRange(1, 86_400);
-        string directory =
-            Environment.GetEnvironmentVariable("LOADINGCACHE_SOAK_OUTPUT")
+        string directory = Environment.GetEnvironmentVariable("LOADINGCACHE_SOAK_OUTPUT")
             ?? Path.Combine(Environment.CurrentDirectory, "artifacts", "soak");
         Directory.CreateDirectory(directory);
         string output = Path.Combine(

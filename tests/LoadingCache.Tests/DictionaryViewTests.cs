@@ -185,17 +185,13 @@ public sealed class DictionaryViewTests
             TaskCreationOptions.RunContinuationsAsynchronously
         );
         int calls = 0;
-        ValueTask<string> first = dictionary.GetOrAddAsync(
-            1,
-            (_, _) =>
-            {
-                Interlocked.Increment(ref calls);
-                return source.Task;
-            }
-        );
-        ValueTask<string> second = dictionary.GetOrAddAsync(
-            1,
-            (_, _) => throw new AssertionFailedException("Factory was called twice.")
+        ValueTask<string> first = dictionary.GetOrAddAsync(1, (_, _) =>
+        {
+            Interlocked.Increment(ref calls);
+            return source.Task;
+        });
+        ValueTask<string> second = dictionary.GetOrAddAsync(1, (_, _) =>
+            throw new AssertionFailedException("Factory was called twice.")
         );
         source.SetResult("one");
         (await first).Should().Be("one");
@@ -302,17 +298,13 @@ public sealed class DictionaryViewTests
         using ICache<int, string> cache = CreateCache<int, string>();
         SyncCacheDictionary<int, string> dictionary = cache.AsDictionary();
         int calls = 0;
-        dictionary.GetOrAdd(
-            1,
-            _ =>
-            {
-                Interlocked.Increment(ref calls);
-                return "one";
-            }
-        );
-        dictionary.GetOrAdd(
-            1,
-            _ => throw new AssertionFailedException("Factory was called on a hit.")
+        dictionary.GetOrAdd(1, _ =>
+        {
+            Interlocked.Increment(ref calls);
+            return "one";
+        });
+        dictionary.GetOrAdd(1, _ =>
+            throw new AssertionFailedException("Factory was called on a hit.")
         );
         calls.Should().Be(1);
         dictionary[1].Should().Be("one");
@@ -358,24 +350,19 @@ public sealed class DictionaryViewTests
             TaskCreationOptions.RunContinuationsAsynchronously
         );
         int calls = 0;
-        Task<CacheMutation<int>> compute = Task.Run(() =>
-            dictionary.Compute(
-                1,
-                (_, current) =>
+        Task<CacheMutation<int>> compute = Task.Run(() => dictionary.Compute(1, (_, current) =>
+            {
+                int call = Interlocked.Increment(ref calls);
+                current.HasValue.Should().BeFalse();
+                if (call != 1)
                 {
-                    int call = Interlocked.Increment(ref calls);
-                    current.HasValue.Should().BeFalse();
-                    if (call != 1)
-                    {
-                        return CacheMutation.Set(20);
-                    }
-
-                    entered.SetResult(true);
-                    release.Task.GetAwaiter().GetResult();
-                    return CacheMutation.Set(10);
+                    return CacheMutation.Set(20);
                 }
-            )
-        );
+
+                entered.SetResult(true);
+                release.Task.GetAwaiter().GetResult();
+                return CacheMutation.Set(10);
+            }));
         (await entered.Task.WaitAsync(TimeSpan.FromSeconds(10))).Should().BeTrue();
         dictionary[1] = 2;
         dictionary.Remove(1).Should().BeTrue();
@@ -410,36 +397,27 @@ public sealed class DictionaryViewTests
     {
         using ICache<int, int> cache = CreateCache<int, int>();
         SyncCacheDictionary<int, int> dictionary = cache.AsDictionary();
-        CacheMutation<int> added = dictionary.Compute(
-            1,
-            static (_, current) =>
-            {
-                current.HasValue.Should().BeFalse();
-                return CacheMutation.Set(0);
-            }
-        );
+        CacheMutation<int> added = dictionary.Compute(1, static (_, current) =>
+        {
+            current.HasValue.Should().BeFalse();
+            return CacheMutation.Set(0);
+        });
         added.Kind.Should().Be(CacheMutationKind.Set);
         dictionary[1].Should().Be(0);
-        CacheMutation<int> removed = dictionary.ComputeIfPresent(
-            1,
-            static (_, current) =>
-            {
-                current.Should().Be(0);
-                return CacheMutation.Remove<int>();
-            }
-        );
+        CacheMutation<int> removed = dictionary.ComputeIfPresent(1, static (_, current) =>
+        {
+            current.Should().Be(0);
+            return CacheMutation.Remove<int>();
+        });
         removed.Kind.Should().Be(CacheMutationKind.Remove);
         dictionary.ContainsKey(1).Should().BeFalse();
         bool called = false;
         dictionary
-            .ComputeIfPresent(
-                1,
-                (_, _) =>
-                {
-                    called = true;
-                    return CacheMutation.Set(1);
-                }
-            )
+            .ComputeIfPresent(1, (_, _) =>
+            {
+                called = true;
+                return CacheMutation.Set(1);
+            })
             .Kind.Should()
             .Be(CacheMutationKind.Keep);
         called.Should().BeFalse();
@@ -454,22 +432,17 @@ public sealed class DictionaryViewTests
         dictionary.Merge(1, 3, static (current, added) => current + added).Should().Be(5);
         bool reentered = false;
         FluentActions
-            .Invoking(() =>
-                dictionary.Compute(
-                    1,
-                    (_, current) =>
+            .Invoking(() => dictionary.Compute(1, (_, current) =>
+                {
+                    if (reentered)
                     {
-                        if (reentered)
-                        {
-                            return CacheMutation.Set(current.Value + 1);
-                        }
-
-                        reentered = true;
-                        dictionary[1] = 10;
                         return CacheMutation.Set(current.Value + 1);
                     }
-                )
-            )
+
+                    reentered = true;
+                    dictionary[1] = 10;
+                    return CacheMutation.Set(current.Value + 1);
+                }))
             .Should()
             .ThrowExactly<LoadingCacheReentrancyException>();
         dictionary[1].Should().Be(10);
@@ -483,9 +456,8 @@ public sealed class DictionaryViewTests
         dictionary[1] = 7;
         FluentActions
             .Invoking(() =>
-                dictionary.Compute(
-                    1,
-                    static (_, _) => throw new InvalidOperationException("callback failure")
+                dictionary.Compute(1, static (_, _) =>
+                    throw new InvalidOperationException("callback failure")
                 )
             )
             .Should()
@@ -509,14 +481,11 @@ public sealed class DictionaryViewTests
         ValueTask<int> pending = dictionary.GetOrAddAsync(1, (_, _) => source.Task);
         bool called = false;
         dictionary
-            .ComputeIfPresent(
-                1,
-                (_, _) =>
-                {
-                    called = true;
-                    return CacheMutation.Set(9);
-                }
-            )
+            .ComputeIfPresent(1, (_, _) =>
+            {
+                called = true;
+                return CacheMutation.Set(9);
+            })
             .Kind.Should()
             .Be(CacheMutationKind.Keep);
         called.Should().BeFalse();
@@ -533,16 +502,11 @@ public sealed class DictionaryViewTests
         SyncCacheDictionary<int, int> dictionary = cache.AsDictionary();
         dictionary[1] = 1;
         FluentActions
-            .Invoking(() =>
-                dictionary.Compute(
-                    1,
-                    (_, _) =>
-                    {
-                        dictionary.Clear();
-                        return CacheMutation.Set(2);
-                    }
-                )
-            )
+            .Invoking(() => dictionary.Compute(1, (_, _) =>
+                {
+                    dictionary.Clear();
+                    return CacheMutation.Set(2);
+                }))
             .Should()
             .ThrowExactly<LoadingCacheReentrancyException>();
         dictionary.ContainsKey(1).Should().BeFalse();

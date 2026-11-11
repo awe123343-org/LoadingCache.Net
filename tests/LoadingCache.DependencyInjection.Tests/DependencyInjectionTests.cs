@@ -49,9 +49,8 @@ public sealed class DependencyInjectionTests
     {
         ServiceCollection services = new();
         services.AddSingleton(_ => new LoaderPrefix("prefix-"));
-        services.AddLoadingCache<int, string>(
-            Configure,
-            static (provider, key) => provider.GetRequiredService<LoaderPrefix>().Value + key
+        services.AddLoadingCache<int, string>(Configure, static (provider, key) =>
+            provider.GetRequiredService<LoaderPrefix>().Value + key
         );
         using ServiceProvider provider = services.BuildServiceProvider();
         ILoadingCache<int, string> cache = provider.GetRequiredService<
@@ -162,9 +161,8 @@ public sealed class DependencyInjectionTests
     public async Task AsyncProviderDisposalStopsTheResolvedCache()
     {
         ServiceCollection services = new();
-        services.AddAsyncLoadingCache<int, string>(
-            Configure,
-            static (_, key, _) => Task.FromResult(key.ToString(CultureInfo.InvariantCulture))
+        services.AddAsyncLoadingCache<int, string>(Configure, static (_, key, _) =>
+            Task.FromResult(key.ToString(CultureInfo.InvariantCulture))
         );
         ServiceProvider provider = services.BuildServiceProvider();
         IAsyncLoadingCache<int, string> cache = provider.GetRequiredService<

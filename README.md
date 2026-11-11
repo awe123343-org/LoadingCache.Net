@@ -8,7 +8,7 @@
 A typed, in-process cache for **.NET 8+**: adaptive Window TinyLFU eviction,
 single-flight loading, expiration and refresh, with a BCL-only core.
 
-One managed package targets `net8.0` and can be used by both .NET 8 and .NET 10
+One managed package targets `net8.0` and can be used by .NET 8, .NET 10 and .NET 11
 applications. DI integration is an optional separate package.
 
 **Experimental.** The API is not frozen and the full 1.0 release gates are not
@@ -21,7 +21,7 @@ of identical behaviour or performance.
 
 ## Quick start
 
-Install the prerelease package (one `net8.0` asset supports .NET 8 and .NET 10):
+Install the prerelease package (one `net8.0` asset supports .NET 8, .NET 10 and .NET 11):
 
 ```sh
 dotnet add package LoadingCache.Net --prerelease
@@ -135,7 +135,7 @@ limitations and the remaining 1.0 requirements.
 
 ## Development
 
-Use the SDK pinned in `global.json` and install both .NET 8 and .NET 10 runtimes.
+Use the SDK pinned in `global.json` and install .NET 8, .NET 10 and .NET 11 runtimes.
 Tests use TUnit with FluentAssertions and test-case-level parallelism; CSharpier is
 a repository-local tool. Nullable analysis and warnings-as-errors are enabled.
 

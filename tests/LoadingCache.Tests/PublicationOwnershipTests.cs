@@ -74,9 +74,8 @@ public sealed class PublicationOwnershipTests
         CacheEngine<int, string> engine = CreateEngine(probe);
         if (asynchronous)
         {
-            await using var cache = new AsyncLoadingCache<int, string>(
-                engine,
-                static (_, _) => Task.FromResult("published")
+            await using var cache = new AsyncLoadingCache<int, string>(engine, static (_, _) =>
+                Task.FromResult("published")
             );
             (await cache.GetAsync(1)).Should().Be("published");
             probe.Stop();
@@ -113,9 +112,8 @@ public sealed class PublicationOwnershipTests
         CacheEngine<int, string> engine = CreateEngine(probe);
         if (asynchronous)
         {
-            await using var cache = new AsyncLoadingCache<int, string>(
-                engine,
-                static (_, _) => Task.FromResult("published")
+            await using var cache = new AsyncLoadingCache<int, string>(engine, static (_, _) =>
+                Task.FromResult("published")
             );
             await ExpectFailure(cache.GetAsync(1).AsTask());
             probe.Stop();
@@ -262,9 +260,8 @@ public sealed class PublicationOwnershipTests
         CacheEngine<int, string> engine = CreateEngine(probe);
         if (asynchronous)
         {
-            await using var cache = new AsyncLoadingCache<int, string>(
-                engine,
-                static (_, _) => Task.FromResult("new")
+            await using var cache = new AsyncLoadingCache<int, string>(engine, static (_, _) =>
+                Task.FromResult("new")
             );
             cache.Set(1, "old");
             cache.CleanUp();
@@ -319,9 +316,8 @@ public sealed class PublicationOwnershipTests
         CacheEngine<int, string> engine = CreateEngine(probe);
         if (asynchronous)
         {
-            await using var cache = new AsyncLoadingCache<int, string>(
-                engine,
-                static (_, _) => Task.FromException<string>(new ControlledPublicationFailure())
+            await using var cache = new AsyncLoadingCache<int, string>(engine, static (_, _) =>
+                Task.FromException<string>(new ControlledPublicationFailure())
             );
             cache.Set(1, "old");
             cache.CleanUp();
@@ -334,9 +330,8 @@ public sealed class PublicationOwnershipTests
         }
         else
         {
-            using var cache = new LoadingCache<int, string>(
-                engine,
-                static _ => throw new ControlledPublicationFailure()
+            using var cache = new LoadingCache<int, string>(engine, static _ =>
+                throw new ControlledPublicationFailure()
             );
             cache.Put(1, "old");
             cache.CleanUp();

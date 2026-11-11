@@ -317,17 +317,12 @@ internal static class Program
         try
         {
             for (int index = 0; index < calls.Length; index++)
-                calls[index] = loading is null
-                    ? memory!.GetOrCreateAsync<Payload>(
-                        key,
-                        entry =>
-                        {
-                            entry.Size = 1;
-                            Interlocked.Increment(ref invocations.Value);
-                            return gate.Task;
-                        }
-                    )
-                    : NullableTask(loading.GetAsync(key).AsTask());
+                calls[index] = loading is null ? memory!.GetOrCreateAsync<Payload>(key, entry =>
+                    {
+                        entry.Size = 1;
+                        Interlocked.Increment(ref invocations.Value);
+                        return gate.Task;
+                    }) : NullableTask(loading.GetAsync(key).AsTask());
             int expectedCalls = loading is null ? options.Workers : 1;
             while (Volatile.Read(ref invocations.Value) < expectedCalls)
             {

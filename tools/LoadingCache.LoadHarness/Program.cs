@@ -70,8 +70,7 @@ try
                 // is used to guess whether the same-generation callers have joined.
                 requests[index] = Measure(cache, callerToken, durations, start + index, 0);
             }
-            TaskCompletionSource<bool> release =
-                Volatile.Read(ref loader.ReleaseLoad)
+            TaskCompletionSource<bool> release = Volatile.Read(ref loader.ReleaseLoad)
                 ?? throw new InvalidOperationException("Fan-in loader gate was not installed.");
             release.TrySetResult(true);
             await Task.WhenAll(requests).WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);

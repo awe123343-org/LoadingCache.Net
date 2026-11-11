@@ -317,8 +317,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
             return GetAsync(key, loadFactory, reloadFactory, cancellationToken);
         }
 
-        AsyncFlight sharedFlight =
-            flight ?? throw new InvalidOperationException("The refresh flight was not installed.");
+        AsyncFlight sharedFlight = flight
+            ?? throw new InvalidOperationException("The refresh flight was not installed.");
         if (start)
         {
             StartAsyncFlight(sharedFlight);

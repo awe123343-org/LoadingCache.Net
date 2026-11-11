@@ -132,10 +132,8 @@ internal static class NativePolicySmoke
             "atomic update uses comparer"
         );
         Require(view.Merge("count", 2, static (left, right) => left + right) == 3, "atomic merge");
-        var kept = view.Compute(
-            "count",
-            static (_, current) =>
-                current.HasValue ? CacheMutation.Keep<int>() : CacheMutation.Set(0)
+        var kept = view.Compute("count", static (_, current) =>
+            current.HasValue ? CacheMutation.Keep<int>() : CacheMutation.Set(0)
         );
         Require(kept.Kind == CacheMutationKind.Keep && view["count"] == 3, "explicit keep");
         var removed = view.ComputeIfPresent("count", static (_, _) => CacheMutation.Remove<int>());

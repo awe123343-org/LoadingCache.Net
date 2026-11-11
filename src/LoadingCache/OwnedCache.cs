@@ -228,21 +228,18 @@ public sealed class OwnedCache<TKey, TValue> : IDisposable, IAsyncDisposable
         CacheLease<TValue>? candidate = null;
         try
         {
-            bool found = _engine.TryGetOwned(
-                key,
-                entry =>
+            bool found = _engine.TryGetOwned(key, entry =>
+            {
+                try
                 {
-                    try
-                    {
-                        candidate = _ownership.Acquire(entry.Token);
-                        return true;
-                    }
-                    catch (ObjectDisposedException)
-                    {
-                        return false;
-                    }
+                    candidate = _ownership.Acquire(entry.Token);
+                    return true;
                 }
-            );
+                catch (ObjectDisposedException)
+                {
+                    return false;
+                }
+            });
 
             if (!found)
             {

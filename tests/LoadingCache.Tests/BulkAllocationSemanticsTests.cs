@@ -23,17 +23,13 @@ public sealed class BulkAllocationSemanticsTests
         );
 
         Task<object>[] views = new Task<object>[8];
-        Parallel.For(
-            0,
-            views.Length,
-            index =>
-            {
-                // Keep the captured engine: Parallel.For joins every reader before the engine scope ends.
-                // ReSharper disable once AccessToDisposedClosure
-                engine.TryGetTask(2, out Task<object>? task).Should().BeTrue();
-                views[index] = task!;
-            }
-        );
+        Parallel.For(0, views.Length, index =>
+        {
+            // Keep the captured engine: Parallel.For joins every reader before the engine scope ends.
+            // ReSharper disable once AccessToDisposedClosure
+            engine.TryGetTask(2, out Task<object>? task).Should().BeTrue();
+            views[index] = task!;
+        });
         foreach (Task<object> view in views)
         {
             view.Should().BeSameAs(views[0]);

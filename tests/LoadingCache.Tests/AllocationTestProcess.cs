@@ -19,8 +19,7 @@ internal static class AllocationTestProcess
         result
             .ExitCode.Should()
             .Be(0, "allocation child output: {0} {1}", result.Output, result.Error);
-        Report report =
-            JsonSerializer.Deserialize<Report>(result.Output.Trim())
+        Report report = JsonSerializer.Deserialize<Report>(result.Output.Trim())
             ?? throw new InvalidOperationException("Allocation child did not produce a report.");
         report.Scenario.Should().Be(scenario);
         report.Runtime.Should().Be(Environment.Version.ToString());
@@ -53,8 +52,7 @@ internal static class AllocationTestProcess
         start.ArgumentList.Add(typeof(AllocationProbe.Program).Assembly.Location);
         start.ArgumentList.Add("--allocation-check");
         start.ArgumentList.Add(scenario);
-        using Process process =
-            Process.Start(start)
+        using Process process = Process.Start(start)
             ?? throw new InvalidOperationException("Could not start allocation child.");
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         Task<string> output = process.StandardOutput.ReadToEndAsync(timeout.Token);

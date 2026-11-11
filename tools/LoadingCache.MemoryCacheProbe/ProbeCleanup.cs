@@ -9,8 +9,7 @@ internal static class ProbeCleanup
         where TValue : notnull
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(watchdog, TimeSpan.Zero);
-        var eviction =
-            cache.Policy.Eviction
+        var eviction = cache.Policy.Eviction
             ?? throw new ArgumentException("A bounded cache is required.", nameof(cache));
         long started = Stopwatch.GetTimestamp();
         var wait = new SpinWait();

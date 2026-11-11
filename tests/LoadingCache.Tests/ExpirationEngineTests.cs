@@ -168,10 +168,8 @@ public sealed class ExpirationEngineTests
                 TestHooks = hooks,
             }
         );
-        await using var cache = new AsyncLoadingCache<int, string>(
-            engine,
-            (key, _) =>
-                Task.FromResult(key.ToString(System.Globalization.CultureInfo.InvariantCulture))
+        await using var cache = new AsyncLoadingCache<int, string>(engine, (key, _) =>
+            Task.FromResult(key.ToString(System.Globalization.CultureInfo.InvariantCulture))
         );
         (await cache.GetAsync(1)).Should().Be("1");
         Task<bool> first = Task.Factory.StartNew(

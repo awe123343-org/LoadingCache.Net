@@ -244,15 +244,12 @@ public sealed class FixedWritePublicationTests
                 RecordStatistics = recordStatistics,
             }
         );
-        await using var cache = new AsyncLoadingCache<int, string>(
-            engine,
-            (_, _) =>
-            {
-                Interlocked.Increment(ref loadCount[0]);
-                loadEntered.TrySetResult();
-                return loadResult.Task;
-            }
-        );
+        await using var cache = new AsyncLoadingCache<int, string>(engine, (_, _) =>
+        {
+            Interlocked.Increment(ref loadCount[0]);
+            loadEntered.TrySetResult();
+            return loadResult.Task;
+        });
         cache.Set(1, "old");
         cache.CleanUp();
         clock.Advance(TimeSpan.FromSeconds(11));

@@ -33,12 +33,8 @@ public sealed class EngineIntegrationRegressionTests
             await comparer.Entered.Task.WaitAsync(Watchdog);
             reader = Task.Factory.StartNew(
                 static state =>
-                    ((ICache<int, int>)state!).GetOrAdd(
-                        1,
-                        static _ =>
-                            throw new AssertionFailedException(
-                                "A resident hit invoked its factory."
-                            )
+                    ((ICache<int, int>)state!).GetOrAdd(1, static _ =>
+                        throw new AssertionFailedException("A resident hit invoked its factory.")
                     ),
                 cache,
                 CancellationToken.None,
@@ -75,9 +71,8 @@ public sealed class EngineIntegrationRegressionTests
         cache.Policy.Eviction.WeightedSize.Should().Be(0);
         pending.SetResult("replacement");
         (
-            await cache.GetOrAddAsync(
-                1,
-                (_, _) => throw new AssertionFailedException("The stored task must be joined.")
+            await cache.GetOrAddAsync(1, (_, _) =>
+                throw new AssertionFailedException("The stored task must be joined.")
             )
         )
             .Should()

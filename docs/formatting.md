@@ -1,7 +1,7 @@
 # Formatting and unused imports
 
 Use the SDK in `global.json`, Node in `.node-version` (`fnm use`), pnpm from
-`package.json`, and `uv`/`uvx`. CSharpier 1.3.0, Ruff 0.14.0 and oxfmt 0.67.0
+`package.json`, and `uv`/`uvx`. CSharpier 1.4.0, Ruff 0.14.0 and oxfmt 0.78.0
 are pinned; prek is unpinned (`uvx prek` for formatting, `uvx prek@latest` for hook installation).
 No global .NET tool installation is needed.
 

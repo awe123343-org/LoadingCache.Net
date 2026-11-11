@@ -768,8 +768,8 @@ internal static class Program
             }
             // Older frozen libraries couple success totals to drop statistics. Resolve this
             // once before timing so one harness can compare both recording implementations.
-            _recordTotals =
-                (bool?)bufferType.GetField("_recordTotals", InstanceMembers)?.GetValue(_buffer)
+            _recordTotals = (bool?)
+                bufferType.GetField("_recordTotals", InstanceMembers)?.GetValue(_buffer)
                 ?? _recordStatistics;
             _table = Field(bufferType, "_table");
             Type ringType = _table.FieldType.GetElementType()!;

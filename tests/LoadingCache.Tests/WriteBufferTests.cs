@@ -584,15 +584,11 @@ public sealed class WriteBufferTests
         int total
     )
     {
-        Parallel.For(
-            0,
-            total,
-            value =>
-            {
-                buffer.TryEnqueue(value).Should().BeTrue();
-                accepted.Add(value);
-            }
-        );
+        Parallel.For(0, total, value =>
+        {
+            buffer.TryEnqueue(value).Should().BeTrue();
+            accepted.Add(value);
+        });
     }
 
     private static Task StartConsumer(BoundedWriteBuffer<int> buffer) =>

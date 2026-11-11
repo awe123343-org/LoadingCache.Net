@@ -433,11 +433,8 @@ internal sealed partial class CacheEngine<TKey, TValue>
                 bulkLoader,
                 Comparer
             );
-            SyncFlight owner = new(
-                plan.OwnedKeys[0],
-                _epoch,
-                ++_nextGeneration,
-                key => ExecuteSyncBulk(group, key)
+            SyncFlight owner = new(plan.OwnedKeys[0], _epoch, ++_nextGeneration, key =>
+                ExecuteSyncBulk(group, key)
             );
             group.Owner = owner;
             _bulkSyncGroups.Add(owner, group);
@@ -715,8 +712,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         try
         {
             RecordCounter(CacheCounterKind.BulkLoads);
-            IReadOnlyDictionary<TKey, TValue> values =
-                group.Loader(group.LoaderKeys)
+            IReadOnlyDictionary<TKey, TValue> values = group.Loader(group.LoaderKeys)
                 ?? throw new InvalidOperationException("The bulk loading delegate returned null.");
             group.Prepared = PrepareBulkResult(group.OwnedKeys, values);
             return group.Prepared.Values[group.OwnedKeys[0]];
@@ -736,9 +732,10 @@ internal sealed partial class CacheEngine<TKey, TValue>
         try
         {
             RecordCounter(CacheCounterKind.BulkLoads);
-            Task<IReadOnlyDictionary<TKey, TValue>> operation =
-                group.Loader(group.LoaderKeys, cancellationToken)
-                ?? throw new InvalidOperationException("The bulk loading delegate returned null.");
+            Task<IReadOnlyDictionary<TKey, TValue>> operation = group.Loader(
+                group.LoaderKeys,
+                cancellationToken
+            ) ?? throw new InvalidOperationException("The bulk loading delegate returned null.");
             IReadOnlyDictionary<TKey, TValue> values = await operation.ConfigureAwait(false);
             group.Prepared = PrepareBulkResult(group.OwnedKeys, values);
             return group.Prepared.Values[group.OwnedKeys[0]];
@@ -1008,8 +1005,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         KeyValuePair<TaskCompletionSource<TValue>, TValue>[] results = [];
         if (group is BulkAsyncGroup asyncGroup)
         {
-            BulkPrepared prepared =
-                asyncGroup.Prepared
+            BulkPrepared prepared = asyncGroup.Prepared
                 ?? throw new InvalidOperationException(
                     "The bulk loading flight completed without a prepared result."
                 );

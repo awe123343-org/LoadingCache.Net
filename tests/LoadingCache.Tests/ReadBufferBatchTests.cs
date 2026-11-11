@@ -22,16 +22,13 @@ public sealed class ReadBufferBatchTests
         OfferOnStripe(buffer, 10, 1).Should().Be(ReadBufferOfferResult.Success);
         buffer.DrainTo(static _ => { }, 4).Should().Be(2);
         int publications = 0;
-        buffer.SetHooksForTesting(
-            beforeReserve: null,
-            beforePublish: () =>
+        buffer.SetHooksForTesting(beforeReserve: null, beforePublish: () =>
+        {
+            if (Interlocked.Increment(ref publications) == 1)
             {
-                if (Interlocked.Increment(ref publications) == 1)
-                {
-                    pausePublication();
-                }
+                pausePublication();
             }
-        );
+        });
         Task<ReadBufferOfferResult> paused = Task.Factory.StartNew(
             static state => OfferOnStripe((StripedReadBuffer<int>)state!, 1, 0),
             buffer,
@@ -190,16 +187,13 @@ public sealed class ReadBufferBatchTests
         Action pausePublication = publication.Invoke;
         buffer.TryEnqueue(0).Should().BeTrue();
         int publishCalls = 0;
-        buffer.SetHooksForTesting(
-            null,
-            () =>
+        buffer.SetHooksForTesting(null, () =>
+        {
+            if (Interlocked.Increment(ref publishCalls) == 1)
             {
-                if (Interlocked.Increment(ref publishCalls) == 1)
-                {
-                    pausePublication();
-                }
+                pausePublication();
             }
-        );
+        });
         Task<bool> paused = Task.Factory.StartNew(
             static state => ((StripedReadBuffer<int>)state!).TryEnqueue(1),
             buffer,

@@ -1,6 +1,6 @@
 # Package and Native AOT validation
 
-The initial distribution route is managed NuGet: one net8.0 asset supports .NET 8/10, verified by actual-runtime consumers. Native AOT qualification is separate and does not block that initial prerelease route; untested RIDs are not implied support. See [publishing](nuget-publishing.md).
+The initial distribution route is managed NuGet: one net8.0 asset supports .NET 8/10/11, validated by actual-runtime consumers. Native AOT qualification is separate and does not block that initial prerelease route; untested RIDs are not implied support. See [publishing](nuget-publishing.md).
 
 ## Package-only consumers
 

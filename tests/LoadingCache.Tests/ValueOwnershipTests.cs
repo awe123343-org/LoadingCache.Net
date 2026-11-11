@@ -114,15 +114,12 @@ public sealed class ValueOwnershipTests
         var releaseCallback = new TaskCompletionSource<object?>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
-        using var ownership = new ValueOwnership<DisposableValue>(
-            1,
-            item =>
-            {
-                callbackEntered.SetResult(null);
-                releaseCallback.Task.GetAwaiter().GetResult();
-                item.Dispose();
-            }
-        );
+        using var ownership = new ValueOwnership<DisposableValue>(1, item =>
+        {
+            callbackEntered.SetResult(null);
+            releaseCallback.Task.GetAwaiter().GetResult();
+            item.Dispose();
+        });
         ValueOwnership<DisposableValue>.Token token = ownership.Publish(value);
         Task retire = Task.Factory.StartNew(
             static state =>
@@ -234,14 +231,11 @@ public sealed class ValueOwnershipTests
         var disposed = new TaskCompletionSource<object?>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
-        using var ownership = new ValueOwnership<DisposableValue>(
-            1,
-            item =>
-            {
-                item.Dispose();
-                disposed.SetResult(null);
-            }
-        );
+        using var ownership = new ValueOwnership<DisposableValue>(1, item =>
+        {
+            item.Dispose();
+            disposed.SetResult(null);
+        });
         ValueOwnership<DisposableValue>.Token token = ownership.Publish(value);
         ownership.Retire(token);
         await disposed.Task.WaitAsync(TimeSpan.FromSeconds(5));

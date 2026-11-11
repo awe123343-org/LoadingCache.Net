@@ -88,79 +88,70 @@ long wallStart = 0;
 long requestCount = 0;
 long requestsAtStart = 0;
 int state = 0;
-app.MapGet(
-    "/config/{key:int}",
-    async (int key, HttpContext context) =>
+app.MapGet("/config/{key:int}", async (int key, HttpContext context) =>
+{
+    if ((uint)key >= capacity || Volatile.Read(ref state) == 2)
+        return Results.BadRequest();
+    TenantConfig value = cache is null
+        ? values[key]
+        : await cache.GetAsync(key, context.RequestAborted).ConfigureAwait(false);
+    Interlocked.Increment(ref requestCount);
+    return Results.Json(value);
+});
+app.MapPost("/begin", async () =>
+{
+    if (Interlocked.CompareExchange(ref state, 1, 0) != 0)
+        throw new InvalidOperationException("Measurement already started.");
+    if (cache is not null)
+        await DrainCache(cache).ConfigureAwait(false);
+    requestsAtStart = Interlocked.Read(ref requestCount);
+    cpuStart = readCpuTime();
+    wallStart = Stopwatch.GetTimestamp();
+    return Results.Ok();
+});
+app.MapPost("/end", async () =>
+{
+    if (Interlocked.CompareExchange(ref state, 2, 1) != 1)
+        throw new InvalidOperationException("Measurement is not active.");
+    long drainStart = Stopwatch.GetTimestamp();
+    DrainEvidence? drain = null;
+    if (cache is not null)
     {
-        if ((uint)key >= capacity || Volatile.Read(ref state) == 2)
-            return Results.BadRequest();
-        TenantConfig value = cache is null
-            ? values[key]
-            : await cache.GetAsync(key, context.RequestAborted).ConfigureAwait(false);
-        Interlocked.Increment(ref requestCount);
-        return Results.Json(value);
+        drain = await DrainCache(cache).ConfigureAwait(false);
+        await cache.DisposeAsync().ConfigureAwait(false);
     }
-);
-app.MapPost(
-    "/begin",
-    async () =>
-    {
-        if (Interlocked.CompareExchange(ref state, 1, 0) != 0)
-            throw new InvalidOperationException("Measurement already started.");
-        if (cache is not null)
-            await DrainCache(cache).ConfigureAwait(false);
-        requestsAtStart = Interlocked.Read(ref requestCount);
-        cpuStart = readCpuTime();
-        wallStart = Stopwatch.GetTimestamp();
-        return Results.Ok();
-    }
-);
-app.MapPost(
-    "/end",
-    async () =>
-    {
-        if (Interlocked.CompareExchange(ref state, 2, 1) != 1)
-            throw new InvalidOperationException("Measurement is not active.");
-        long drainStart = Stopwatch.GetTimestamp();
-        DrainEvidence? drain = null;
-        if (cache is not null)
+    double cpuSeconds = (readCpuTime() - cpuStart).TotalSeconds;
+    return Results.Json(
+        new
         {
-            drain = await DrainCache(cache).ConfigureAwait(false);
-            await cache.DisposeAsync().ConfigureAwait(false);
+            schemaVersion = 1,
+            backend,
+            expiry,
+            statistics,
+            capacity,
+            payloadCharacters,
+            lookupsPerRequest = 1,
+            loaderServiceTimeMilliseconds = 0,
+            expectedLoads = 0,
+            actualLoads = Interlocked.Read(ref loads),
+            measuredRequests = Interlocked.Read(ref requestCount) - requestsAtStart,
+            cpuSeconds,
+            wallSecondsIncludingDrain = Stopwatch.GetElapsedTime(wallStart).TotalSeconds,
+            drainSeconds = Stopwatch.GetElapsedTime(drainStart).TotalSeconds,
+            drain,
+            runtime = RuntimeInformation.FrameworkDescription,
+            architecture = RuntimeInformation.ProcessArchitecture.ToString(),
+            os = RuntimeInformation.OSDescription,
+            logicalProcessors = Environment.ProcessorCount,
+            serverGc = System.Runtime.GCSettings.IsServerGC,
+            argv = Environment.GetCommandLineArgs(),
+            cacheAssemblySha256 = Hash(typeof(CacheBuilder).Assembly.Location),
+            probeAssemblySha256 = Hash(typeof(TenantConfig).Assembly.Location),
+            coreLibrarySha256 = Hash(typeof(object).Assembly.Location),
+            aspNetCoreAssemblySha256 = Hash(typeof(WebApplication).Assembly.Location),
         }
-        double cpuSeconds = (readCpuTime() - cpuStart).TotalSeconds;
-        return Results.Json(
-            new
-            {
-                schemaVersion = 1,
-                backend,
-                expiry,
-                statistics,
-                capacity,
-                payloadCharacters,
-                lookupsPerRequest = 1,
-                loaderServiceTimeMilliseconds = 0,
-                expectedLoads = 0,
-                actualLoads = Interlocked.Read(ref loads),
-                measuredRequests = Interlocked.Read(ref requestCount) - requestsAtStart,
-                cpuSeconds,
-                wallSecondsIncludingDrain = Stopwatch.GetElapsedTime(wallStart).TotalSeconds,
-                drainSeconds = Stopwatch.GetElapsedTime(drainStart).TotalSeconds,
-                drain,
-                runtime = RuntimeInformation.FrameworkDescription,
-                architecture = RuntimeInformation.ProcessArchitecture.ToString(),
-                os = RuntimeInformation.OSDescription,
-                logicalProcessors = Environment.ProcessorCount,
-                serverGc = System.Runtime.GCSettings.IsServerGC,
-                argv = Environment.GetCommandLineArgs(),
-                cacheAssemblySha256 = Hash(typeof(CacheBuilder).Assembly.Location),
-                probeAssemblySha256 = Hash(typeof(TenantConfig).Assembly.Location),
-                coreLibrarySha256 = Hash(typeof(object).Assembly.Location),
-                aspNetCoreAssemblySha256 = Hash(typeof(WebApplication).Assembly.Location),
-            }
-        );
-    }
-);
+    );
+});
 await app.StartAsync().ConfigureAwait(false);
 try
 {

@@ -14,8 +14,7 @@ internal sealed partial class CacheEngine<TKey, TValue>
         if (backstop is null)
         {
             var created = new WriteMaintenanceBackstop(this, _timeProvider);
-            backstop =
-                Interlocked.CompareExchange(ref _writeMaintenanceBackstop, created, null)
+            backstop = Interlocked.CompareExchange(ref _writeMaintenanceBackstop, created, null)
                 ?? created;
         }
 
