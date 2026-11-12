@@ -41,7 +41,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: "0.13.7"
+          version: "0.13.8"
       - name: Select version from VERSION
         id: version
         env:
@@ -108,7 +108,7 @@ jobs:
         run: dotnet build LoadingCache.slnx -c Release
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: "0.13.7"
+          version: "0.13.8"
       - name: Pack and inspect packages
         run: |
           uv run --no-project python tools/pack-release.py \
@@ -202,7 +202,7 @@ jobs:
           merge-multiple: true
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: "0.13.7"
+          version: "0.13.8"
       - name: Verify immutable release manifest
         id: verify-artifact
         env:
@@ -263,7 +263,7 @@ jobs:
           merge-multiple: true
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: "0.13.7"
+          version: "0.13.8"
       - name: Verify immutable release manifest
         env:
           ARTIFACT_ROOT: artifacts/nuget
