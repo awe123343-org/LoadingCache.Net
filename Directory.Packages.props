@@ -21,7 +21,7 @@
       Include="Microsoft.Extensions.DependencyInjection.Abstractions"
       Version="10.0.15"
     />
-    <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.11.0" />
+    <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.11.1" />
   </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)' != 'net8.0'">
     <PackageVersion Include="Microsoft.Extensions.Caching.Memory" Version="11.0.0" />
