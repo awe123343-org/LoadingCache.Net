@@ -30,6 +30,6 @@
       Include="Microsoft.Extensions.DependencyInjection.Abstractions"
       Version="11.0.0"
     />
-    <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="11.0.1" />
   </ItemGroup>
 </Project>
