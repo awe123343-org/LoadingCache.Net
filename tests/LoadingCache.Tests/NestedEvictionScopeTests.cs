@@ -22,11 +22,13 @@ public sealed class NestedEvictionScopeTests
         cache.Put(2, 0);
         time.Advance(TimeSpan.FromSeconds(1));
         Func<int, Func<int, int>, int> getOrAdd = cache.GetOrAdd;
-        int value = cache.GetOrAdd(1, _ => getOrAdd(2, _ =>
+        int value = cache.GetOrAdd(1, _ =>
+            getOrAdd(2, _ =>
             {
                 notifiedBeforeNestedLoad = Volatile.Read(ref notifications) == 1;
                 return 2;
-            }));
+            })
+        );
         value.Should().Be(2);
         notifiedBeforeNestedLoad.Should().BeTrue();
         notifications.Should().Be(1);
