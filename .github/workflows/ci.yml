@@ -32,7 +32,7 @@ jobs:
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
-          version: "0.13.9"
+          version: "0.13.10"
           enable-cache: true
           cache-dependency-glob: .pre-commit-config.yaml
       - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
@@ -64,7 +64,7 @@ jobs:
           dotnet-quality: ga
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
-          version: "0.13.9"
+          version: "0.13.10"
           enable-cache: false
       - name: Record actual environment
         run: dotnet --info
